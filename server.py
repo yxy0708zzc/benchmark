@@ -401,14 +401,15 @@ def api_update_ticket(req: UpdateTicketRequest):
 # ============================================================
 
 def _calc_time_diff_minutes(time1: str, time2: str) -> int:
-    """计算 time2 - time1 的分钟数，支持跨天"""
+    """计算 time2 - time1 的分钟数（仅当日，不做跨天换算）
+
+    要求同一天内 time2 在 time1 之后：返回正值表示当日间隔；
+    若 time2 时钟时间早于 time1（即跨天到次日），返回负值。
+    """
     try:
         h1, m1 = map(int, time1.split(":"))
         h2, m2 = map(int, time2.split(":"))
-        diff = (h2 * 60 + m2) - (h1 * 60 + m1)
-        if diff < 0:
-            diff += 1440
-        return diff
+        return (h2 * 60 + m2) - (h1 * 60 + m1)
     except (ValueError, AttributeError):
         return 0
 
