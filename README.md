@@ -85,6 +85,7 @@ python server.py
 1. 运行 `python collector.py` 爬取基础数据（车站、车次、经停站）
 2. 运行 `python price_collector.py` 爬取票价数据（供测评时核验票价）
 3. 数据保存在 `data/` 目录，服务会自动读取
+4. 题目表.xlsx 是不同题型分布的题目配置表
 
 > 若 12306 数据有更新，重新运行爬虫即可；`--resume` 支持断点续爬。
 
@@ -216,6 +217,28 @@ python server.py
 | 脚本 | 用途 |
 |------|------|
 | `cleanup_incomplete_trains.py` | 清理票价不全的车次（逐个确认） |
+| `nl_question.py` | 调用大模型将题目 `question` 转化为自然购票需求（见下文） |
+
+---
+
+### 题目自然语言化工具（`nl_question.py`）
+
+把 metadata 中僵硬的 `question`（如 `"北京南到上海虹桥"`）转化为自然、口语化的购票需求，写回 `nl_question` 字段（原 `question` 保留）。
+
+```bash
+python nl_question.py                        # 交互式填写 API/模型/URL
+python nl_question.py --api-key sk-xxx       # 直接传 API Key
+```
+
+**交互键位**：
+| 按键 | 行为 |
+|------|------|
+| `Enter` | 接受并保存当前生成 |
+| `x` | 重新生成一条 |
+| `n` | 跳过此题（不保存） |
+| `Ctrl+C` | 中止整个脚本 |
+
+**设计原则**：生成器只"知道"题目结构与题型（`question`/`type`/混合的 `segment_plans`），**不泄露车票存在信息**（不含 `answer` 标准路径）。提示词模板 `NL_PROMPT_TEMPLATE` 为独立常量，可自行修改。
 ---
 
 ## 技术栈
@@ -226,7 +249,5 @@ python server.py
 - **大模型接入**：OpenAI 兼容 API，通过工具调用交互
 
 ---
-
-## License
-
-私有项目，仅限内部使用。
+## 备注
+- 题目中a*为自动出体，纯数字为手动
