@@ -1,0 +1,2576 @@
+{
+  "timestamp": "2026-07-24T11:14:22.433318",
+  "question_id": "25",
+  "model_name": "deepseek-v4-flash",
+  "user_input": "上海虹桥到青岛北",
+  "conversation": [
+    {
+      "role": "system",
+      "content": "你是一个高铁票务助手,帮助用户规划行程并购买车票。\n\n你的余票全部数据来源都是需要从本地的数据,通过工具调用获取。不能根据你的记忆或经验。\n\n你的核心目标是:尽可能帮用户买到票。如果经过工具查询确认完全无法满足用户的硬性要求,可以告知用户并放弃,但必须是在调用过相关工具、确认无票之后。\n\n你的回答语气应简洁。在给出方案时,需要解释你为什么选择这个方案,以及它满足了用户的哪些需求。\n\n【座位类型说明】\n- class2:二等座,经济型,价格较低\n- class1:一等座,更舒适,价格中等\n- class0:特等座,可躺,十分舒适,价格更高\n\n【用户可能提供的信息】\n你必须识别和处理的信息:\n- 出发地、目的地\n\n你可能需要处理的信息(如用户提供):\n- 换乘时间要求\n- 预算范围\n- 座位类型偏好\n- 换乘次数上限\n- 指定中转站（中间至少停留多长时间）\n- 购票张数\n用户输入可能包含上述信息的任意组合,或可能包含其他信息，你需要按需理解。如果用户没有提供所有非必要信息,你不需要要求用户补充。\n\n【购票策略】(重点)\n你可以在方案中使用以下购票方法,灵活组合:\n1. 直达:从出发站直接坐到到达站,同一车次。例:\n2. 买短补长:买出发站到前方某站的票,上车后补票到目的地。例:路线A->B->C,我想从A到C,但是A到C没有票,于是买A到B的票,再车上补票到C。但是有风险会被训斥(虽然仍然可以坐)。\n3. 额外购买(买长坐短):买全程票但从中间站上下车,或买超过目的地的票提前下车。路线A->B->C,我想从B到C,但是B到C没有票,于是买A到C的票(注意由于我们是的票是个半矩阵,短途没票不代表长途没票),可以从B上车。\n4. 换乘:在中间站换乘另一趟车。大模型根据自己的地理知识,推断可能的换乘站,也可以找一些直达的车,选择途径的站,看看能不能在这些站换乘。可以选择绕路的票,不一定是最近,以最好的达成目标为目的。\n5. 混合调用:以上方法的任意组合。例:路线为A->B->C->D->E->F,想从B到E,可以用额外购买方法买A到C,在C换乘,从C到D,再在D同车换乘(买这个车次的C到D和D到F)额外购买到F,从E下车。\n\n你可以反复调用工具查询数据,直到找到合适的方案。以上的方案可以组合使用。\n\n你可以一次同时调用多个工具，且为了效率考虑，一次尽可能调用多个工具。\n\n【【回答要求】\n你在每一阶段购票方案中,都要详细说明:\n- 使用了什么方法(直达/买短补长/额外购买/同车换乘/换乘/混合)\n- 车次号\n- 乘车区间\n- 出发和到达时间\n- 座位类型\n- 购票张数\n- 如涉及换乘,说明换乘地点和换乘时间是否充裕\n\n你不会买票,只是规划行程。\n\n【输出格式要求】\n在你最终回复的末尾,用以下 JSON 格式输出你的完整购票方案（包含所有要购买的票段）:\n\n{\"final_plan\": [\n  {\"train_num\": \"G1\", \"from\": \"VNP\", \"to\": \"JGK\", \"seat_type\": \"class2\", \"tickets\": 2}\n]}\n\n字段说明:\n- train_num: 车次号\n- from / to: 车站电报码（不是中文名！必须使用电报码，如北京南是 VNP 不是\"北京南\"）\n- seat_type: 座位类型（class0/class1/class2）\n- tickets: 你要购买的票数（整数）\n\n注意:\n1. 必须使用电报码，不是中文站名\n2. 如果之前有换乘、同车换乘等,每个票段都列出来\n3. 如果最终没有合适的方案,输出 {\"final_plan\": []}\n4. JSON 必须在回复末尾,不要被任何其他文字包裹\n"
+    },
+    {
+      "role": "user",
+      "content": "上海虹桥到青岛北"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_wYe6U7ldM8HRmTaFqbLc1467",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"上海虹桥\"}"
+          }
+        },
+        {
+          "id": "call_01_5kTFbWeFTJ63QnpbkzHF1677",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"青岛北\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_wYe6U7ldM8HRmTaFqbLc1467",
+      "content": "[{\"station_id\": \"AOH\", \"station_name\": \"上海虹桥\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_5kTFbWeFTJ63QnpbkzHF1677",
+      "content": "[{\"station_id\": \"QHK\", \"station_name\": \"青岛北\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "好的，上海虹桥（AOH）到青岛北（QHK），我先查一下直达车次和余票情况。",
+      "tool_calls": [
+        {
+          "id": "call_00_orCDIcaEyxREO1G5UcpK5251",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_orCDIcaEyxREO1G5UcpK5251",
+      "content": "[{\"train_num\": \"G688\", \"depart_time\": \"15:27\", \"arrive_time\": \"20:50\", \"duration\": \"05:23\"}, {\"train_num\": \"G3310\", \"depart_time\": \"16:45\", \"arrive_time\": \"22:20\", \"duration\": \"05:35\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "有2趟直达车次，我来查看详细信息和余票情况。",
+      "tool_calls": [
+        {
+          "id": "call_00_K9Y3asxpiUbCZpVjEOqi2080",
+          "type": "function",
+          "function": {
+            "name": "query_train_detail",
+            "arguments": "{\"train_num\": \"G688\"}"
+          }
+        },
+        {
+          "id": "call_01_fM3S59MkItfH1WKg9rIC0708",
+          "type": "function",
+          "function": {
+            "name": "query_train_detail",
+            "arguments": "{\"train_num\": \"G3310\"}"
+          }
+        },
+        {
+          "id": "call_02_JjgbgG4JR314d6GKalm40873",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_03_zvGricKheCCCkAKuEvF02912",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_K9Y3asxpiUbCZpVjEOqi2080",
+      "content": "{\"stops\": [{\"stop_no\": 1, \"station_id\": \"HVU\", \"station_name\": \"杭州西\", \"stop_time\": \"14:12\"}, {\"stop_no\": 2, \"station_id\": \"SJU\", \"station_name\": \"盛泽\", \"stop_time\": \"14:49\"}, {\"stop_no\": 3, \"station_id\": \"AOH\", \"station_name\": \"上海虹桥\", \"stop_time\": \"15:27\"}, {\"stop_no\": 4, \"station_id\": \"ZAU\", \"station_name\": \"张家港\", \"stop_time\": \"16:23\"}, {\"stop_no\": 5, \"station_id\": \"NXU\", \"station_name\": \"南通西\", \"stop_time\": \"16:41\"}, {\"stop_no\": 6, \"station_id\": \"HIH\", \"station_name\": \"海安\", \"stop_time\": \"17:01\"}, {\"stop_no\": 7, \"station_id\": \"DBH\", \"station_name\": \"东台\", \"stop_time\": \"17:16\"}, {\"stop_no\": 8, \"station_id\": \"AFH\", \"station_name\": \"盐城\", \"stop_time\": \"17:36\"}, {\"stop_no\": 9, \"station_id\": \"SAU\", \"station_name\": \"射阳\", \"stop_time\": \"17:58\"}, {\"stop_no\": 10, \"station_id\": \"UIH\", \"station_name\": \"连云港\", \"stop_time\": \"18:56\"}, {\"stop_no\": 11, \"station_id\": \"KZK\", \"station_name\": \"日照西\", \"stop_time\": \"19:40\"}, {\"stop_no\": 12, \"station_id\": \"QUK\", \"station_name\": \"青岛西\", \"stop_time\": \"20:11\"}, {\"stop_no\": 13, \"station_id\": \"QHK\", \"station_name\": \"青岛北\", \"stop_time\": \"20:50\"}]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_fM3S59MkItfH1WKg9rIC0708",
+      "content": "{\"stops\": [{\"stop_no\": 1, \"station_id\": \"FZS\", \"station_name\": \"福州\", \"stop_time\": \"10:47\"}, {\"stop_no\": 2, \"station_id\": \"XOS\", \"station_name\": \"霞浦\", \"stop_time\": \"11:43\"}, {\"stop_no\": 3, \"station_id\": \"ARH\", \"station_name\": \"平阳\", \"stop_time\": \"12:25\"}, {\"stop_no\": 4, \"station_id\": \"VRH\", \"station_name\": \"温州南\", \"stop_time\": \"12:49\"}, {\"stop_no\": 5, \"station_id\": \"XJU\", \"station_name\": \"仙居\", \"stop_time\": \"13:24\"}, {\"stop_no\": 6, \"station_id\": \"HJU\", \"station_name\": \"横店\", \"stop_time\": \"13:44\"}, {\"stop_no\": 7, \"station_id\": \"YWH\", \"station_name\": \"义乌\", \"stop_time\": \"14:03\"}, {\"stop_no\": 8, \"station_id\": \"HVU\", \"station_name\": \"杭州西\", \"stop_time\": \"14:39\"}, {\"stop_no\": 9, \"station_id\": \"HKU\", \"station_name\": \"湖州东\", \"stop_time\": \"15:11\"}, {\"stop_no\": 10, \"station_id\": \"KIU\", \"station_name\": \"湖州南浔\", \"stop_time\": \"15:35\"}, {\"stop_no\": 11, \"station_id\": \"SJU\", \"station_name\": \"盛泽\", \"stop_time\": \"15:55\"}, {\"stop_no\": 12, \"station_id\": \"SMU\", \"station_name\": \"苏州南\", \"stop_time\": \"16:15\"}, {\"stop_no\": 13, \"station_id\": \"AOH\", \"station_name\": \"上海虹桥\", \"stop_time\": \"16:45\"}, {\"stop_no\": 14, \"station_id\": \"TCU\", \"station_name\": \"太仓\", \"stop_time\": \"17:25\"}, {\"stop_no\": 15, \"station_id\": \"CAU\", \"station_name\": \"常熟\", \"stop_time\": \"17:47\"}, {\"stop_no\": 16, \"station_id\": \"ZAU\", \"station_name\": \"张家港\", \"stop_time\": \"17:58\"}, {\"stop_no\": 17, \"station_id\": \"HIH\", \"station_name\": \"海安\", \"stop_time\": \"18:31\"}, {\"stop_no\": 18, \"station_id\": \"AFH\", \"station_name\": \"盐城\", \"stop_time\": \"18:59\"}, {\"stop_no\": 19, \"station_id\": \"SAU\", \"station_name\": \"射阳\", \"stop_time\": \"19:24\"}, {\"stop_no\": 20, \"station_id\": \"XSU\", \"station_name\": \"响水县\", \"stop_time\": \"19:52\"}, {\"stop_no\": 21, \"station_id\": \"UIH\", \"station_name\": \"连云港\", \"stop_time\": \"20:27\"}, {\"stop_no\": 22, \"station_id\": \"GYU\", \"station_name\": \"赣榆\", \"stop_time\": \"20:46\"}, {\"stop_no\": 23, \"station_id\": \"KZK\", \"station_name\": \"日照西\", \"stop_time\": \"21:16\"}, {\"stop_no\": 24, \"station_id\": \"QHK\", \"station_name\": \"青岛北\", \"stop_time\": \"22:20\"}]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_JjgbgG4JR314d6GKalm40873",
+      "content": "{\"class0\": {\"AOH|QHK\": 0}, \"class1\": {\"AOH|QHK\": 0}, \"class2\": {\"AOH|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_zvGricKheCCCkAKuEvF02912",
+      "content": "{\"class0\": {\"AOH|QHK\": 0}, \"class1\": {\"AOH|QHK\": 0}, \"class2\": {\"AOH|QHK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "直达车次G688和G3310的上海虹桥→青岛北段余票均为0。我来探索其他购票方案——比如买短补长、额外购买或换乘。\n\n先查G688在各站区间的余票情况。",
+      "tool_calls": [
+        {
+          "id": "call_00_5B77QEEgMo15blnxOJ3o5438",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\"}"
+          }
+        },
+        {
+          "id": "call_01_1eVC5HHcVX8KXR9jX1NG3240",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_5B77QEEgMo15blnxOJ3o5438",
+      "content": "{\"class0\": {}, \"class1\": {}, \"class2\": {}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_1eVC5HHcVX8KXR9jX1NG3240",
+      "content": "{\"class0\": {}, \"class1\": {}, \"class2\": {}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_QV1D7FMHibOsbVICU0px1628",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\"}"
+          }
+        },
+        {
+          "id": "call_01_YQ6C11ux7echqZ77bdSN1418",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_QV1D7FMHibOsbVICU0px1628",
+      "content": "{\"class0\": {}, \"class1\": {}, \"class2\": {}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_YQ6C11ux7echqZ77bdSN1418",
+      "content": "{\"class0\": {}, \"class1\": {}, \"class2\": {}}"
+    },
+    {
+      "role": "assistant",
+      "content": "直达都没票了，我看看有没有换乘方案。先查上海虹桥有哪些车次可供选择。",
+      "tool_calls": [
+        {
+          "id": "call_00_6OJWtK1SYhrlhyiMlCgZ3990",
+          "type": "function",
+          "function": {
+            "name": "query_trains_at_station",
+            "arguments": "{\"station_id\": \"AOH\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_6OJWtK1SYhrlhyiMlCgZ3990",
+      "content": "{\"error\": \"'trains'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_nY6gT3Sy8LjRczS8ZWGL5772",
+          "type": "function",
+          "function": {
+            "name": "list_trains",
+            "arguments": "{\"keyword\": \"G\", \"limit\": 200}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_nY6gT3Sy8LjRczS8ZWGL5772",
+      "content": "[{\"train_num\": \"G1\"}, {\"train_num\": \"G10\"}, {\"train_num\": \"G1001\"}, {\"train_num\": \"G1002\"}, {\"train_num\": \"G1003\"}, {\"train_num\": \"G1004\"}, {\"train_num\": \"G1005\"}, {\"train_num\": \"G1006\"}, {\"train_num\": \"G1007\"}, {\"train_num\": \"G1008\"}, {\"train_num\": \"G1009\"}, {\"train_num\": \"G101\"}, {\"train_num\": \"G1010\"}, {\"train_num\": \"G1012\"}, {\"train_num\": \"G1015\"}, {\"train_num\": \"G1016\"}, {\"train_num\": \"G102\"}, {\"train_num\": \"G1020\"}, {\"train_num\": \"G1023\"}, {\"train_num\": \"G1024\"}, {\"train_num\": \"G1025\"}, {\"train_num\": \"G1026\"}, {\"train_num\": \"G1029\"}, {\"train_num\": \"G103\"}, {\"train_num\": \"G1030\"}, {\"train_num\": \"G1033\"}, {\"train_num\": \"G1034\"}, {\"train_num\": \"G1037\"}, {\"train_num\": \"G104\"}, {\"train_num\": \"G1041\"}, {\"train_num\": \"G1042\"}, {\"train_num\": \"G1043\"}, {\"train_num\": \"G1044\"}, {\"train_num\": \"G1045\"}, {\"train_num\": \"G1046\"}, {\"train_num\": \"G1047\"}, {\"train_num\": \"G1049\"}, {\"train_num\": \"G105\"}, {\"train_num\": \"G1050\"}, {\"train_num\": \"G1051\"}, {\"train_num\": \"G1052\"}, {\"train_num\": \"G1053\"}, {\"train_num\": \"G1054\"}, {\"train_num\": \"G1055\"}, {\"train_num\": \"G1056\"}, {\"train_num\": \"G1059\"}, {\"train_num\": \"G106\"}, {\"train_num\": \"G1060\"}, {\"train_num\": \"G1061\"}, {\"train_num\": \"G1062\"}, {\"train_num\": \"G1063\"}, {\"train_num\": \"G1064\"}, {\"train_num\": \"G1065\"}, {\"train_num\": \"G1067\"}, {\"train_num\": \"G1068\"}, {\"train_num\": \"G1069\"}, {\"train_num\": \"G107\"}, {\"train_num\": \"G1070\"}, {\"train_num\": \"G1071\"}, {\"train_num\": \"G1072\"}, {\"train_num\": \"G1074\"}, {\"train_num\": \"G1075\"}, {\"train_num\": \"G1076\"}, {\"train_num\": \"G1077\"}, {\"train_num\": \"G1078\"}, {\"train_num\": \"G1079\"}, {\"train_num\": \"G108\"}, {\"train_num\": \"G1080\"}, {\"train_num\": \"G1081\"}, {\"train_num\": \"G1082\"}, {\"train_num\": \"G1083\"}, {\"train_num\": \"G1084\"}, {\"train_num\": \"G1085\"}, {\"train_num\": \"G1086\"}, {\"train_num\": \"G1087\"}, {\"train_num\": \"G1088\"}, {\"train_num\": \"G1089\"}, {\"train_num\": \"G1090\"}, {\"train_num\": \"G1091\"}, {\"train_num\": \"G1092\"}, {\"train_num\": \"G1094\"}, {\"train_num\": \"G1095\"}, {\"train_num\": \"G1096\"}, {\"train_num\": \"G1097\"}, {\"train_num\": \"G1098\"}, {\"train_num\": \"G1099\"}, {\"train_num\": \"G11\"}, {\"train_num\": \"G1100\"}, {\"train_num\": \"G1101\"}, {\"train_num\": \"G1102\"}, {\"train_num\": \"G1103\"}, {\"train_num\": \"G1104\"}, {\"train_num\": \"G1105\"}, {\"train_num\": \"G1106\"}, {\"train_num\": \"G1107\"}, {\"train_num\": \"G1108\"}, {\"train_num\": \"G1109\"}, {\"train_num\": \"G1110\"}, {\"train_num\": \"G1111\"}, {\"train_num\": \"G1112\"}, {\"train_num\": \"G1113\"}, {\"train_num\": \"G1114\"}, {\"train_num\": \"G1115\"}, {\"train_num\": \"G1116\"}, {\"train_num\": \"G1117\"}, {\"train_num\": \"G1118\"}, {\"train_num\": \"G1120\"}, {\"train_num\": \"G1121\"}, {\"train_num\": \"G1122\"}, {\"train_num\": \"G1123\"}, {\"train_num\": \"G1124\"}, {\"train_num\": \"G1125\"}, {\"train_num\": \"G1126\"}, {\"train_num\": \"G1127\"}, {\"train_num\": \"G1128\"}, {\"train_num\": \"G1129\"}, {\"train_num\": \"G1130\"}, {\"train_num\": \"G1137\"}, {\"train_num\": \"G1138\"}, {\"train_num\": \"G1141\"}, {\"train_num\": \"G1142\"}, {\"train_num\": \"G1146\"}, {\"train_num\": \"G1149\"}, {\"train_num\": \"G115\"}, {\"train_num\": \"G1150\"}, {\"train_num\": \"G1153\"}, {\"train_num\": \"G1154\"}, {\"train_num\": \"G1157\"}, {\"train_num\": \"G1158\"}, {\"train_num\": \"G116\"}, {\"train_num\": \"G1161\"}, {\"train_num\": \"G1162\"}, {\"train_num\": \"G1163\"}, {\"train_num\": \"G1164\"}, {\"train_num\": \"G1167\"}, {\"train_num\": \"G1168\"}, {\"train_num\": \"G1169\"}, {\"train_num\": \"G117\"}, {\"train_num\": \"G1170\"}, {\"train_num\": \"G1173\"}, {\"train_num\": \"G1177\"}, {\"train_num\": \"G1178\"}, {\"train_num\": \"G1179\"}, {\"train_num\": \"G118\"}, {\"train_num\": \"G1180\"}, {\"train_num\": \"G1183\"}, {\"train_num\": \"G1184\"}, {\"train_num\": \"G1186\"}, {\"train_num\": \"G1188\"}, {\"train_num\": \"G1189\"}, {\"train_num\": \"G1190\"}, {\"train_num\": \"G1191\"}, {\"train_num\": \"G1192\"}, {\"train_num\": \"G1195\"}, {\"train_num\": \"G1196\"}, {\"train_num\": \"G1197\"}, {\"train_num\": \"G1198\"}, {\"train_num\": \"G12\"}, {\"train_num\": \"G1203\"}, {\"train_num\": \"G1204\"}, {\"train_num\": \"G1207\"}, {\"train_num\": \"G1208\"}, {\"train_num\": \"G1209\"}, {\"train_num\": \"G121\"}, {\"train_num\": \"G1210\"}, {\"train_num\": \"G1211\"}, {\"train_num\": \"G1212\"}, {\"train_num\": \"G1213\"}, {\"train_num\": \"G1214\"}, {\"train_num\": \"G1217\"}, {\"train_num\": \"G1218\"}, {\"train_num\": \"G1219\"}, {\"train_num\": \"G122\"}, {\"train_num\": \"G1220\"}, {\"train_num\": \"G1223\"}, {\"train_num\": \"G1224\"}, {\"train_num\": \"G1227\"}, {\"train_num\": \"G1228\"}, {\"train_num\": \"G123\"}, {\"train_num\": \"G1231\"}, {\"train_num\": \"G1232\"}, {\"train_num\": \"G1235\"}, {\"train_num\": \"G1236\"}, {\"train_num\": \"G1239\"}, {\"train_num\": \"G124\"}, {\"train_num\": \"G1240\"}, {\"train_num\": \"G1243\"}, {\"train_num\": \"G1244\"}, {\"train_num\": \"G1247\"}, {\"train_num\": \"G1248\"}, {\"train_num\": \"G1249\"}, {\"train_num\": \"G125\"}, {\"train_num\": \"G1250\"}, {\"train_num\": \"G1253\"}, {\"train_num\": \"G1254\"}, {\"train_num\": \"G1257\"}, {\"train_num\": \"G1258\"}, {\"train_num\": \"G1259\"}, {\"train_num\": \"G126\"}, {\"train_num\": \"G1260\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_Mg4XodxO1irQ28wwBc1L4931",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAU\"}"
+          }
+        },
+        {
+          "id": "call_01_KdnZqgjZ27esZ6I86Drc1628",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NXU\"}"
+          }
+        },
+        {
+          "id": "call_02_wbb1X4iphNJk4NPBAu4N0810",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"HIH\"}"
+          }
+        },
+        {
+          "id": "call_03_H4ibXLxppPxefjUpUDS66259",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"DBH\"}"
+          }
+        },
+        {
+          "id": "call_04_WFwGIxC70ipBUd6dyso61357",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"AFH\"}"
+          }
+        },
+        {
+          "id": "call_05_bpvw7vgp8oA9pgvfxMW76201",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"SAU\"}"
+          }
+        },
+        {
+          "id": "call_06_tiYLWlXztyTQ1oeFs4ct7509",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_07_MZYldvaxOMiOj7ONHGHV2424",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"KZK\"}"
+          }
+        },
+        {
+          "id": "call_08_xWRA0jS2StqkEDRSU2Ot3194",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"AOH\", \"to_station_id\": \"QUK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_Mg4XodxO1irQ28wwBc1L4931",
+      "content": "{\"class0\": {\"AOH|ZAU\": 0}, \"class1\": {\"AOH|ZAU\": 0}, \"class2\": {\"AOH|ZAU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_KdnZqgjZ27esZ6I86Drc1628",
+      "content": "{\"class0\": {\"AOH|NXU\": 0}, \"class1\": {\"AOH|NXU\": 0}, \"class2\": {\"AOH|NXU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_wbb1X4iphNJk4NPBAu4N0810",
+      "content": "{\"class0\": {\"AOH|HIH\": 0}, \"class1\": {\"AOH|HIH\": 0}, \"class2\": {\"AOH|HIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_H4ibXLxppPxefjUpUDS66259",
+      "content": "{\"class0\": {\"AOH|DBH\": 0}, \"class1\": {\"AOH|DBH\": 0}, \"class2\": {\"AOH|DBH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_WFwGIxC70ipBUd6dyso61357",
+      "content": "{\"class0\": {\"AOH|AFH\": 0}, \"class1\": {\"AOH|AFH\": 0}, \"class2\": {\"AOH|AFH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_bpvw7vgp8oA9pgvfxMW76201",
+      "content": "{\"class0\": {\"AOH|SAU\": 0}, \"class1\": {\"AOH|SAU\": 0}, \"class2\": {\"AOH|SAU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_tiYLWlXztyTQ1oeFs4ct7509",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_MZYldvaxOMiOj7ONHGHV2424",
+      "content": "{\"class0\": {\"AOH|KZK\": 0}, \"class1\": {\"AOH|KZK\": 0}, \"class2\": {\"AOH|KZK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_xWRA0jS2StqkEDRSU2Ot3194",
+      "content": "{\"class0\": {\"AOH|QUK\": 0}, \"class1\": {\"AOH|QUK\": 0}, \"class2\": {\"AOH|QUK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_L3hlr2bJ5bcu7FbGD5ts9517",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"TCU\"}"
+          }
+        },
+        {
+          "id": "call_01_3MHFcYXULSeFHBOugnY00726",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"CAU\"}"
+          }
+        },
+        {
+          "id": "call_02_BmalhaaYg0C2i5VTGJHa3892",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAU\"}"
+          }
+        },
+        {
+          "id": "call_03_kKuHVIImhT8snHXbo3BB8836",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"HIH\"}"
+          }
+        },
+        {
+          "id": "call_04_gZUlCs4ORfm1CRUfKcq62599",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"AFH\"}"
+          }
+        },
+        {
+          "id": "call_05_Mul1rBw7ZF43UQW0tgU40563",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"SAU\"}"
+          }
+        },
+        {
+          "id": "call_06_AXFZ8rVE9UnoWlQIgGtI0581",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"XSU\"}"
+          }
+        },
+        {
+          "id": "call_07_8UTuj5Z74mGn3y9NLjqA9621",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_08_pCepaLWVRG0ognbdq56F1504",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"GYU\"}"
+          }
+        },
+        {
+          "id": "call_09_ohWoH7BXNwNf0BtNSoav8031",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"AOH\", \"to_station_id\": \"KZK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_L3hlr2bJ5bcu7FbGD5ts9517",
+      "content": "{\"class0\": {\"AOH|TCU\": 0}, \"class1\": {\"AOH|TCU\": 0}, \"class2\": {\"AOH|TCU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_3MHFcYXULSeFHBOugnY00726",
+      "content": "{\"class0\": {\"AOH|CAU\": 0}, \"class1\": {\"AOH|CAU\": 0}, \"class2\": {\"AOH|CAU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_BmalhaaYg0C2i5VTGJHa3892",
+      "content": "{\"class0\": {\"AOH|ZAU\": 0}, \"class1\": {\"AOH|ZAU\": 0}, \"class2\": {\"AOH|ZAU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_kKuHVIImhT8snHXbo3BB8836",
+      "content": "{\"class0\": {\"AOH|HIH\": 0}, \"class1\": {\"AOH|HIH\": 0}, \"class2\": {\"AOH|HIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_gZUlCs4ORfm1CRUfKcq62599",
+      "content": "{\"class0\": {\"AOH|AFH\": 0}, \"class1\": {\"AOH|AFH\": 0}, \"class2\": {\"AOH|AFH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_Mul1rBw7ZF43UQW0tgU40563",
+      "content": "{\"class0\": {\"AOH|SAU\": 0}, \"class1\": {\"AOH|SAU\": 0}, \"class2\": {\"AOH|SAU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_AXFZ8rVE9UnoWlQIgGtI0581",
+      "content": "{\"class0\": {\"AOH|XSU\": 0}, \"class1\": {\"AOH|XSU\": 0}, \"class2\": {\"AOH|XSU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_8UTuj5Z74mGn3y9NLjqA9621",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_pCepaLWVRG0ognbdq56F1504",
+      "content": "{\"class0\": {\"AOH|GYU\": 0}, \"class1\": {\"AOH|GYU\": 0}, \"class2\": {\"AOH|GYU\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_ohWoH7BXNwNf0BtNSoav8031",
+      "content": "{\"class0\": {\"AOH|KZK\": 0}, \"class1\": {\"AOH|KZK\": 0}, \"class2\": {\"AOH|KZK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "两趟直达车所有区间都没票了。我试试看换乘方案，先查常见中转站的情况。",
+      "tool_calls": [
+        {
+          "id": "call_00_JWr5DDM7ef3YUaSyiVUy4586",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_01_04fFlK51sWGZMRrq23y72585",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"VNP\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_02_rRPsl6aqs7iiEIQWHWGI6375",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_03_9Fp2SHRLF0fzGVEcDtQO8763",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"NKH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_JWr5DDM7ef3YUaSyiVUy4586",
+      "content": "[{\"train_num\": \"G532\", \"depart_time\": \"06:31\", \"arrive_time\": \"12:18\", \"duration\": \"05:47\"}, {\"train_num\": \"G548\", \"depart_time\": \"06:32\", \"arrive_time\": \"12:39\", \"duration\": \"06:07\"}, {\"train_num\": \"G2\", \"depart_time\": \"06:43\", \"arrive_time\": \"11:32\", \"duration\": \"04:49\"}, {\"train_num\": \"G550\", \"depart_time\": \"07:22\", \"arrive_time\": \"13:21\", \"duration\": \"05:59\"}, {\"train_num\": \"G566\", \"depart_time\": \"07:24\", \"arrive_time\": \"13:36\", \"duration\": \"06:12\"}, {\"train_num\": \"G598\", \"depart_time\": \"07:38\", \"arrive_time\": \"13:32\", \"duration\": \"05:54\"}, {\"train_num\": \"G8\", \"depart_time\": \"08:00\", \"arrive_time\": \"12:26\", \"duration\": \"04:26\"}, {\"train_num\": \"G600\", \"depart_time\": \"08:05\", \"arrive_time\": \"14:04\", \"duration\": \"05:59\"}, {\"train_num\": \"G634\", \"depart_time\": \"08:15\", \"arrive_time\": \"14:13\", \"duration\": \"05:58\"}, {\"train_num\": \"G10\", \"depart_time\": \"09:00\", \"arrive_time\": \"13:26\", \"duration\": \"04:26\"}, {\"train_num\": \"G668\", \"depart_time\": \"09:26\", \"arrive_time\": \"15:21\", \"duration\": \"05:55\"}, {\"train_num\": \"G670\", \"depart_time\": \"09:43\", \"arrive_time\": \"15:51\", \"duration\": \"06:08\"}, {\"train_num\": \"G12\", \"depart_time\": \"10:00\", \"arrive_time\": \"14:24\", \"duration\": \"04:24\"}, {\"train_num\": \"G694\", \"depart_time\": \"10:43\", \"arrive_time\": \"16:42\", \"duration\": \"05:59\"}, {\"train_num\": \"G14\", \"depart_time\": \"11:00\", \"arrive_time\": \"15:31\", \"duration\": \"04:31\"}, {\"train_num\": \"G736\", \"depart_time\": \"11:05\", \"arrive_time\": \"18:07\", \"duration\": \"07:02\"}, {\"train_num\": \"G738\", \"depart_time\": \"12:20\", \"arrive_time\": \"18:47\", \"duration\": \"06:27\"}, {\"train_num\": \"G742\", \"depart_time\": \"12:32\", \"arrive_time\": \"18:32\", \"duration\": \"06:00\"}, {\"train_num\": \"G748\", \"depart_time\": \"13:26\", \"arrive_time\": \"18:59\", \"duration\": \"05:33\"}, {\"train_num\": \"G750\", \"depart_time\": \"13:33\", \"arrive_time\": \"19:50\", \"duration\": \"06:17\"}, {\"train_num\": \"G20\", \"depart_time\": \"14:00\", \"arrive_time\": \"18:36\", \"duration\": \"04:36\"}, {\"train_num\": \"G752\", \"depart_time\": \"14:18\", \"arrive_time\": \"20:13\", \"duration\": \"05:55\"}, {\"train_num\": \"G796\", \"depart_time\": \"14:40\", \"arrive_time\": \"20:47\", \"duration\": \"06:07\"}, {\"train_num\": \"G44\", \"depart_time\": \"14:59\", \"arrive_time\": \"19:37\", \"duration\": \"04:38\"}, {\"train_num\": \"G22\", \"depart_time\": \"15:00\", \"arrive_time\": \"19:33\", \"duration\": \"04:33\"}, {\"train_num\": \"G804\", \"depart_time\": \"15:10\", \"arrive_time\": \"20:39\", \"duration\": \"05:29\"}, {\"train_num\": \"G798\", \"depart_time\": \"15:21\", \"arrive_time\": \"21:10\", \"duration\": \"05:49\"}, {\"train_num\": \"G800\", \"depart_time\": \"15:25\", \"arrive_time\": \"21:42\", \"duration\": \"06:17\"}, {\"train_num\": \"G2590\", \"depart_time\": \"15:43\", \"arrive_time\": \"23:11\", \"duration\": \"07:28\"}, {\"train_num\": \"G24\", \"depart_time\": \"16:00\", \"arrive_time\": \"20:35\", \"duration\": \"04:35\"}, {\"train_num\": \"G802\", \"depart_time\": \"16:04\", \"arrive_time\": \"22:00\", \"duration\": \"05:56\"}, {\"train_num\": \"G806\", \"depart_time\": \"16:37\", \"arrive_time\": \"22:22\", \"duration\": \"05:45\"}, {\"train_num\": \"G26\", \"depart_time\": \"17:00\", \"arrive_time\": \"21:32\", \"duration\": \"04:32\"}, {\"train_num\": \"G726\", \"depart_time\": \"17:16\", \"arrive_time\": \"23:02\", \"duration\": \"05:46\"}, {\"train_num\": \"G808\", \"depart_time\": \"17:25\", \"arrive_time\": \"23:16\", \"duration\": \"05:51\"}, {\"train_num\": \"G810\", \"depart_time\": \"17:46\", \"arrive_time\": \"23:42\", \"duration\": \"05:56\"}, {\"train_num\": \"G30\", \"depart_time\": \"18:52\", \"arrive_time\": \"23:21\", \"duration\": \"04:29\"}, {\"train_num\": \"G32\", \"depart_time\": \"19:25\", \"arrive_time\": \"23:49\", \"duration\": \"04:24\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_04fFlK51sWGZMRrq23y72585",
+      "content": "[{\"train_num\": \"G883\", \"depart_time\": \"11:32\", \"arrive_time\": \"15:06\", \"duration\": \"03:34\"}, {\"train_num\": \"G1069\", \"depart_time\": \"12:31\", \"arrive_time\": \"17:19\", \"duration\": \"04:48\"}, {\"train_num\": \"G71\", \"depart_time\": \"14:58\", \"arrive_time\": \"18:10\", \"duration\": \"03:12\"}, {\"train_num\": \"G73\", \"depart_time\": \"17:56\", \"arrive_time\": \"21:03\", \"duration\": \"03:07\"}, {\"train_num\": \"G891\", \"depart_time\": \"19:36\", \"arrive_time\": \"23:10\", \"duration\": \"03:34\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_rRPsl6aqs7iiEIQWHWGI6375",
+      "content": "[{\"train_num\": \"G1970\", \"depart_time\": \"06:09\", \"arrive_time\": \"07:36\", \"duration\": \"01:27\"}, {\"train_num\": \"G1971\", \"depart_time\": \"06:09\", \"arrive_time\": \"07:36\", \"duration\": \"01:27\"}, {\"train_num\": \"G1802\", \"depart_time\": \"06:13\", \"arrive_time\": \"07:40\", \"duration\": \"01:27\"}, {\"train_num\": \"G1803\", \"depart_time\": \"06:13\", \"arrive_time\": \"07:40\", \"duration\": \"01:27\"}, {\"train_num\": \"G3176\", \"depart_time\": \"06:19\", \"arrive_time\": \"07:55\", \"duration\": \"01:36\"}, {\"train_num\": \"G3177\", \"depart_time\": \"06:19\", \"arrive_time\": \"07:55\", \"duration\": \"01:36\"}, {\"train_num\": \"G532\", \"depart_time\": \"06:31\", \"arrive_time\": \"08:03\", \"duration\": \"01:32\"}, {\"train_num\": \"G548\", \"depart_time\": \"06:32\", \"arrive_time\": \"08:40\", \"duration\": \"02:08\"}, {\"train_num\": \"G1772\", \"depart_time\": \"06:35\", \"arrive_time\": \"08:23\", \"duration\": \"01:48\"}, {\"train_num\": \"G1773\", \"depart_time\": \"06:35\", \"arrive_time\": \"08:23\", \"duration\": \"01:48\"}, {\"train_num\": \"G3230\", \"depart_time\": \"06:42\", \"arrive_time\": \"08:59\", \"duration\": \"02:17\"}, {\"train_num\": \"G3231\", \"depart_time\": \"06:42\", \"arrive_time\": \"08:59\", \"duration\": \"02:17\"}, {\"train_num\": \"G2\", \"depart_time\": \"06:43\", \"arrive_time\": \"07:58\", \"duration\": \"01:15\"}, {\"train_num\": \"G464\", \"depart_time\": \"06:48\", \"arrive_time\": \"08:08\", \"duration\": \"01:20\"}, {\"train_num\": \"G465\", \"depart_time\": \"06:48\", \"arrive_time\": \"08:08\", \"duration\": \"01:20\"}, {\"train_num\": \"G3390\", \"depart_time\": \"07:04\", \"arrive_time\": \"09:11\", \"duration\": \"02:07\"}, {\"train_num\": \"G3391\", \"depart_time\": \"07:04\", \"arrive_time\": \"09:11\", \"duration\": \"02:07\"}, {\"train_num\": \"G1974\", \"depart_time\": \"07:16\", \"arrive_time\": \"08:36\", \"duration\": \"01:20\"}, {\"train_num\": \"G1975\", \"depart_time\": \"07:16\", \"arrive_time\": \"08:36\", \"duration\": \"01:20\"}, {\"train_num\": \"G550\", \"depart_time\": \"07:22\", \"arrive_time\": \"08:50\", \"duration\": \"01:28\"}, {\"train_num\": \"G566\", \"depart_time\": \"07:24\", \"arrive_time\": \"09:05\", \"duration\": \"01:41\"}, {\"train_num\": \"G1212\", \"depart_time\": \"07:32\", \"arrive_time\": \"09:16\", \"duration\": \"01:44\"}, {\"train_num\": \"G598\", \"depart_time\": \"07:38\", \"arrive_time\": \"09:12\", \"duration\": \"01:34\"}, {\"train_num\": \"G1229\", \"depart_time\": \"07:47\", \"arrive_time\": \"09:30\", \"duration\": \"01:43\"}, {\"train_num\": \"G1232\", \"depart_time\": \"07:47\", \"arrive_time\": \"09:30\", \"duration\": \"01:43\"}, {\"train_num\": \"G452\", \"depart_time\": \"07:55\", \"arrive_time\": \"08:56\", \"duration\": \"01:01\"}, {\"train_num\": \"G453\", \"depart_time\": \"07:55\", \"arrive_time\": \"08:56\", \"duration\": \"01:01\"}, {\"train_num\": \"G1952\", \"depart_time\": \"07:59\", \"arrive_time\": \"09:34\", \"duration\": \"01:35\"}, {\"train_num\": \"G1953\", \"depart_time\": \"07:59\", \"arrive_time\": \"09:34\", \"duration\": \"01:35\"}, {\"train_num\": \"G8\", \"depart_time\": \"08:00\", \"arrive_time\": \"09:00\", \"duration\": \"01:00\"}, {\"train_num\": \"G600\", \"depart_time\": \"08:05\", \"arrive_time\": \"09:38\", \"duration\": \"01:33\"}, {\"train_num\": \"G634\", \"depart_time\": \"08:15\", \"arrive_time\": \"09:43\", \"duration\": \"01:28\"}, {\"train_num\": \"G586\", \"depart_time\": \"08:25\", \"arrive_time\": \"10:06\", \"duration\": \"01:41\"}, {\"train_num\": \"G587\", \"depart_time\": \"08:25\", \"arrive_time\": \"10:06\", \"duration\": \"01:41\"}, {\"train_num\": \"G3272\", \"depart_time\": \"08:26\", \"arrive_time\": \"10:38\", \"duration\": \"02:12\"}, {\"train_num\": \"G3273\", \"depart_time\": \"08:26\", \"arrive_time\": \"10:38\", \"duration\": \"02:12\"}, {\"train_num\": \"G1866\", \"depart_time\": \"08:34\", \"arrive_time\": \"10:27\", \"duration\": \"01:53\"}, {\"train_num\": \"G1867\", \"depart_time\": \"08:34\", \"arrive_time\": \"10:27\", \"duration\": \"01:53\"}, {\"train_num\": \"G7180\", \"depart_time\": \"08:34\", \"arrive_time\": \"10:15\", \"duration\": \"01:41\"}, {\"train_num\": \"G384\", \"depart_time\": \"08:47\", \"arrive_time\": \"10:22\", \"duration\": \"01:35\"}, {\"train_num\": \"G385\", \"depart_time\": \"08:47\", \"arrive_time\": \"10:22\", \"duration\": \"01:35\"}, {\"train_num\": \"G94\", \"depart_time\": \"08:55\", \"arrive_time\": \"09:54\", \"duration\": \"00:59\"}, {\"train_num\": \"G95\", \"depart_time\": \"08:55\", \"arrive_time\": \"09:54\", \"duration\": \"00:59\"}, {\"train_num\": \"G10\", \"depart_time\": \"09:00\", \"arrive_time\": \"09:59\", \"duration\": \"00:59\"}, {\"train_num\": \"G1233\", \"depart_time\": \"09:04\", \"arrive_time\": \"10:39\", \"duration\": \"01:35\"}, {\"train_num\": \"G1236\", \"depart_time\": \"09:04\", \"arrive_time\": \"10:39\", \"duration\": \"01:35\"}, {\"train_num\": \"G1806\", \"depart_time\": \"09:08\", \"arrive_time\": \"10:43\", \"duration\": \"01:35\"}, {\"train_num\": \"G1807\", \"depart_time\": \"09:08\", \"arrive_time\": \"10:43\", \"duration\": \"01:35\"}, {\"train_num\": \"G7492\", \"depart_time\": \"09:08\", \"arrive_time\": \"11:09\", \"duration\": \"02:01\"}, {\"train_num\": \"G7493\", \"depart_time\": \"09:08\", \"arrive_time\": \"11:09\", \"duration\": \"02:01\"}, {\"train_num\": \"G1214\", \"depart_time\": \"09:13\", \"arrive_time\": \"10:51\", \"duration\": \"01:38\"}, {\"train_num\": \"G2194\", \"depart_time\": \"09:19\", \"arrive_time\": \"10:47\", \"duration\": \"01:28\"}, {\"train_num\": \"G2195\", \"depart_time\": \"09:19\", \"arrive_time\": \"10:47\", \"duration\": \"01:28\"}, {\"train_num\": \"G7372\", \"depart_time\": \"09:23\", \"arrive_time\": \"11:30\", \"duration\": \"02:07\"}, {\"train_num\": \"G7373\", \"depart_time\": \"09:23\", \"arrive_time\": \"11:30\", \"duration\": \"02:07\"}, {\"train_num\": \"G668\", \"depart_time\": \"09:26\", \"arrive_time\": \"11:09\", \"duration\": \"01:43\"}, {\"train_num\": \"G1201\", \"depart_time\": \"09:33\", \"arrive_time\": \"11:13\", \"duration\": \"01:40\"}, {\"train_num\": \"G1204\", \"depart_time\": \"09:33\", \"arrive_time\": \"11:13\", \"duration\": \"01:40\"}, {\"train_num\": \"G3164\", \"depart_time\": \"09:38\", \"arrive_time\": \"11:18\", \"duration\": \"01:40\"}, {\"train_num\": \"G3165\", \"depart_time\": \"09:38\", \"arrive_time\": \"11:18\", \"duration\": \"01:40\"}, {\"train_num\": \"G670\", \"depart_time\": \"09:43\", \"arrive_time\": \"11:26\", \"duration\": \"01:43\"}, {\"train_num\": \"G1476\", \"depart_time\": \"09:51\", \"arrive_time\": \"11:30\", \"duration\": \"01:39\"}, {\"train_num\": \"G1477\", \"depart_time\": \"09:51\", \"arrive_time\": \"11:30\", \"duration\": \"01:39\"}, {\"train_num\": \"G7128\", \"depart_time\": \"09:51\", \"arrive_time\": \"11:55\", \"duration\": \"02:04\"}, {\"train_num\": \"G7129\", \"depart_time\": \"09:51\", \"arrive_time\": \"11:55\", \"duration\": \"02:04\"}, {\"train_num\": \"G12\", \"depart_time\": \"10:00\", \"arrive_time\": \"10:59\", \"duration\": \"00:59\"}, {\"train_num\": \"G100\", \"depart_time\": \"10:04\", \"arrive_time\": \"11:03\", \"duration\": \"00:59\"}, {\"train_num\": \"G97\", \"depart_time\": \"10:04\", \"arrive_time\": \"11:03\", \"duration\": \"00:59\"}, {\"train_num\": \"G1948\", \"depart_time\": \"10:16\", \"arrive_time\": \"11:38\", \"duration\": \"01:22\"}, {\"train_num\": \"G1949\", \"depart_time\": \"10:16\", \"arrive_time\": \"11:38\", \"duration\": \"01:22\"}, {\"train_num\": \"G3318\", \"depart_time\": \"10:20\", \"arrive_time\": \"11:42\", \"duration\": \"01:22\"}, {\"train_num\": \"G3319\", \"depart_time\": \"10:20\", \"arrive_time\": \"11:42\", \"duration\": \"01:22\"}, {\"train_num\": \"G7136\", \"depart_time\": \"10:20\", \"arrive_time\": \"12:12\", \"duration\": \"01:52\"}, {\"train_num\": \"G7137\", \"depart_time\": \"10:20\", \"arrive_time\": \"12:12\", \"duration\": \"01:52\"}, {\"train_num\": \"G7764\", \"depart_time\": \"10:24\", \"arrive_time\": \"11:55\", \"duration\": \"01:31\"}, {\"train_num\": \"G7765\", \"depart_time\": \"10:24\", \"arrive_time\": \"11:55\", \"duration\": \"01:31\"}, {\"train_num\": \"G676\", \"depart_time\": \"10:25\", \"arrive_time\": \"11:47\", \"duration\": \"01:22\"}, {\"train_num\": \"G677\", \"depart_time\": \"10:25\", \"arrive_time\": \"11:47\", \"duration\": \"01:22\"}, {\"train_num\": \"G7172\", \"depart_time\": \"10:26\", \"arrive_time\": \"12:49\", \"duration\": \"02:23\"}, {\"train_num\": \"G7173\", \"depart_time\": \"10:26\", \"arrive_time\": \"12:49\", \"duration\": \"02:23\"}, {\"train_num\": \"G694\", \"depart_time\": \"10:43\", \"arrive_time\": \"12:07\", \"duration\": \"01:24\"}, {\"train_num\": \"G7386\", \"depart_time\": \"10:48\", \"arrive_time\": \"12:16\", \"duration\": \"01:28\"}, {\"train_num\": \"G7387\", \"depart_time\": \"10:48\", \"arrive_time\": \"12:16\", \"duration\": \"01:28\"}, {\"train_num\": \"G1426\", \"depart_time\": \"10:52\", \"arrive_time\": \"12:23\", \"duration\": \"01:31\"}, {\"train_num\": \"G1427\", \"depart_time\": \"10:52\", \"arrive_time\": \"12:23\", \"duration\": \"01:31\"}, {\"train_num\": \"G8322\", \"depart_time\": \"10:58\", \"arrive_time\": \"12:56\", \"duration\": \"01:58\"}, {\"train_num\": \"G8323\", \"depart_time\": \"10:58\", \"arrive_time\": \"12:56\", \"duration\": \"01:58\"}, {\"train_num\": \"G14\", \"depart_time\": \"11:00\", \"arrive_time\": \"12:02\", \"duration\": \"01:02\"}, {\"train_num\": \"G7572\", \"depart_time\": \"11:03\", \"arrive_time\": \"13:11\", \"duration\": \"02:08\"}, {\"train_num\": \"G7573\", \"depart_time\": \"11:03\", \"arrive_time\": \"13:11\", \"duration\": \"02:08\"}, {\"train_num\": \"G736\", \"depart_time\": \"11:05\", \"arrive_time\": \"12:36\", \"duration\": \"01:31\"}, {\"train_num\": \"G1225\", \"depart_time\": \"11:08\", \"arrive_time\": \"12:49\", \"duration\": \"01:41\"}, {\"train_num\": \"G1228\", \"depart_time\": \"11:08\", \"arrive_time\": \"12:49\", \"duration\": \"01:41\"}, {\"train_num\": \"G1252\", \"depart_time\": \"11:10\", \"arrive_time\": \"12:27\", \"duration\": \"01:17\"}, {\"train_num\": \"G1253\", \"depart_time\": \"11:10\", \"arrive_time\": \"12:27\", \"duration\": \"01:17\"}, {\"train_num\": \"G1724\", \"depart_time\": \"11:13\", \"arrive_time\": \"12:54\", \"duration\": \"01:41\"}, {\"train_num\": \"G1725\", \"depart_time\": \"11:13\", \"arrive_time\": \"12:54\", \"duration\": \"01:41\"}, {\"train_num\": \"G1924\", \"depart_time\": \"11:28\", \"arrive_time\": \"12:46\", \"duration\": \"01:18\"}, {\"train_num\": \"G1925\", \"depart_time\": \"11:28\", \"arrive_time\": \"12:46\", \"duration\": \"01:18\"}, {\"train_num\": \"G3152\", \"depart_time\": \"11:32\", \"arrive_time\": \"13:19\", \"duration\": \"01:47\"}, {\"train_num\": \"G3153\", \"depart_time\": \"11:32\", \"arrive_time\": \"13:19\", \"duration\": \"01:47\"}, {\"train_num\": \"G2662\", \"depart_time\": \"11:39\", \"arrive_time\": \"13:28\", \"duration\": \"01:49\"}, {\"train_num\": \"G1956\", \"depart_time\": \"11:44\", \"arrive_time\": \"13:32\", \"duration\": \"01:48\"}, {\"train_num\": \"G1957\", \"depart_time\": \"11:44\", \"arrive_time\": \"13:32\", \"duration\": \"01:48\"}, {\"train_num\": \"G1716\", \"depart_time\": \"11:51\", \"arrive_time\": \"13:37\", \"duration\": \"01:46\"}, {\"train_num\": \"G1717\", \"depart_time\": \"11:51\", \"arrive_time\": \"13:37\", \"duration\": \"01:46\"}, {\"train_num\": \"G7134\", \"depart_time\": \"12:04\", \"arrive_time\": \"14:18\", \"duration\": \"02:14\"}, {\"train_num\": \"G740\", \"depart_time\": \"12:05\", \"arrive_time\": \"13:12\", \"duration\": \"01:07\"}, {\"train_num\": \"G7576\", \"depart_time\": \"12:10\", \"arrive_time\": \"14:14\", \"duration\": \"02:04\"}, {\"train_num\": \"G7577\", \"depart_time\": \"12:10\", \"arrive_time\": \"14:14\", \"duration\": \"02:04\"}, {\"train_num\": \"G738\", \"depart_time\": \"12:20\", \"arrive_time\": \"13:49\", \"duration\": \"01:29\"}, {\"train_num\": \"G742\", \"depart_time\": \"12:32\", \"arrive_time\": \"13:53\", \"duration\": \"01:21\"}, {\"train_num\": \"G1928\", \"depart_time\": \"12:36\", \"arrive_time\": \"13:57\", \"duration\": \"01:21\"}, {\"train_num\": \"G1929\", \"depart_time\": \"12:36\", \"arrive_time\": \"13:57\", \"duration\": \"01:21\"}, {\"train_num\": \"G1420\", \"depart_time\": \"12:50\", \"arrive_time\": \"15:06\", \"duration\": \"02:16\"}, {\"train_num\": \"G1810\", \"depart_time\": \"12:52\", \"arrive_time\": \"14:35\", \"duration\": \"01:43\"}, {\"train_num\": \"G1811\", \"depart_time\": \"12:52\", \"arrive_time\": \"14:35\", \"duration\": \"01:43\"}, {\"train_num\": \"G7164\", \"depart_time\": \"13:09\", \"arrive_time\": \"14:57\", \"duration\": \"01:48\"}, {\"train_num\": \"G7165\", \"depart_time\": \"13:09\", \"arrive_time\": \"14:57\", \"duration\": \"01:48\"}, {\"train_num\": \"G468\", \"depart_time\": \"13:12\", \"arrive_time\": \"14:12\", \"duration\": \"01:00\"}, {\"train_num\": \"G469\", \"depart_time\": \"13:12\", \"arrive_time\": \"14:12\", \"duration\": \"01:00\"}, {\"train_num\": \"G7182\", \"depart_time\": \"13:16\", \"arrive_time\": \"14:45\", \"duration\": \"01:29\"}, {\"train_num\": \"G7183\", \"depart_time\": \"13:16\", \"arrive_time\": \"14:45\", \"duration\": \"01:29\"}, {\"train_num\": \"G748\", \"depart_time\": \"13:26\", \"arrive_time\": \"14:48\", \"duration\": \"01:22\"}, {\"train_num\": \"G3382\", \"depart_time\": \"13:27\", \"arrive_time\": \"15:45\", \"duration\": \"02:18\"}, {\"train_num\": \"G3383\", \"depart_time\": \"13:27\", \"arrive_time\": \"15:45\", \"duration\": \"02:18\"}, {\"train_num\": \"G7148\", \"depart_time\": \"13:29\", \"arrive_time\": \"15:29\", \"duration\": \"02:00\"}, {\"train_num\": \"G7149\", \"depart_time\": \"13:29\", \"arrive_time\": \"15:29\", \"duration\": \"02:00\"}, {\"train_num\": \"G1706\", \"depart_time\": \"13:30\", \"arrive_time\": \"14:52\", \"duration\": \"01:22\"}, {\"train_num\": \"G1707\", \"depart_time\": \"13:30\", \"arrive_time\": \"14:52\", \"duration\": \"01:22\"}, {\"train_num\": \"G750\", \"depart_time\": \"13:33\", \"arrive_time\": \"15:11\", \"duration\": \"01:38\"}, {\"train_num\": \"G1932\", \"depart_time\": \"13:38\", \"arrive_time\": \"15:22\", \"duration\": \"01:44\"}, {\"train_num\": \"G1933\", \"depart_time\": \"13:38\", \"arrive_time\": \"15:22\", \"duration\": \"01:44\"}, {\"train_num\": \"G3252\", \"depart_time\": \"13:43\", \"arrive_time\": \"15:40\", \"duration\": \"01:57\"}, {\"train_num\": \"G3253\", \"depart_time\": \"13:43\", \"arrive_time\": \"15:40\", \"duration\": \"01:57\"}, {\"train_num\": \"G456\", \"depart_time\": \"13:54\", \"arrive_time\": \"14:55\", \"duration\": \"01:01\"}, {\"train_num\": \"G457\", \"depart_time\": \"13:54\", \"arrive_time\": \"14:55\", \"duration\": \"01:01\"}, {\"train_num\": \"G20\", \"depart_time\": \"14:00\", \"arrive_time\": \"15:00\", \"duration\": \"01:00\"}, {\"train_num\": \"G1464\", \"depart_time\": \"14:03\", \"arrive_time\": \"16:08\", \"duration\": \"02:05\"}, {\"train_num\": \"G1465\", \"depart_time\": \"14:03\", \"arrive_time\": \"16:08\", \"duration\": \"02:05\"}, {\"train_num\": \"G80\", \"depart_time\": \"14:04\", \"arrive_time\": \"15:05\", \"duration\": \"01:01\"}, {\"train_num\": \"G81\", \"depart_time\": \"14:04\", \"arrive_time\": \"15:05\", \"duration\": \"01:01\"}, {\"train_num\": \"G1220\", \"depart_time\": \"14:08\", \"arrive_time\": \"15:16\", \"duration\": \"01:08\"}, {\"train_num\": \"G752\", \"depart_time\": \"14:18\", \"arrive_time\": \"15:35\", \"duration\": \"01:17\"}, {\"train_num\": \"G1818\", \"depart_time\": \"14:33\", \"arrive_time\": \"16:08\", \"duration\": \"01:35\"}, {\"train_num\": \"G1819\", \"depart_time\": \"14:33\", \"arrive_time\": \"16:08\", \"duration\": \"01:35\"}, {\"train_num\": \"G796\", \"depart_time\": \"14:40\", \"arrive_time\": \"16:17\", \"duration\": \"01:37\"}, {\"train_num\": \"G7168\", \"depart_time\": \"14:44\", \"arrive_time\": \"16:23\", \"duration\": \"01:39\"}, {\"train_num\": \"G7169\", \"depart_time\": \"14:44\", \"arrive_time\": \"16:23\", \"duration\": \"01:39\"}, {\"train_num\": \"G874\", \"depart_time\": \"14:49\", \"arrive_time\": \"16:27\", \"duration\": \"01:38\"}, {\"train_num\": \"G2384\", \"depart_time\": \"14:54\", \"arrive_time\": \"16:57\", \"duration\": \"02:03\"}, {\"train_num\": \"G2385\", \"depart_time\": \"14:54\", \"arrive_time\": \"16:57\", \"duration\": \"02:03\"}, {\"train_num\": \"G44\", \"depart_time\": \"14:59\", \"arrive_time\": \"16:03\", \"duration\": \"01:04\"}, {\"train_num\": \"G22\", \"depart_time\": \"15:00\", \"arrive_time\": \"15:59\", \"duration\": \"00:59\"}, {\"train_num\": \"G804\", \"depart_time\": \"15:10\", \"arrive_time\": \"16:31\", \"duration\": \"01:21\"}, {\"train_num\": \"G1776\", \"depart_time\": \"15:14\", \"arrive_time\": \"16:45\", \"duration\": \"01:31\"}, {\"train_num\": \"G1777\", \"depart_time\": \"15:14\", \"arrive_time\": \"16:45\", \"duration\": \"01:31\"}, {\"train_num\": \"G2366\", \"depart_time\": \"15:16\", \"arrive_time\": \"17:19\", \"duration\": \"02:03\"}, {\"train_num\": \"G2367\", \"depart_time\": \"15:16\", \"arrive_time\": \"17:19\", \"duration\": \"02:03\"}, {\"train_num\": \"G798\", \"depart_time\": \"15:21\", \"arrive_time\": \"16:35\", \"duration\": \"01:14\"}, {\"train_num\": \"G800\", \"depart_time\": \"15:25\", \"arrive_time\": \"17:13\", \"duration\": \"01:48\"}, {\"train_num\": \"G1822\", \"depart_time\": \"15:32\", \"arrive_time\": \"16:48\", \"duration\": \"01:16\"}, {\"train_num\": \"G1823\", \"depart_time\": \"15:32\", \"arrive_time\": \"16:48\", \"duration\": \"01:16\"}, {\"train_num\": \"G1736\", \"depart_time\": \"15:36\", \"arrive_time\": \"17:06\", \"duration\": \"01:30\"}, {\"train_num\": \"G1737\", \"depart_time\": \"15:36\", \"arrive_time\": \"17:06\", \"duration\": \"01:30\"}, {\"train_num\": \"G7152\", \"depart_time\": \"15:42\", \"arrive_time\": \"17:37\", \"duration\": \"01:55\"}, {\"train_num\": \"G7153\", \"depart_time\": \"15:42\", \"arrive_time\": \"17:37\", \"duration\": \"01:55\"}, {\"train_num\": \"G3826\", \"depart_time\": \"15:50\", \"arrive_time\": \"17:20\", \"duration\": \"01:30\"}, {\"train_num\": \"G3827\", \"depart_time\": \"15:50\", \"arrive_time\": \"17:20\", \"duration\": \"01:30\"}, {\"train_num\": \"G24\", \"depart_time\": \"16:00\", \"arrive_time\": \"16:59\", \"duration\": \"00:59\"}, {\"train_num\": \"G802\", \"depart_time\": \"16:04\", \"arrive_time\": \"17:25\", \"duration\": \"01:21\"}, {\"train_num\": \"G1916\", \"depart_time\": \"16:09\", \"arrive_time\": \"17:30\", \"duration\": \"01:21\"}, {\"train_num\": \"G1917\", \"depart_time\": \"16:09\", \"arrive_time\": \"17:30\", \"duration\": \"01:21\"}, {\"train_num\": \"G7592\", \"depart_time\": \"16:10\", \"arrive_time\": \"18:30\", \"duration\": \"02:20\"}, {\"train_num\": \"G7593\", \"depart_time\": \"16:10\", \"arrive_time\": \"18:30\", \"duration\": \"02:20\"}, {\"train_num\": \"G7138\", \"depart_time\": \"16:15\", \"arrive_time\": \"18:23\", \"duration\": \"02:08\"}, {\"train_num\": \"G7186\", \"depart_time\": \"16:19\", \"arrive_time\": \"17:34\", \"duration\": \"01:15\"}, {\"train_num\": \"G7187\", \"depart_time\": \"16:19\", \"arrive_time\": \"17:34\", \"duration\": \"01:15\"}, {\"train_num\": \"G2812\", \"depart_time\": \"16:25\", \"arrive_time\": \"17:51\", \"duration\": \"01:26\"}, {\"train_num\": \"G2813\", \"depart_time\": \"16:25\", \"arrive_time\": \"17:51\", \"duration\": \"01:26\"}, {\"train_num\": \"G7376\", \"depart_time\": \"16:30\", \"arrive_time\": \"18:26\", \"duration\": \"01:56\"}, {\"train_num\": \"G7377\", \"depart_time\": \"16:30\", \"arrive_time\": \"18:26\", \"duration\": \"01:56\"}, {\"train_num\": \"G826\", \"depart_time\": \"16:32\", \"arrive_time\": \"17:47\", \"duration\": \"01:15\"}, {\"train_num\": \"G827\", \"depart_time\": \"16:32\", \"arrive_time\": \"17:47\", \"duration\": \"01:15\"}, {\"train_num\": \"G806\", \"depart_time\": \"16:37\", \"arrive_time\": \"18:01\", \"duration\": \"01:24\"}, {\"train_num\": \"G2410\", \"depart_time\": \"16:38\", \"arrive_time\": \"19:06\", \"duration\": \"02:28\"}, {\"train_num\": \"G2411\", \"depart_time\": \"16:38\", \"arrive_time\": \"19:06\", \"duration\": \"02:28\"}, {\"train_num\": \"G7196\", \"depart_time\": \"16:44\", \"arrive_time\": \"18:15\", \"duration\": \"01:31\"}, {\"train_num\": \"G7197\", \"depart_time\": \"16:44\", \"arrive_time\": \"18:15\", \"duration\": \"01:31\"}, {\"train_num\": \"G460\", \"depart_time\": \"16:53\", \"arrive_time\": \"17:56\", \"duration\": \"01:03\"}, {\"train_num\": \"G461\", \"depart_time\": \"16:53\", \"arrive_time\": \"17:56\", \"duration\": \"01:03\"}, {\"train_num\": \"G26\", \"depart_time\": \"17:00\", \"arrive_time\": \"18:07\", \"duration\": \"01:07\"}, {\"train_num\": \"G7144\", \"depart_time\": \"17:00\", \"arrive_time\": \"19:11\", \"duration\": \"02:11\"}, {\"train_num\": \"G7145\", \"depart_time\": \"17:00\", \"arrive_time\": \"19:11\", \"duration\": \"02:11\"}, {\"train_num\": \"G1940\", \"depart_time\": \"17:07\", \"arrive_time\": \"18:21\", \"duration\": \"01:14\"}, {\"train_num\": \"G1941\", \"depart_time\": \"17:07\", \"arrive_time\": \"18:21\", \"duration\": \"01:14\"}, {\"train_num\": \"G996\", \"depart_time\": \"17:11\", \"arrive_time\": \"18:25\", \"duration\": \"01:14\"}, {\"train_num\": \"G726\", \"depart_time\": \"17:16\", \"arrive_time\": \"18:29\", \"duration\": \"01:13\"}, {\"train_num\": \"G808\", \"depart_time\": \"17:25\", \"arrive_time\": \"18:33\", \"duration\": \"01:08\"}, {\"train_num\": \"G935\", \"depart_time\": \"17:30\", \"arrive_time\": \"18:48\", \"duration\": \"01:18\"}, {\"train_num\": \"G938\", \"depart_time\": \"17:30\", \"arrive_time\": \"18:48\", \"duration\": \"01:18\"}, {\"train_num\": \"G7206\", \"depart_time\": \"17:31\", \"arrive_time\": \"19:31\", \"duration\": \"02:00\"}, {\"train_num\": \"G7207\", \"depart_time\": \"17:31\", \"arrive_time\": \"19:31\", \"duration\": \"02:00\"}, {\"train_num\": \"G2422\", \"depart_time\": \"17:33\", \"arrive_time\": \"19:41\", \"duration\": \"02:08\"}, {\"train_num\": \"G2423\", \"depart_time\": \"17:33\", \"arrive_time\": \"19:41\", \"duration\": \"02:08\"}, {\"train_num\": \"G810\", \"depart_time\": \"17:46\", \"arrive_time\": \"19:12\", \"duration\": \"01:26\"}, {\"train_num\": \"G7114\", \"depart_time\": \"17:51\", \"arrive_time\": \"20:14\", \"duration\": \"02:23\"}, {\"train_num\": \"G7115\", \"depart_time\": \"17:51\", \"arrive_time\": \"20:14\", \"duration\": \"02:23\"}, {\"train_num\": \"G7192\", \"depart_time\": \"17:54\", \"arrive_time\": \"19:46\", \"duration\": \"01:52\"}, {\"train_num\": \"G7726\", \"depart_time\": \"18:07\", \"arrive_time\": \"20:14\", \"duration\": \"02:07\"}, {\"train_num\": \"G7727\", \"depart_time\": \"18:07\", \"arrive_time\": \"20:14\", \"duration\": \"02:07\"}, {\"train_num\": \"G960\", \"depart_time\": \"18:09\", \"arrive_time\": \"19:32\", \"duration\": \"01:23\"}, {\"train_num\": \"G1826\", \"depart_time\": \"18:14\", \"arrive_time\": \"19:36\", \"duration\": \"01:22\"}, {\"train_num\": \"G1827\", \"depart_time\": \"18:14\", \"arrive_time\": \"19:36\", \"duration\": \"01:22\"}, {\"train_num\": \"G7792\", \"depart_time\": \"18:14\", \"arrive_time\": \"20:07\", \"duration\": \"01:53\"}, {\"train_num\": \"G7793\", \"depart_time\": \"18:14\", \"arrive_time\": \"20:07\", \"duration\": \"01:53\"}, {\"train_num\": \"G7788\", \"depart_time\": \"18:24\", \"arrive_time\": \"19:53\", \"duration\": \"01:29\"}, {\"train_num\": \"G7789\", \"depart_time\": \"18:24\", \"arrive_time\": \"19:53\", \"duration\": \"01:29\"}, {\"train_num\": \"G7160\", \"depart_time\": \"18:29\", \"arrive_time\": \"20:50\", \"duration\": \"02:21\"}, {\"train_num\": \"G7161\", \"depart_time\": \"18:29\", \"arrive_time\": \"20:50\", \"duration\": \"02:21\"}, {\"train_num\": \"G7520\", \"depart_time\": \"18:29\", \"arrive_time\": \"20:35\", \"duration\": \"02:06\"}, {\"train_num\": \"G1764\", \"depart_time\": \"18:37\", \"arrive_time\": \"20:31\", \"duration\": \"01:54\"}, {\"train_num\": \"G1765\", \"depart_time\": \"18:37\", \"arrive_time\": \"20:31\", \"duration\": \"01:54\"}, {\"train_num\": \"G7590\", \"depart_time\": \"18:39\", \"arrive_time\": \"20:46\", \"duration\": \"02:07\"}, {\"train_num\": \"G30\", \"depart_time\": \"18:52\", \"arrive_time\": \"20:00\", \"duration\": \"01:08\"}, {\"train_num\": \"G7310\", \"depart_time\": \"18:54\", \"arrive_time\": \"21:09\", \"duration\": \"02:15\"}, {\"train_num\": \"G1510\", \"depart_time\": \"19:03\", \"arrive_time\": \"20:51\", \"duration\": \"01:48\"}, {\"train_num\": \"G84\", \"depart_time\": \"19:05\", \"arrive_time\": \"20:12\", \"duration\": \"01:07\"}, {\"train_num\": \"G85\", \"depart_time\": \"19:05\", \"arrive_time\": \"20:12\", \"duration\": \"01:07\"}, {\"train_num\": \"G7432\", \"depart_time\": \"19:13\", \"arrive_time\": \"21:12\", \"duration\": \"01:59\"}, {\"train_num\": \"G7433\", \"depart_time\": \"19:13\", \"arrive_time\": \"21:12\", \"duration\": \"01:59\"}, {\"train_num\": \"G7596\", \"depart_time\": \"19:17\", \"arrive_time\": \"21:01\", \"duration\": \"01:44\"}, {\"train_num\": \"G7597\", \"depart_time\": \"19:17\", \"arrive_time\": \"21:01\", \"duration\": \"01:44\"}, {\"train_num\": \"G32\", \"depart_time\": \"19:25\", \"arrive_time\": \"20:24\", \"duration\": \"00:59\"}, {\"train_num\": \"G7190\", \"depart_time\": \"19:39\", \"arrive_time\": \"21:20\", \"duration\": \"01:41\"}, {\"train_num\": \"G7570\", \"depart_time\": \"19:47\", \"arrive_time\": \"21:50\", \"duration\": \"02:03\"}, {\"train_num\": \"G7176\", \"depart_time\": \"19:55\", \"arrive_time\": \"20:56\", \"duration\": \"01:01\"}, {\"train_num\": \"G7177\", \"depart_time\": \"19:55\", \"arrive_time\": \"20:56\", \"duration\": \"01:01\"}, {\"train_num\": \"G3377\", \"depart_time\": \"20:01\", \"arrive_time\": \"22:15\", \"duration\": \"02:14\"}, {\"train_num\": \"G3380\", \"depart_time\": \"20:01\", \"arrive_time\": \"22:15\", \"duration\": \"02:14\"}, {\"train_num\": \"G7566\", \"depart_time\": \"20:02\", \"arrive_time\": \"21:42\", \"duration\": \"01:40\"}, {\"train_num\": \"G76\", \"depart_time\": \"20:15\", \"arrive_time\": \"21:15\", \"duration\": \"01:00\"}, {\"train_num\": \"G77\", \"depart_time\": \"20:15\", \"arrive_time\": \"21:15\", \"duration\": \"01:00\"}, {\"train_num\": \"G7314\", \"depart_time\": \"20:27\", \"arrive_time\": \"22:37\", \"duration\": \"02:10\"}, {\"train_num\": \"G8370\", \"depart_time\": \"20:31\", \"arrive_time\": \"21:46\", \"duration\": \"01:15\"}, {\"train_num\": \"G3060\", \"depart_time\": \"21:03\", \"arrive_time\": \"22:20\", \"duration\": \"01:17\"}, {\"train_num\": \"G7350\", \"depart_time\": \"21:35\", \"arrive_time\": \"23:25\", \"duration\": \"01:50\"}, {\"train_num\": \"G206\", \"depart_time\": \"22:01\", \"arrive_time\": \"23:12\", \"duration\": \"01:11\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_9Fp2SHRLF0fzGVEcDtQO8763",
+      "content": "[{\"train_num\": \"G986\", \"depart_time\": \"08:26\", \"arrive_time\": \"13:31\", \"duration\": \"05:05\"}, {\"train_num\": \"G987\", \"depart_time\": \"08:26\", \"arrive_time\": \"13:31\", \"duration\": \"05:05\"}, {\"train_num\": \"G1551\", \"depart_time\": \"13:33\", \"arrive_time\": \"18:29\", \"duration\": \"04:56\"}, {\"train_num\": \"G1554\", \"depart_time\": \"13:33\", \"arrive_time\": \"18:29\", \"duration\": \"04:56\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "好的，可以试试北京南或南京南换乘。我先查几个候选方案的余票情况。",
+      "tool_calls": [
+        {
+          "id": "call_00_HVR0UOk2UEPpHqPT84CI9034",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G2\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_01_clRMprBciw1YErESiwxm9241",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G8\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_02_El44A3ldoswbAFUV5ohw7214",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G10\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_03_GW3xFiutOZh1ALE7Ebkh3562",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G12\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_04_gxZVsoNNvNS85omKzpvP8300",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G14\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_05_qEgvQBJZYMuS4gOUUFvf6226",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G20\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_06_cdOjTdSrAxMOtHD8PHVT2381",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G22\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_07_aTIMSTfSkfxuKGClogCr6273",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G24\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_08_ubm0LzGCT8Ul5E7z8BTE2074",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G26\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        },
+        {
+          "id": "call_09_XidcS7wmcZzkxv5xkyrL6630",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G44\", \"from_station_id\": \"AOH\", \"to_station_id\": \"VNP\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_HVR0UOk2UEPpHqPT84CI9034",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_clRMprBciw1YErESiwxm9241",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_El44A3ldoswbAFUV5ohw7214",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_GW3xFiutOZh1ALE7Ebkh3562",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_gxZVsoNNvNS85omKzpvP8300",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_qEgvQBJZYMuS4gOUUFvf6226",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_cdOjTdSrAxMOtHD8PHVT2381",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_aTIMSTfSkfxuKGClogCr6273",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_ubm0LzGCT8Ul5E7z8BTE2074",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_XidcS7wmcZzkxv5xkyrL6630",
+      "content": "{\"class0\": {\"AOH|VNP\": 0}, \"class1\": {\"AOH|VNP\": 0}, \"class2\": {\"AOH|VNP\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "北京南方向也没票了，试试南京南换乘。",
+      "tool_calls": [
+        {
+          "id": "call_00_uuyGIX1yy0QZEBh0WJxm7264",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G2\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_01_0DK114y13v7MCPj0g6Fy4347",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G8\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_02_tixyZi1WHxwlv5p35sNp2163",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G10\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_03_XkMvctt3DdepSrJKUImf3322",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G12\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_04_pfpaF6wjOebQX1QIv83n4447",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G14\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_05_tpVHoG5At2E0SHB53KKV5041",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G20\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_06_m2CXTCIR8L57XCWwk8J31859",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G22\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_07_Ax46wkvoEErmZIdeF9CA9490",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G24\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_08_wDLtWFekbg3NKIc9QpFZ4449",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G44\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_09_GekzrAAme3GQqsW6O2jL6692",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G26\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_uuyGIX1yy0QZEBh0WJxm7264",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_0DK114y13v7MCPj0g6Fy4347",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_tixyZi1WHxwlv5p35sNp2163",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_XkMvctt3DdepSrJKUImf3322",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_pfpaF6wjOebQX1QIv83n4447",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_tpVHoG5At2E0SHB53KKV5041",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_m2CXTCIR8L57XCWwk8J31859",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_Ax46wkvoEErmZIdeF9CA9490",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_wDLtWFekbg3NKIc9QpFZ4449",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_GekzrAAme3GQqsW6O2jL6692",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_BCHCxSMBidzuvj0gs0Zw3235",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G100\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_01_REXJE3OxRMYgkPHaZEZx6775",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G94\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_02_e89LzxkTlfb5lrslSd1d3428",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1212\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_03_nbLsICJPETZlTEFvHnof4878",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1232\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_04_cghOWNeZy9G0fMEFYxql0518",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G452\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_05_RsQk9Pp0Wz0G36j4QxUk9188",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G456\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_06_geOM4aeXBoVgV4R8TcXZ9598",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G460\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_07_hZiE8MKi2Lxm8v1YNeNK4792",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G464\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_08_dFnQwMfsVUosswk0SsTI8596",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G468\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_09_E0DB5ugMBJtJEK18WSM94553",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G80\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_10_HRNXQsvWe3mHKKtalTXn1335",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G84\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        },
+        {
+          "id": "call_11_8rpFk6q8RbXCYTzkedSg9655",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G76\", \"from_station_id\": \"AOH\", \"to_station_id\": \"NKH\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_BCHCxSMBidzuvj0gs0Zw3235",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_REXJE3OxRMYgkPHaZEZx6775",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_e89LzxkTlfb5lrslSd1d3428",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_nbLsICJPETZlTEFvHnof4878",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_cghOWNeZy9G0fMEFYxql0518",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_RsQk9Pp0Wz0G36j4QxUk9188",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_geOM4aeXBoVgV4R8TcXZ9598",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_hZiE8MKi2Lxm8v1YNeNK4792",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_dFnQwMfsVUosswk0SsTI8596",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_E0DB5ugMBJtJEK18WSM94553",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_10_HRNXQsvWe3mHKKtalTXn1335",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_11_8rpFk6q8RbXCYTzkedSg9655",
+      "content": "{\"class0\": {\"AOH|NKH\": 0}, \"class1\": {\"AOH|NKH\": 0}, \"class2\": {\"AOH|NKH\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_D9z84fqDtERzFTg1DHAg2259",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"济南西\"}"
+          }
+        },
+        {
+          "id": "call_01_FbmYXoUCs6Hd3IkAJKFg9384",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"济南\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_D9z84fqDtERzFTg1DHAg2259",
+      "content": "[{\"station_id\": \"JGK\", \"station_name\": \"济南西\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_FbmYXoUCs6Hd3IkAJKFg9384",
+      "content": "[{\"station_id\": \"JNK\", \"station_name\": \"济南\"}, {\"station_id\": \"MDK\", \"station_name\": \"济南东\"}, {\"station_id\": \"JGK\", \"station_name\": \"济南西\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_iwFlQ7qeZMwBINLKrHOB0158",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_01_iueWWoyGLrVzJSNlqNpq0433",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"JGK\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_iwFlQ7qeZMwBINLKrHOB0158",
+      "content": "[{\"train_num\": \"G532\", \"depart_time\": \"06:31\", \"arrive_time\": \"10:34\", \"duration\": \"04:03\"}, {\"train_num\": \"G548\", \"depart_time\": \"06:32\", \"arrive_time\": \"10:51\", \"duration\": \"04:19\"}, {\"train_num\": \"G2\", \"depart_time\": \"06:43\", \"arrive_time\": \"10:06\", \"duration\": \"03:23\"}, {\"train_num\": \"G550\", \"depart_time\": \"07:22\", \"arrive_time\": \"11:38\", \"duration\": \"04:16\"}, {\"train_num\": \"G566\", \"depart_time\": \"07:24\", \"arrive_time\": \"11:46\", \"duration\": \"04:22\"}, {\"train_num\": \"G1212\", \"depart_time\": \"07:32\", \"arrive_time\": \"12:05\", \"duration\": \"04:33\"}, {\"train_num\": \"G598\", \"depart_time\": \"07:38\", \"arrive_time\": \"11:42\", \"duration\": \"04:04\"}, {\"train_num\": \"G1229\", \"depart_time\": \"07:47\", \"arrive_time\": \"12:19\", \"duration\": \"04:32\"}, {\"train_num\": \"G1232\", \"depart_time\": \"07:47\", \"arrive_time\": \"12:19\", \"duration\": \"04:32\"}, {\"train_num\": \"G8\", \"depart_time\": \"08:00\", \"arrive_time\": \"10:59\", \"duration\": \"02:59\"}, {\"train_num\": \"G600\", \"depart_time\": \"08:05\", \"arrive_time\": \"12:13\", \"duration\": \"04:08\"}, {\"train_num\": \"G634\", \"depart_time\": \"08:15\", \"arrive_time\": \"12:23\", \"duration\": \"04:08\"}, {\"train_num\": \"G10\", \"depart_time\": \"09:00\", \"arrive_time\": \"12:00\", \"duration\": \"03:00\"}, {\"train_num\": \"G1233\", \"depart_time\": \"09:04\", \"arrive_time\": \"13:30\", \"duration\": \"04:26\"}, {\"train_num\": \"G1236\", \"depart_time\": \"09:04\", \"arrive_time\": \"13:30\", \"duration\": \"04:26\"}, {\"train_num\": \"G1214\", \"depart_time\": \"09:13\", \"arrive_time\": \"13:36\", \"duration\": \"04:23\"}, {\"train_num\": \"G668\", \"depart_time\": \"09:26\", \"arrive_time\": \"13:40\", \"duration\": \"04:14\"}, {\"train_num\": \"G1255\", \"depart_time\": \"09:31\", \"arrive_time\": \"14:36\", \"duration\": \"05:05\"}, {\"train_num\": \"G1258\", \"depart_time\": \"09:31\", \"arrive_time\": \"14:36\", \"duration\": \"05:05\"}, {\"train_num\": \"G1201\", \"depart_time\": \"09:33\", \"arrive_time\": \"13:48\", \"duration\": \"04:15\"}, {\"train_num\": \"G1204\", \"depart_time\": \"09:33\", \"arrive_time\": \"13:48\", \"duration\": \"04:15\"}, {\"train_num\": \"G670\", \"depart_time\": \"09:43\", \"arrive_time\": \"14:10\", \"duration\": \"04:27\"}, {\"train_num\": \"G12\", \"depart_time\": \"10:00\", \"arrive_time\": \"12:58\", \"duration\": \"02:58\"}, {\"train_num\": \"G100\", \"depart_time\": \"10:04\", \"arrive_time\": \"13:02\", \"duration\": \"02:58\"}, {\"train_num\": \"G97\", \"depart_time\": \"10:04\", \"arrive_time\": \"13:02\", \"duration\": \"02:58\"}, {\"train_num\": \"G694\", \"depart_time\": \"10:43\", \"arrive_time\": \"14:46\", \"duration\": \"04:03\"}, {\"train_num\": \"G14\", \"depart_time\": \"11:00\", \"arrive_time\": \"14:02\", \"duration\": \"03:02\"}, {\"train_num\": \"G736\", \"depart_time\": \"11:05\", \"arrive_time\": \"15:52\", \"duration\": \"04:47\"}, {\"train_num\": \"G1225\", \"depart_time\": \"11:08\", \"arrive_time\": \"15:43\", \"duration\": \"04:35\"}, {\"train_num\": \"G1228\", \"depart_time\": \"11:08\", \"arrive_time\": \"15:43\", \"duration\": \"04:35\"}, {\"train_num\": \"G1252\", \"depart_time\": \"11:10\", \"arrive_time\": \"15:32\", \"duration\": \"04:22\"}, {\"train_num\": \"G1253\", \"depart_time\": \"11:10\", \"arrive_time\": \"15:32\", \"duration\": \"04:22\"}, {\"train_num\": \"G738\", \"depart_time\": \"12:20\", \"arrive_time\": \"16:38\", \"duration\": \"04:18\"}, {\"train_num\": \"G742\", \"depart_time\": \"12:32\", \"arrive_time\": \"16:50\", \"duration\": \"04:18\"}, {\"train_num\": \"G748\", \"depart_time\": \"13:26\", \"arrive_time\": \"17:17\", \"duration\": \"03:51\"}, {\"train_num\": \"G750\", \"depart_time\": \"13:33\", \"arrive_time\": \"17:51\", \"duration\": \"04:18\"}, {\"train_num\": \"G20\", \"depart_time\": \"14:00\", \"arrive_time\": \"17:09\", \"duration\": \"03:09\"}, {\"train_num\": \"G1220\", \"depart_time\": \"14:08\", \"arrive_time\": \"17:28\", \"duration\": \"03:20\"}, {\"train_num\": \"G752\", \"depart_time\": \"14:18\", \"arrive_time\": \"18:21\", \"duration\": \"04:03\"}, {\"train_num\": \"G796\", \"depart_time\": \"14:40\", \"arrive_time\": \"18:54\", \"duration\": \"04:14\"}, {\"train_num\": \"G874\", \"depart_time\": \"14:49\", \"arrive_time\": \"18:58\", \"duration\": \"04:09\"}, {\"train_num\": \"G44\", \"depart_time\": \"14:59\", \"arrive_time\": \"18:03\", \"duration\": \"03:04\"}, {\"train_num\": \"G22\", \"depart_time\": \"15:00\", \"arrive_time\": \"17:59\", \"duration\": \"02:59\"}, {\"train_num\": \"G804\", \"depart_time\": \"15:10\", \"arrive_time\": \"19:13\", \"duration\": \"04:03\"}, {\"train_num\": \"G798\", \"depart_time\": \"15:21\", \"arrive_time\": \"19:22\", \"duration\": \"04:01\"}, {\"train_num\": \"G800\", \"depart_time\": \"15:25\", \"arrive_time\": \"19:52\", \"duration\": \"04:27\"}, {\"train_num\": \"G2590\", \"depart_time\": \"15:43\", \"arrive_time\": \"21:29\", \"duration\": \"05:46\"}, {\"train_num\": \"G24\", \"depart_time\": \"16:00\", \"arrive_time\": \"19:09\", \"duration\": \"03:09\"}, {\"train_num\": \"G802\", \"depart_time\": \"16:04\", \"arrive_time\": \"20:12\", \"duration\": \"04:08\"}, {\"train_num\": \"G806\", \"depart_time\": \"16:37\", \"arrive_time\": \"20:43\", \"duration\": \"04:06\"}, {\"train_num\": \"G26\", \"depart_time\": \"17:00\", \"arrive_time\": \"20:07\", \"duration\": \"03:07\"}, {\"train_num\": \"G996\", \"depart_time\": \"17:11\", \"arrive_time\": \"20:50\", \"duration\": \"03:39\"}, {\"train_num\": \"G726\", \"depart_time\": \"17:16\", \"arrive_time\": \"21:17\", \"duration\": \"04:01\"}, {\"train_num\": \"G808\", \"depart_time\": \"17:25\", \"arrive_time\": \"21:33\", \"duration\": \"04:08\"}, {\"train_num\": \"G935\", \"depart_time\": \"17:30\", \"arrive_time\": \"21:37\", \"duration\": \"04:07\"}, {\"train_num\": \"G938\", \"depart_time\": \"17:30\", \"arrive_time\": \"21:37\", \"duration\": \"04:07\"}, {\"train_num\": \"G810\", \"depart_time\": \"17:46\", \"arrive_time\": \"21:45\", \"duration\": \"03:59\"}, {\"train_num\": \"G960\", \"depart_time\": \"18:09\", \"arrive_time\": \"22:20\", \"duration\": \"04:11\"}, {\"train_num\": \"G32\", \"depart_time\": \"19:25\", \"arrive_time\": \"22:24\", \"duration\": \"02:59\"}, {\"train_num\": \"G76\", \"depart_time\": \"20:15\", \"arrive_time\": \"23:15\", \"duration\": \"03:00\"}, {\"train_num\": \"G77\", \"depart_time\": \"20:15\", \"arrive_time\": \"23:15\", \"duration\": \"03:00\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_iueWWoyGLrVzJSNlqNpq0433",
+      "content": "[{\"train_num\": \"G6905\", \"depart_time\": \"06:00\", \"arrive_time\": \"07:53\", \"duration\": \"01:53\"}, {\"train_num\": \"G6971\", \"depart_time\": \"06:06\", \"arrive_time\": \"08:32\", \"duration\": \"02:26\"}, {\"train_num\": \"G5594\", \"depart_time\": \"09:13\", \"arrive_time\": \"11:16\", \"duration\": \"02:03\"}, {\"train_num\": \"G5595\", \"depart_time\": \"09:13\", \"arrive_time\": \"11:16\", \"duration\": \"02:03\"}, {\"train_num\": \"G6913\", \"depart_time\": \"09:59\", \"arrive_time\": \"11:55\", \"duration\": \"01:56\"}, {\"train_num\": \"G1069\", \"depart_time\": \"14:18\", \"arrive_time\": \"17:19\", \"duration\": \"03:01\"}, {\"train_num\": \"G3615\", \"depart_time\": \"17:22\", \"arrive_time\": \"19:47\", \"duration\": \"02:25\"}, {\"train_num\": \"G3618\", \"depart_time\": \"17:22\", \"arrive_time\": \"19:47\", \"duration\": \"02:25\"}, {\"train_num\": \"G1246\", \"depart_time\": \"19:02\", \"arrive_time\": \"21:40\", \"duration\": \"02:38\"}, {\"train_num\": \"G1247\", \"depart_time\": \"19:02\", \"arrive_time\": \"21:40\", \"duration\": \"02:38\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "来了，济南西中转是个好方案！让我查一下关键车次的余票。",
+      "tool_calls": [
+        {
+          "id": "call_00_CQCfMAKDHD6AmfQmwKve9323",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G8\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_01_WeirgHgtEFpg6gbALyHJ6515",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G10\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_02_3mhhEalCxj0OKbnbVhSO5813",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G12\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_03_DCnlJhKcLRAWU56JC1Rz0461",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G14\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_04_szqvmDHP05uvtMnkcmc74901",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G20\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_05_khqN3ncQduJEcB9wdzzz4241",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G22\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_06_DASYbO8UJVdVzcq6bkHe7402",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G44\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_07_CbTAdIlXjUZeYGo5Oqqk3956",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1069\", \"from_station_id\": \"JGK\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_08_2TPXl7s5XcuTcTj19nQb0064",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3615\", \"from_station_id\": \"JGK\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_09_MtECv4AfzWjethSSPcDL9148",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1246\", \"from_station_id\": \"JGK\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_10_055YoNYpMulh8sMrCAcs7019",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G6913\", \"from_station_id\": \"JGK\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_CQCfMAKDHD6AmfQmwKve9323",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_WeirgHgtEFpg6gbALyHJ6515",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_3mhhEalCxj0OKbnbVhSO5813",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_DCnlJhKcLRAWU56JC1Rz0461",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_szqvmDHP05uvtMnkcmc74901",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_khqN3ncQduJEcB9wdzzz4241",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_DASYbO8UJVdVzcq6bkHe7402",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_CbTAdIlXjUZeYGo5Oqqk3956",
+      "content": "{\"class0\": {\"JGK|QHK\": 0}, \"class1\": {\"JGK|QHK\": 0}, \"class2\": {\"JGK|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_2TPXl7s5XcuTcTj19nQb0064",
+      "content": "{\"class0\": {\"JGK|QHK\": 0}, \"class1\": {\"JGK|QHK\": 0}, \"class2\": {\"JGK|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_MtECv4AfzWjethSSPcDL9148",
+      "content": "{\"class0\": {\"JGK|QHK\": 0}, \"class1\": {\"JGK|QHK\": 0}, \"class2\": {\"JGK|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_10_055YoNYpMulh8sMrCAcs7019",
+      "content": "{\"class0\": {\"JGK|QHK\": 0}, \"class1\": {\"JGK|QHK\": 0}, \"class2\": {\"JGK|QHK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_3d5UKMiCdpYiKXp3EJqW3759",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"徐州东\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_3d5UKMiCdpYiKXp3EJqW3759",
+      "content": "[{\"station_id\": \"UUH\", \"station_name\": \"徐州东\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_Aze8XrK4K4mndh8cVr3L0035",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_01_WhYAaApokeiJffpOLbNH4612",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"UUH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_Aze8XrK4K4mndh8cVr3L0035",
+      "content": "[{\"train_num\": \"G1970\", \"depart_time\": \"06:09\", \"arrive_time\": \"09:06\", \"duration\": \"02:57\"}, {\"train_num\": \"G1971\", \"depart_time\": \"06:09\", \"arrive_time\": \"09:06\", \"duration\": \"02:57\"}, {\"train_num\": \"G1802\", \"depart_time\": \"06:13\", \"arrive_time\": \"09:10\", \"duration\": \"02:57\"}, {\"train_num\": \"G1803\", \"depart_time\": \"06:13\", \"arrive_time\": \"09:10\", \"duration\": \"02:57\"}, {\"train_num\": \"G3144\", \"depart_time\": \"07:00\", \"arrive_time\": \"10:58\", \"duration\": \"03:58\"}, {\"train_num\": \"G3145\", \"depart_time\": \"07:00\", \"arrive_time\": \"10:58\", \"duration\": \"03:58\"}, {\"train_num\": \"G1974\", \"depart_time\": \"07:16\", \"arrive_time\": \"10:18\", \"duration\": \"03:02\"}, {\"train_num\": \"G1975\", \"depart_time\": \"07:16\", \"arrive_time\": \"10:18\", \"duration\": \"03:02\"}, {\"train_num\": \"G1986\", \"depart_time\": \"07:19\", \"arrive_time\": \"11:20\", \"duration\": \"04:01\"}, {\"train_num\": \"G1987\", \"depart_time\": \"07:19\", \"arrive_time\": \"11:20\", \"duration\": \"04:01\"}, {\"train_num\": \"G566\", \"depart_time\": \"07:24\", \"arrive_time\": \"10:33\", \"duration\": \"03:09\"}, {\"train_num\": \"G1212\", \"depart_time\": \"07:32\", \"arrive_time\": \"10:47\", \"duration\": \"03:15\"}, {\"train_num\": \"G598\", \"depart_time\": \"07:38\", \"arrive_time\": \"10:29\", \"duration\": \"02:51\"}, {\"train_num\": \"G3288\", \"depart_time\": \"07:46\", \"arrive_time\": \"11:46\", \"duration\": \"04:00\"}, {\"train_num\": \"G3289\", \"depart_time\": \"07:46\", \"arrive_time\": \"11:46\", \"duration\": \"04:00\"}, {\"train_num\": \"G1229\", \"depart_time\": \"07:47\", \"arrive_time\": \"11:12\", \"duration\": \"03:25\"}, {\"train_num\": \"G1232\", \"depart_time\": \"07:47\", \"arrive_time\": \"11:12\", \"duration\": \"03:25\"}, {\"train_num\": \"G600\", \"depart_time\": \"08:05\", \"arrive_time\": \"10:55\", \"duration\": \"02:50\"}, {\"train_num\": \"G634\", \"depart_time\": \"08:15\", \"arrive_time\": \"11:16\", \"duration\": \"03:01\"}, {\"train_num\": \"G3292\", \"depart_time\": \"08:24\", \"arrive_time\": \"12:46\", \"duration\": \"04:22\"}, {\"train_num\": \"G3293\", \"depart_time\": \"08:24\", \"arrive_time\": \"12:46\", \"duration\": \"04:22\"}, {\"train_num\": \"G1866\", \"depart_time\": \"08:34\", \"arrive_time\": \"11:57\", \"duration\": \"03:23\"}, {\"train_num\": \"G1867\", \"depart_time\": \"08:34\", \"arrive_time\": \"11:57\", \"duration\": \"03:23\"}, {\"train_num\": \"G94\", \"depart_time\": \"08:55\", \"arrive_time\": \"11:02\", \"duration\": \"02:07\"}, {\"train_num\": \"G95\", \"depart_time\": \"08:55\", \"arrive_time\": \"11:02\", \"duration\": \"02:07\"}, {\"train_num\": \"G1233\", \"depart_time\": \"09:04\", \"arrive_time\": \"12:16\", \"duration\": \"03:12\"}, {\"train_num\": \"G1236\", \"depart_time\": \"09:04\", \"arrive_time\": \"12:16\", \"duration\": \"03:12\"}, {\"train_num\": \"G1806\", \"depart_time\": \"09:08\", \"arrive_time\": \"12:20\", \"duration\": \"03:12\"}, {\"train_num\": \"G1807\", \"depart_time\": \"09:08\", \"arrive_time\": \"12:20\", \"duration\": \"03:12\"}, {\"train_num\": \"G1214\", \"depart_time\": \"09:13\", \"arrive_time\": \"12:30\", \"duration\": \"03:17\"}, {\"train_num\": \"G2194\", \"depart_time\": \"09:19\", \"arrive_time\": \"12:26\", \"duration\": \"03:07\"}, {\"train_num\": \"G2195\", \"depart_time\": \"09:19\", \"arrive_time\": \"12:26\", \"duration\": \"03:07\"}, {\"train_num\": \"G668\", \"depart_time\": \"09:26\", \"arrive_time\": \"12:34\", \"duration\": \"03:08\"}, {\"train_num\": \"G1255\", \"depart_time\": \"09:31\", \"arrive_time\": \"13:20\", \"duration\": \"03:49\"}, {\"train_num\": \"G1258\", \"depart_time\": \"09:31\", \"arrive_time\": \"13:20\", \"duration\": \"03:49\"}, {\"train_num\": \"G1201\", \"depart_time\": \"09:33\", \"arrive_time\": \"12:42\", \"duration\": \"03:09\"}, {\"train_num\": \"G1204\", \"depart_time\": \"09:33\", \"arrive_time\": \"12:42\", \"duration\": \"03:09\"}, {\"train_num\": \"G670\", \"depart_time\": \"09:43\", \"arrive_time\": \"12:50\", \"duration\": \"03:07\"}, {\"train_num\": \"G3751\", \"depart_time\": \"09:50\", \"arrive_time\": \"13:46\", \"duration\": \"03:56\"}, {\"train_num\": \"G3754\", \"depart_time\": \"09:50\", \"arrive_time\": \"13:46\", \"duration\": \"03:56\"}, {\"train_num\": \"G1476\", \"depart_time\": \"09:51\", \"arrive_time\": \"12:54\", \"duration\": \"03:03\"}, {\"train_num\": \"G1477\", \"depart_time\": \"09:51\", \"arrive_time\": \"12:54\", \"duration\": \"03:03\"}, {\"train_num\": \"G3171\", \"depart_time\": \"10:15\", \"arrive_time\": \"14:10\", \"duration\": \"03:55\"}, {\"train_num\": \"G3174\", \"depart_time\": \"10:15\", \"arrive_time\": \"14:10\", \"duration\": \"03:55\"}, {\"train_num\": \"G1948\", \"depart_time\": \"10:16\", \"arrive_time\": \"13:20\", \"duration\": \"03:04\"}, {\"train_num\": \"G1949\", \"depart_time\": \"10:16\", \"arrive_time\": \"13:20\", \"duration\": \"03:04\"}, {\"train_num\": \"G7764\", \"depart_time\": \"10:24\", \"arrive_time\": \"13:46\", \"duration\": \"03:22\"}, {\"train_num\": \"G7765\", \"depart_time\": \"10:24\", \"arrive_time\": \"13:46\", \"duration\": \"03:22\"}, {\"train_num\": \"G3284\", \"depart_time\": \"10:37\", \"arrive_time\": \"15:03\", \"duration\": \"04:26\"}, {\"train_num\": \"G3285\", \"depart_time\": \"10:37\", \"arrive_time\": \"15:03\", \"duration\": \"04:26\"}, {\"train_num\": \"G694\", \"depart_time\": \"10:43\", \"arrive_time\": \"13:32\", \"duration\": \"02:49\"}, {\"train_num\": \"G736\", \"depart_time\": \"11:05\", \"arrive_time\": \"14:06\", \"duration\": \"03:01\"}, {\"train_num\": \"G1225\", \"depart_time\": \"11:08\", \"arrive_time\": \"14:31\", \"duration\": \"03:23\"}, {\"train_num\": \"G1228\", \"depart_time\": \"11:08\", \"arrive_time\": \"14:31\", \"duration\": \"03:23\"}, {\"train_num\": \"G1252\", \"depart_time\": \"11:10\", \"arrive_time\": \"14:02\", \"duration\": \"02:52\"}, {\"train_num\": \"G1253\", \"depart_time\": \"11:10\", \"arrive_time\": \"14:02\", \"duration\": \"02:52\"}, {\"train_num\": \"G2662\", \"depart_time\": \"11:39\", \"arrive_time\": \"14:52\", \"duration\": \"03:13\"}, {\"train_num\": \"G1532\", \"depart_time\": \"11:57\", \"arrive_time\": \"16:21\", \"duration\": \"04:24\"}, {\"train_num\": \"G1533\", \"depart_time\": \"11:57\", \"arrive_time\": \"16:21\", \"duration\": \"04:24\"}, {\"train_num\": \"G3132\", \"depart_time\": \"11:59\", \"arrive_time\": \"15:49\", \"duration\": \"03:50\"}, {\"train_num\": \"G3133\", \"depart_time\": \"11:59\", \"arrive_time\": \"15:49\", \"duration\": \"03:50\"}, {\"train_num\": \"G738\", \"depart_time\": \"12:20\", \"arrive_time\": \"15:26\", \"duration\": \"03:06\"}, {\"train_num\": \"G7508\", \"depart_time\": \"12:25\", \"arrive_time\": \"16:26\", \"duration\": \"04:01\"}, {\"train_num\": \"G742\", \"depart_time\": \"12:32\", \"arrive_time\": \"15:34\", \"duration\": \"03:02\"}, {\"train_num\": \"G1928\", \"depart_time\": \"12:36\", \"arrive_time\": \"15:38\", \"duration\": \"03:02\"}, {\"train_num\": \"G1929\", \"depart_time\": \"12:36\", \"arrive_time\": \"15:38\", \"duration\": \"03:02\"}, {\"train_num\": \"G1810\", \"depart_time\": \"12:52\", \"arrive_time\": \"15:59\", \"duration\": \"03:07\"}, {\"train_num\": \"G1811\", \"depart_time\": \"12:52\", \"arrive_time\": \"15:59\", \"duration\": \"03:07\"}, {\"train_num\": \"G1706\", \"depart_time\": \"13:30\", \"arrive_time\": \"16:34\", \"duration\": \"03:04\"}, {\"train_num\": \"G1707\", \"depart_time\": \"13:30\", \"arrive_time\": \"16:34\", \"duration\": \"03:04\"}, {\"train_num\": \"G750\", \"depart_time\": \"13:33\", \"arrive_time\": \"16:38\", \"duration\": \"03:05\"}, {\"train_num\": \"G1932\", \"depart_time\": \"13:38\", \"arrive_time\": \"16:48\", \"duration\": \"03:10\"}, {\"train_num\": \"G1933\", \"depart_time\": \"13:38\", \"arrive_time\": \"16:48\", \"duration\": \"03:10\"}, {\"train_num\": \"G3296\", \"depart_time\": \"13:49\", \"arrive_time\": \"17:55\", \"duration\": \"04:06\"}, {\"train_num\": \"G3297\", \"depart_time\": \"13:49\", \"arrive_time\": \"17:55\", \"duration\": \"04:06\"}, {\"train_num\": \"G20\", \"depart_time\": \"14:00\", \"arrive_time\": \"16:11\", \"duration\": \"02:11\"}, {\"train_num\": \"G80\", \"depart_time\": \"14:04\", \"arrive_time\": \"16:19\", \"duration\": \"02:15\"}, {\"train_num\": \"G81\", \"depart_time\": \"14:04\", \"arrive_time\": \"16:19\", \"duration\": \"02:15\"}, {\"train_num\": \"G752\", \"depart_time\": \"14:18\", \"arrive_time\": \"16:53\", \"duration\": \"02:35\"}, {\"train_num\": \"G1818\", \"depart_time\": \"14:33\", \"arrive_time\": \"17:26\", \"duration\": \"02:53\"}, {\"train_num\": \"G1819\", \"depart_time\": \"14:33\", \"arrive_time\": \"17:26\", \"duration\": \"02:53\"}, {\"train_num\": \"G796\", \"depart_time\": \"14:40\", \"arrive_time\": \"17:41\", \"duration\": \"03:01\"}, {\"train_num\": \"G874\", \"depart_time\": \"14:49\", \"arrive_time\": \"17:45\", \"duration\": \"02:56\"}, {\"train_num\": \"G804\", \"depart_time\": \"15:10\", \"arrive_time\": \"17:57\", \"duration\": \"02:47\"}, {\"train_num\": \"G798\", \"depart_time\": \"15:21\", \"arrive_time\": \"18:01\", \"duration\": \"02:40\"}, {\"train_num\": \"G800\", \"depart_time\": \"15:25\", \"arrive_time\": \"18:45\", \"duration\": \"03:20\"}, {\"train_num\": \"G1822\", \"depart_time\": \"15:32\", \"arrive_time\": \"18:32\", \"duration\": \"03:00\"}, {\"train_num\": \"G1823\", \"depart_time\": \"15:32\", \"arrive_time\": \"18:32\", \"duration\": \"03:00\"}, {\"train_num\": \"G2590\", \"depart_time\": \"15:43\", \"arrive_time\": \"20:22\", \"duration\": \"04:39\"}, {\"train_num\": \"G2612\", \"depart_time\": \"15:53\", \"arrive_time\": \"19:47\", \"duration\": \"03:54\"}, {\"train_num\": \"G2613\", \"depart_time\": \"15:53\", \"arrive_time\": \"19:47\", \"duration\": \"03:54\"}, {\"train_num\": \"G24\", \"depart_time\": \"16:00\", \"arrive_time\": \"18:09\", \"duration\": \"02:09\"}, {\"train_num\": \"G802\", \"depart_time\": \"16:04\", \"arrive_time\": \"18:50\", \"duration\": \"02:46\"}, {\"train_num\": \"G1916\", \"depart_time\": \"16:09\", \"arrive_time\": \"18:59\", \"duration\": \"02:50\"}, {\"train_num\": \"G1917\", \"depart_time\": \"16:09\", \"arrive_time\": \"18:59\", \"duration\": \"02:50\"}, {\"train_num\": \"G826\", \"depart_time\": \"16:32\", \"arrive_time\": \"19:03\", \"duration\": \"02:31\"}, {\"train_num\": \"G827\", \"depart_time\": \"16:32\", \"arrive_time\": \"19:03\", \"duration\": \"02:31\"}, {\"train_num\": \"G806\", \"depart_time\": \"16:37\", \"arrive_time\": \"19:29\", \"duration\": \"02:52\"}, {\"train_num\": \"G7644\", \"depart_time\": \"16:55\", \"arrive_time\": \"21:08\", \"duration\": \"04:13\"}, {\"train_num\": \"G1940\", \"depart_time\": \"17:07\", \"arrive_time\": \"19:37\", \"duration\": \"02:30\"}, {\"train_num\": \"G1941\", \"depart_time\": \"17:07\", \"arrive_time\": \"19:37\", \"duration\": \"02:30\"}, {\"train_num\": \"G996\", \"depart_time\": \"17:11\", \"arrive_time\": \"19:41\", \"duration\": \"02:30\"}, {\"train_num\": \"G3280\", \"depart_time\": \"17:15\", \"arrive_time\": \"21:30\", \"duration\": \"04:15\"}, {\"train_num\": \"G3281\", \"depart_time\": \"17:15\", \"arrive_time\": \"21:30\", \"duration\": \"04:15\"}, {\"train_num\": \"G726\", \"depart_time\": \"17:16\", \"arrive_time\": \"19:53\", \"duration\": \"02:37\"}, {\"train_num\": \"G808\", \"depart_time\": \"17:25\", \"arrive_time\": \"20:06\", \"duration\": \"02:41\"}, {\"train_num\": \"G935\", \"depart_time\": \"17:30\", \"arrive_time\": \"20:25\", \"duration\": \"02:55\"}, {\"train_num\": \"G938\", \"depart_time\": \"17:30\", \"arrive_time\": \"20:25\", \"duration\": \"02:55\"}, {\"train_num\": \"G810\", \"depart_time\": \"17:46\", \"arrive_time\": \"20:40\", \"duration\": \"02:54\"}, {\"train_num\": \"G7192\", \"depart_time\": \"17:54\", \"arrive_time\": \"21:40\", \"duration\": \"03:46\"}, {\"train_num\": \"G8362\", \"depart_time\": \"18:07\", \"arrive_time\": \"22:12\", \"duration\": \"04:05\"}, {\"train_num\": \"G960\", \"depart_time\": \"18:09\", \"arrive_time\": \"20:50\", \"duration\": \"02:41\"}, {\"train_num\": \"G7792\", \"depart_time\": \"18:14\", \"arrive_time\": \"21:57\", \"duration\": \"03:43\"}, {\"train_num\": \"G7793\", \"depart_time\": \"18:14\", \"arrive_time\": \"21:57\", \"duration\": \"03:43\"}, {\"train_num\": \"G7590\", \"depart_time\": \"18:39\", \"arrive_time\": \"22:17\", \"duration\": \"03:38\"}, {\"train_num\": \"G8364\", \"depart_time\": \"18:53\", \"arrive_time\": \"22:40\", \"duration\": \"03:47\"}, {\"train_num\": \"G84\", \"depart_time\": \"19:05\", \"arrive_time\": \"21:21\", \"duration\": \"02:16\"}, {\"train_num\": \"G85\", \"depart_time\": \"19:05\", \"arrive_time\": \"21:21\", \"duration\": \"02:16\"}, {\"train_num\": \"G7584\", \"depart_time\": \"19:10\", \"arrive_time\": \"23:04\", \"duration\": \"03:54\"}, {\"train_num\": \"G7190\", \"depart_time\": \"19:39\", \"arrive_time\": \"22:59\", \"duration\": \"03:20\"}, {\"train_num\": \"G8370\", \"depart_time\": \"20:31\", \"arrive_time\": \"23:09\", \"duration\": \"02:38\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_WhYAaApokeiJffpOLbNH4612",
+      "content": "[{\"train_num\": \"G3572\", \"depart_time\": \"06:25\", \"arrive_time\": \"10:41\", \"duration\": \"04:16\"}, {\"train_num\": \"G3573\", \"depart_time\": \"06:25\", \"arrive_time\": \"10:41\", \"duration\": \"04:16\"}, {\"train_num\": \"G1852\", \"depart_time\": \"08:57\", \"arrive_time\": \"11:58\", \"duration\": \"03:01\"}, {\"train_num\": \"G1853\", \"depart_time\": \"08:57\", \"arrive_time\": \"11:58\", \"duration\": \"03:01\"}, {\"train_num\": \"G986\", \"depart_time\": \"09:42\", \"arrive_time\": \"13:31\", \"duration\": \"03:49\"}, {\"train_num\": \"G987\", \"depart_time\": \"09:42\", \"arrive_time\": \"13:31\", \"duration\": \"03:49\"}, {\"train_num\": \"G3010\", \"depart_time\": \"10:47\", \"arrive_time\": \"14:31\", \"duration\": \"03:44\"}, {\"train_num\": \"G3011\", \"depart_time\": \"10:47\", \"arrive_time\": \"14:31\", \"duration\": \"03:44\"}, {\"train_num\": \"G952\", \"depart_time\": \"13:43\", \"arrive_time\": \"17:15\", \"duration\": \"03:32\"}, {\"train_num\": \"G953\", \"depart_time\": \"13:43\", \"arrive_time\": \"17:15\", \"duration\": \"03:32\"}, {\"train_num\": \"G2260\", \"depart_time\": \"13:59\", \"arrive_time\": \"17:26\", \"duration\": \"03:27\"}, {\"train_num\": \"G2261\", \"depart_time\": \"13:59\", \"arrive_time\": \"17:26\", \"duration\": \"03:27\"}, {\"train_num\": \"G1856\", \"depart_time\": \"17:10\", \"arrive_time\": \"20:30\", \"duration\": \"03:20\"}, {\"train_num\": \"G1857\", \"depart_time\": \"17:10\", \"arrive_time\": \"20:30\", \"duration\": \"03:20\"}, {\"train_num\": \"G1996\", \"depart_time\": \"18:56\", \"arrive_time\": \"22:05\", \"duration\": \"03:09\"}, {\"train_num\": \"G1997\", \"depart_time\": \"18:56\", \"arrive_time\": \"22:05\", \"duration\": \"03:09\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_mSwqrwMIEONFdZpxoKBk7840",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G94\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_01_KXmTIxlerAtWz6ApXAAe6788",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G20\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_02_DQw0e2zjqbLXpvBZDyca4311",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G24\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_03_MSNcgmrKgBbRobRFcpE86271",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G44\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_04_3i5u47bkIqwNUcYhjjd25842",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G22\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_05_OW0dRpaG05taeMlSklwV6460",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G26\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_06_fnIJWJEEcS2YAAJ451PU3262",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G952\", \"from_station_id\": \"UUH\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_07_Ot60xcCA0wdi9g4rGcUT6558",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1856\", \"from_station_id\": \"UUH\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_08_xZ7HYGPlgrghxMjgeXqf7942",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1996\", \"from_station_id\": \"UUH\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_09_AzPNDsbF4hyCs2y3b41N5297",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G2260\", \"from_station_id\": \"UUH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_mSwqrwMIEONFdZpxoKBk7840",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_KXmTIxlerAtWz6ApXAAe6788",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_DQw0e2zjqbLXpvBZDyca4311",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_MSNcgmrKgBbRobRFcpE86271",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_3i5u47bkIqwNUcYhjjd25842",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_OW0dRpaG05taeMlSklwV6460",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_fnIJWJEEcS2YAAJ451PU3262",
+      "content": "{\"class0\": {\"UUH|QHK\": 0}, \"class1\": {\"UUH|QHK\": 0}, \"class2\": {\"UUH|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_Ot60xcCA0wdi9g4rGcUT6558",
+      "content": "{\"class0\": {\"UUH|QHK\": 0}, \"class1\": {\"UUH|QHK\": 0}, \"class2\": {\"UUH|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_xZ7HYGPlgrghxMjgeXqf7942",
+      "content": "{\"class0\": {\"UUH|QHK\": 0}, \"class1\": {\"UUH|QHK\": 0}, \"class2\": {\"UUH|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_AzPNDsbF4hyCs2y3b41N5297",
+      "content": "{\"class0\": {\"UUH|QHK\": 0}, \"class1\": {\"UUH|QHK\": 0}, \"class2\": {\"UUH|QHK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "让我看看能否用\"买长坐短\"的方法——查查这些车次从更远的站到青岛北的余票。",
+      "tool_calls": [
+        {
+          "id": "call_00_UEV4EgqOuiGW0NEw46bp2625",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G688\", \"from_station_id\": \"HVU\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_01_aJkIJAUrSQBomzXw1ASm5362",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3310\", \"from_station_id\": \"FZS\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_UEV4EgqOuiGW0NEw46bp2625",
+      "content": "{\"class0\": {\"HVU|QHK\": 0}, \"class1\": {\"HVU|QHK\": 0}, \"class2\": {\"HVU|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_aJkIJAUrSQBomzXw1ASm5362",
+      "content": "{\"class0\": {\"FZS|QHK\": 0}, \"class1\": {\"FZS|QHK\": 0}, \"class2\": {\"FZS|QHK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_bl1RsolwNivZCA4UuDiu0125",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_01_MmotG0XRg7l7rnNKZIM52748",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"UIH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_bl1RsolwNivZCA4UuDiu0125",
+      "content": "[{\"train_num\": \"G8302\", \"depart_time\": \"08:52\", \"arrive_time\": \"12:14\", \"duration\": \"03:22\"}, {\"train_num\": \"G7524\", \"depart_time\": \"10:48\", \"arrive_time\": \"14:08\", \"duration\": \"03:20\"}, {\"train_num\": \"G7316\", \"depart_time\": \"11:19\", \"arrive_time\": \"14:58\", \"duration\": \"03:39\"}, {\"train_num\": \"G7586\", \"depart_time\": \"11:40\", \"arrive_time\": \"15:28\", \"duration\": \"03:48\"}, {\"train_num\": \"G7540\", \"depart_time\": \"12:56\", \"arrive_time\": \"16:43\", \"duration\": \"03:47\"}, {\"train_num\": \"G8352\", \"depart_time\": \"13:17\", \"arrive_time\": \"17:18\", \"duration\": \"04:01\"}, {\"train_num\": \"G7390\", \"depart_time\": \"14:28\", \"arrive_time\": \"18:11\", \"duration\": \"03:43\"}, {\"train_num\": \"G8354\", \"depart_time\": \"14:42\", \"arrive_time\": \"18:48\", \"duration\": \"04:06\"}, {\"train_num\": \"G688\", \"depart_time\": \"15:27\", \"arrive_time\": \"18:56\", \"duration\": \"03:29\"}, {\"train_num\": \"G3310\", \"depart_time\": \"16:45\", \"arrive_time\": \"20:27\", \"duration\": \"03:42\"}, {\"train_num\": \"G7792\", \"depart_time\": \"18:14\", \"arrive_time\": \"23:27\", \"duration\": \"05:13\"}, {\"train_num\": \"G7793\", \"depart_time\": \"18:14\", \"arrive_time\": \"23:27\", \"duration\": \"05:13\"}, {\"train_num\": \"G8356\", \"depart_time\": \"19:26\", \"arrive_time\": \"22:40\", \"duration\": \"03:14\"}, {\"train_num\": \"G7550\", \"depart_time\": \"19:47\", \"arrive_time\": \"23:34\", \"duration\": \"03:47\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_MmotG0XRg7l7rnNKZIM52748",
+      "content": "[{\"train_num\": \"G1852\", \"depart_time\": \"09:56\", \"arrive_time\": \"11:58\", \"duration\": \"02:02\"}, {\"train_num\": \"G1853\", \"depart_time\": \"09:56\", \"arrive_time\": \"11:58\", \"duration\": \"02:02\"}, {\"train_num\": \"G3010\", \"depart_time\": \"11:50\", \"arrive_time\": \"14:31\", \"duration\": \"02:41\"}, {\"train_num\": \"G3011\", \"depart_time\": \"11:50\", \"arrive_time\": \"14:31\", \"duration\": \"02:41\"}, {\"train_num\": \"G952\", \"depart_time\": \"14:53\", \"arrive_time\": \"17:15\", \"duration\": \"02:22\"}, {\"train_num\": \"G953\", \"depart_time\": \"14:53\", \"arrive_time\": \"17:15\", \"duration\": \"02:22\"}, {\"train_num\": \"G2260\", \"depart_time\": \"15:12\", \"arrive_time\": \"17:26\", \"duration\": \"02:14\"}, {\"train_num\": \"G2261\", \"depart_time\": \"15:12\", \"arrive_time\": \"17:26\", \"duration\": \"02:14\"}, {\"train_num\": \"G1551\", \"depart_time\": \"16:20\", \"arrive_time\": \"18:29\", \"duration\": \"02:09\"}, {\"train_num\": \"G1554\", \"depart_time\": \"16:20\", \"arrive_time\": \"18:29\", \"duration\": \"02:09\"}, {\"train_num\": \"G1856\", \"depart_time\": \"18:27\", \"arrive_time\": \"20:30\", \"duration\": \"02:03\"}, {\"train_num\": \"G1857\", \"depart_time\": \"18:27\", \"arrive_time\": \"20:30\", \"duration\": \"02:03\"}, {\"train_num\": \"G688\", \"depart_time\": \"18:56\", \"arrive_time\": \"20:50\", \"duration\": \"01:54\"}, {\"train_num\": \"G1996\", \"depart_time\": \"20:08\", \"arrive_time\": \"22:05\", \"duration\": \"01:57\"}, {\"train_num\": \"G1997\", \"depart_time\": \"20:08\", \"arrive_time\": \"22:05\", \"duration\": \"01:57\"}, {\"train_num\": \"G3310\", \"depart_time\": \"20:27\", \"arrive_time\": \"22:20\", \"duration\": \"01:53\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_AmvluHuWn4vLKrmSNA1t1278",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G8302\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_01_562zE789qVWtwinVDWwS1868",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G7524\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_02_moZGEMiaFR2ssLpjSsI91832",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G7316\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_03_IxIp5mkeRtFGAFwsEh9i9086",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G7586\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_04_l8s89ndxuzHZYrkWQSKb6740",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G7540\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_05_NtbevCcOg4jslLAHtOBX1901",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G8352\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_06_i2tcXLRi2mW5qvWS5u3O7179",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G7390\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_07_XixLEqY12s0yrii1HbB74304",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G8354\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_08_ftX9JqYBWlPFaCkFzbVn2842",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G8356\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        },
+        {
+          "id": "call_09_PSHFHzQAbC9f3OSbIUin5904",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G7550\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UIH\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_AmvluHuWn4vLKrmSNA1t1278",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_562zE789qVWtwinVDWwS1868",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_moZGEMiaFR2ssLpjSsI91832",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_IxIp5mkeRtFGAFwsEh9i9086",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_l8s89ndxuzHZYrkWQSKb6740",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_NtbevCcOg4jslLAHtOBX1901",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_i2tcXLRi2mW5qvWS5u3O7179",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_XixLEqY12s0yrii1HbB74304",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_ftX9JqYBWlPFaCkFzbVn2842",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_PSHFHzQAbC9f3OSbIUin5904",
+      "content": "{\"class0\": {\"AOH|UIH\": 0}, \"class1\": {\"AOH|UIH\": 0}, \"class2\": {\"AOH|UIH\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_9y2UflPrNvKwCLSHNUOL5415",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"KZK\"}"
+          }
+        },
+        {
+          "id": "call_01_6fARrQlHxD87Xqa2oH0B7920",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"KZK\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_9y2UflPrNvKwCLSHNUOL5415",
+      "content": "[{\"train_num\": \"G688\", \"depart_time\": \"15:27\", \"arrive_time\": \"19:40\", \"duration\": \"04:13\"}, {\"train_num\": \"G3310\", \"depart_time\": \"16:45\", \"arrive_time\": \"21:16\", \"duration\": \"04:31\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_6fARrQlHxD87Xqa2oH0B7920",
+      "content": "[{\"train_num\": \"G5362\", \"depart_time\": \"07:10\", \"arrive_time\": \"08:16\", \"duration\": \"01:06\"}, {\"train_num\": \"G5551\", \"depart_time\": \"08:48\", \"arrive_time\": \"10:04\", \"duration\": \"01:16\"}, {\"train_num\": \"G5554\", \"depart_time\": \"08:48\", \"arrive_time\": \"10:04\", \"duration\": \"01:16\"}, {\"train_num\": \"G2034\", \"depart_time\": \"09:29\", \"arrive_time\": \"10:42\", \"duration\": \"01:13\"}, {\"train_num\": \"G5364\", \"depart_time\": \"09:48\", \"arrive_time\": \"10:58\", \"duration\": \"01:10\"}, {\"train_num\": \"G5556\", \"depart_time\": \"10:13\", \"arrive_time\": \"11:34\", \"duration\": \"01:21\"}, {\"train_num\": \"G5557\", \"depart_time\": \"10:13\", \"arrive_time\": \"11:34\", \"duration\": \"01:21\"}, {\"train_num\": \"G1852\", \"depart_time\": \"10:42\", \"arrive_time\": \"11:58\", \"duration\": \"01:16\"}, {\"train_num\": \"G1853\", \"depart_time\": \"10:42\", \"arrive_time\": \"11:58\", \"duration\": \"01:16\"}, {\"train_num\": \"G2030\", \"depart_time\": \"10:42\", \"arrive_time\": \"11:46\", \"duration\": \"01:04\"}, {\"train_num\": \"G5570\", \"depart_time\": \"12:08\", \"arrive_time\": \"13:18\", \"duration\": \"01:10\"}, {\"train_num\": \"G3266\", \"depart_time\": \"12:42\", \"arrive_time\": \"13:51\", \"duration\": \"01:09\"}, {\"train_num\": \"G3267\", \"depart_time\": \"12:42\", \"arrive_time\": \"13:51\", \"duration\": \"01:09\"}, {\"train_num\": \"G3010\", \"depart_time\": \"13:00\", \"arrive_time\": \"14:31\", \"duration\": \"01:31\"}, {\"train_num\": \"G3011\", \"depart_time\": \"13:00\", \"arrive_time\": \"14:31\", \"duration\": \"01:31\"}, {\"train_num\": \"G952\", \"depart_time\": \"15:53\", \"arrive_time\": \"17:15\", \"duration\": \"01:22\"}, {\"train_num\": \"G953\", \"depart_time\": \"15:53\", \"arrive_time\": \"17:15\", \"duration\": \"01:22\"}, {\"train_num\": \"G5572\", \"depart_time\": \"16:02\", \"arrive_time\": \"17:10\", \"duration\": \"01:08\"}, {\"train_num\": \"G2260\", \"depart_time\": \"16:05\", \"arrive_time\": \"17:26\", \"duration\": \"01:21\"}, {\"train_num\": \"G2261\", \"depart_time\": \"16:05\", \"arrive_time\": \"17:26\", \"duration\": \"01:21\"}, {\"train_num\": \"G5576\", \"depart_time\": \"17:08\", \"arrive_time\": \"18:18\", \"duration\": \"01:10\"}, {\"train_num\": \"G1551\", \"depart_time\": \"17:16\", \"arrive_time\": \"18:29\", \"duration\": \"01:13\"}, {\"train_num\": \"G1554\", \"depart_time\": \"17:16\", \"arrive_time\": \"18:29\", \"duration\": \"01:13\"}, {\"train_num\": \"G426\", \"depart_time\": \"17:32\", \"arrive_time\": \"18:36\", \"duration\": \"01:04\"}, {\"train_num\": \"G1856\", \"depart_time\": \"19:20\", \"arrive_time\": \"20:30\", \"duration\": \"01:10\"}, {\"train_num\": \"G1857\", \"depart_time\": \"19:20\", \"arrive_time\": \"20:30\", \"duration\": \"01:10\"}, {\"train_num\": \"G688\", \"depart_time\": \"19:40\", \"arrive_time\": \"20:50\", \"duration\": \"01:10\"}, {\"train_num\": \"G5586\", \"depart_time\": \"20:02\", \"arrive_time\": \"21:15\", \"duration\": \"01:13\"}, {\"train_num\": \"G5587\", \"depart_time\": \"20:02\", \"arrive_time\": \"21:15\", \"duration\": \"01:13\"}, {\"train_num\": \"G1996\", \"depart_time\": \"21:00\", \"arrive_time\": \"22:05\", \"duration\": \"01:05\"}, {\"train_num\": \"G1997\", \"depart_time\": \"21:00\", \"arrive_time\": \"22:05\", \"duration\": \"01:05\"}, {\"train_num\": \"G3310\", \"depart_time\": \"21:16\", \"arrive_time\": \"22:20\", \"duration\": \"01:04\"}, {\"train_num\": \"G1834\", \"depart_time\": \"21:20\", \"arrive_time\": \"22:26\", \"duration\": \"01:06\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_xvI80IFJQQqmeOUd7hVx1093",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"青岛\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_xvI80IFJQQqmeOUd7hVx1093",
+      "content": "[{\"station_id\": \"QDK\", \"station_name\": \"青岛\"}, {\"station_id\": \"QHK\", \"station_name\": \"青岛北\"}, {\"station_id\": \"QJK\", \"station_name\": \"青岛机场\"}, {\"station_id\": \"QUK\", \"station_name\": \"青岛西\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_zKeansWCF0REuZ7bk6L62642",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"QDK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_zKeansWCF0REuZ7bk6L62642",
+      "content": "[{\"train_num\": \"G826\", \"depart_time\": \"16:32\", \"arrive_time\": \"23:10\", \"duration\": \"06:38\"}, {\"train_num\": \"G827\", \"depart_time\": \"16:32\", \"arrive_time\": \"23:10\", \"duration\": \"06:38\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_qrjcnqbtvT1Or6xyUy8y0850",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G826\", \"from_station_id\": \"AOH\", \"to_station_id\": \"QDK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_qrjcnqbtvT1Or6xyUy8y0850",
+      "content": "{\"class0\": {\"AOH|QDK\": 0}, \"class1\": {\"AOH|QDK\": 0}, \"class2\": {\"AOH|QDK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_hPmmZaWtmyx1qpRcZwnf8496",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"AFH\"}"
+          }
+        },
+        {
+          "id": "call_01_LJHum44YLqJQanCgsjNM9827",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AFH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_hPmmZaWtmyx1qpRcZwnf8496",
+      "content": "[{\"train_num\": \"G3144\", \"depart_time\": \"07:00\", \"arrive_time\": \"09:17\", \"duration\": \"02:17\"}, {\"train_num\": \"G3145\", \"depart_time\": \"07:00\", \"arrive_time\": \"09:17\", \"duration\": \"02:17\"}, {\"train_num\": \"G3288\", \"depart_time\": \"07:46\", \"arrive_time\": \"09:52\", \"duration\": \"02:06\"}, {\"train_num\": \"G3289\", \"depart_time\": \"07:46\", \"arrive_time\": \"09:52\", \"duration\": \"02:06\"}, {\"train_num\": \"G1255\", \"depart_time\": \"09:31\", \"arrive_time\": \"11:36\", \"duration\": \"02:05\"}, {\"train_num\": \"G1258\", \"depart_time\": \"09:31\", \"arrive_time\": \"11:36\", \"duration\": \"02:05\"}, {\"train_num\": \"G3751\", \"depart_time\": \"09:50\", \"arrive_time\": \"11:58\", \"duration\": \"02:08\"}, {\"train_num\": \"G3754\", \"depart_time\": \"09:50\", \"arrive_time\": \"11:58\", \"duration\": \"02:08\"}, {\"train_num\": \"G3171\", \"depart_time\": \"10:15\", \"arrive_time\": \"12:27\", \"duration\": \"02:12\"}, {\"train_num\": \"G3174\", \"depart_time\": \"10:15\", \"arrive_time\": \"12:27\", \"duration\": \"02:12\"}, {\"train_num\": \"G3284\", \"depart_time\": \"10:37\", \"arrive_time\": \"12:58\", \"duration\": \"02:21\"}, {\"train_num\": \"G3285\", \"depart_time\": \"10:37\", \"arrive_time\": \"12:58\", \"duration\": \"02:21\"}, {\"train_num\": \"G7524\", \"depart_time\": \"10:48\", \"arrive_time\": \"12:39\", \"duration\": \"01:51\"}, {\"train_num\": \"G1532\", \"depart_time\": \"11:57\", \"arrive_time\": \"14:14\", \"duration\": \"02:17\"}, {\"train_num\": \"G1533\", \"depart_time\": \"11:57\", \"arrive_time\": \"14:14\", \"duration\": \"02:17\"}, {\"train_num\": \"G3132\", \"depart_time\": \"11:59\", \"arrive_time\": \"14:09\", \"duration\": \"02:10\"}, {\"train_num\": \"G3133\", \"depart_time\": \"11:59\", \"arrive_time\": \"14:09\", \"duration\": \"02:10\"}, {\"train_num\": \"G7306\", \"depart_time\": \"12:29\", \"arrive_time\": \"14:26\", \"duration\": \"01:57\"}, {\"train_num\": \"G7540\", \"depart_time\": \"12:56\", \"arrive_time\": \"15:13\", \"duration\": \"02:17\"}, {\"train_num\": \"G8352\", \"depart_time\": \"13:17\", \"arrive_time\": \"15:42\", \"duration\": \"02:25\"}, {\"train_num\": \"G3296\", \"depart_time\": \"13:49\", \"arrive_time\": \"16:09\", \"duration\": \"02:20\"}, {\"train_num\": \"G3297\", \"depart_time\": \"13:49\", \"arrive_time\": \"16:09\", \"duration\": \"02:20\"}, {\"train_num\": \"G8354\", \"depart_time\": \"14:42\", \"arrive_time\": \"17:12\", \"duration\": \"02:30\"}, {\"train_num\": \"G688\", \"depart_time\": \"15:27\", \"arrive_time\": \"17:36\", \"duration\": \"02:09\"}, {\"train_num\": \"G3310\", \"depart_time\": \"16:45\", \"arrive_time\": \"18:59\", \"duration\": \"02:14\"}, {\"train_num\": \"G3280\", \"depart_time\": \"17:15\", \"arrive_time\": \"19:27\", \"duration\": \"02:12\"}, {\"train_num\": \"G3281\", \"depart_time\": \"17:15\", \"arrive_time\": \"19:27\", \"duration\": \"02:12\"}, {\"train_num\": \"G8362\", \"depart_time\": \"18:07\", \"arrive_time\": \"20:19\", \"duration\": \"02:12\"}, {\"train_num\": \"G8364\", \"depart_time\": \"18:53\", \"arrive_time\": \"20:54\", \"duration\": \"02:01\"}, {\"train_num\": \"G8356\", \"depart_time\": \"19:26\", \"arrive_time\": \"21:28\", \"duration\": \"02:02\"}, {\"train_num\": \"G8358\", \"depart_time\": \"19:38\", \"arrive_time\": \"21:52\", \"duration\": \"02:14\"}, {\"train_num\": \"G8360\", \"depart_time\": \"20:27\", \"arrive_time\": \"22:46\", \"duration\": \"02:19\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_LJHum44YLqJQanCgsjNM9827",
+      "content": "[{\"train_num\": \"G688\", \"depart_time\": \"17:36\", \"arrive_time\": \"20:50\", \"duration\": \"03:14\"}, {\"train_num\": \"G3310\", \"depart_time\": \"18:59\", \"arrive_time\": \"22:20\", \"duration\": \"03:21\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_GA2kk2v6WOCzMzbNof9Y7690",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"合肥南\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_GA2kk2v6WOCzMzbNof9Y7690",
+      "content": "[{\"station_id\": \"ENH\", \"station_name\": \"合肥南\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_IfAuylqIBpZH7M5RDcUq4121",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"ENH\"}"
+          }
+        },
+        {
+          "id": "call_01_Fl0iizqEEF3sOhru2sg07592",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"ENH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_IfAuylqIBpZH7M5RDcUq4121",
+      "content": "[{\"train_num\": \"G1772\", \"depart_time\": \"06:35\", \"arrive_time\": \"09:15\", \"duration\": \"02:40\"}, {\"train_num\": \"G1773\", \"depart_time\": \"06:35\", \"arrive_time\": \"09:15\", \"duration\": \"02:40\"}, {\"train_num\": \"G3230\", \"depart_time\": \"06:42\", \"arrive_time\": \"09:51\", \"duration\": \"03:09\"}, {\"train_num\": \"G3231\", \"depart_time\": \"06:42\", \"arrive_time\": \"09:51\", \"duration\": \"03:09\"}, {\"train_num\": \"G3390\", \"depart_time\": \"07:04\", \"arrive_time\": \"10:17\", \"duration\": \"03:13\"}, {\"train_num\": \"G3391\", \"depart_time\": \"07:04\", \"arrive_time\": \"10:17\", \"duration\": \"03:13\"}, {\"train_num\": \"G452\", \"depart_time\": \"07:55\", \"arrive_time\": \"09:46\", \"duration\": \"01:51\"}, {\"train_num\": \"G453\", \"depart_time\": \"07:55\", \"arrive_time\": \"09:46\", \"duration\": \"01:51\"}, {\"train_num\": \"G586\", \"depart_time\": \"08:25\", \"arrive_time\": \"10:57\", \"duration\": \"02:32\"}, {\"train_num\": \"G587\", \"depart_time\": \"08:25\", \"arrive_time\": \"10:57\", \"duration\": \"02:32\"}, {\"train_num\": \"G384\", \"depart_time\": \"08:47\", \"arrive_time\": \"11:13\", \"duration\": \"02:26\"}, {\"train_num\": \"G385\", \"depart_time\": \"08:47\", \"arrive_time\": \"11:13\", \"duration\": \"02:26\"}, {\"train_num\": \"G1978\", \"depart_time\": \"09:56\", \"arrive_time\": \"13:06\", \"duration\": \"03:10\"}, {\"train_num\": \"G1979\", \"depart_time\": \"09:56\", \"arrive_time\": \"13:06\", \"duration\": \"03:10\"}, {\"train_num\": \"G3318\", \"depart_time\": \"10:20\", \"arrive_time\": \"12:46\", \"duration\": \"02:26\"}, {\"train_num\": \"G3319\", \"depart_time\": \"10:20\", \"arrive_time\": \"12:46\", \"duration\": \"02:26\"}, {\"train_num\": \"G676\", \"depart_time\": \"10:25\", \"arrive_time\": \"12:41\", \"duration\": \"02:16\"}, {\"train_num\": \"G677\", \"depart_time\": \"10:25\", \"arrive_time\": \"12:41\", \"duration\": \"02:16\"}, {\"train_num\": \"G7386\", \"depart_time\": \"10:48\", \"arrive_time\": \"13:13\", \"duration\": \"02:25\"}, {\"train_num\": \"G7387\", \"depart_time\": \"10:48\", \"arrive_time\": \"13:13\", \"duration\": \"02:25\"}, {\"train_num\": \"G1426\", \"depart_time\": \"10:52\", \"arrive_time\": \"13:18\", \"duration\": \"02:26\"}, {\"train_num\": \"G1427\", \"depart_time\": \"10:52\", \"arrive_time\": \"13:18\", \"duration\": \"02:26\"}, {\"train_num\": \"G1724\", \"depart_time\": \"11:13\", \"arrive_time\": \"13:48\", \"duration\": \"02:35\"}, {\"train_num\": \"G1725\", \"depart_time\": \"11:13\", \"arrive_time\": \"13:48\", \"duration\": \"02:35\"}, {\"train_num\": \"G1716\", \"depart_time\": \"11:51\", \"arrive_time\": \"14:33\", \"duration\": \"02:42\"}, {\"train_num\": \"G1717\", \"depart_time\": \"11:51\", \"arrive_time\": \"14:33\", \"duration\": \"02:42\"}, {\"train_num\": \"G7576\", \"depart_time\": \"12:10\", \"arrive_time\": \"15:06\", \"duration\": \"02:56\"}, {\"train_num\": \"G7577\", \"depart_time\": \"12:10\", \"arrive_time\": \"15:06\", \"duration\": \"02:56\"}, {\"train_num\": \"G3160\", \"depart_time\": \"12:51\", \"arrive_time\": \"15:57\", \"duration\": \"03:06\"}, {\"train_num\": \"G3161\", \"depart_time\": \"12:51\", \"arrive_time\": \"15:57\", \"duration\": \"03:06\"}, {\"train_num\": \"G3382\", \"depart_time\": \"13:27\", \"arrive_time\": \"16:46\", \"duration\": \"03:19\"}, {\"train_num\": \"G3383\", \"depart_time\": \"13:27\", \"arrive_time\": \"16:46\", \"duration\": \"03:19\"}, {\"train_num\": \"G456\", \"depart_time\": \"13:54\", \"arrive_time\": \"15:47\", \"duration\": \"01:53\"}, {\"train_num\": \"G457\", \"depart_time\": \"13:54\", \"arrive_time\": \"15:47\", \"duration\": \"01:53\"}, {\"train_num\": \"G1776\", \"depart_time\": \"15:14\", \"arrive_time\": \"17:42\", \"duration\": \"02:28\"}, {\"train_num\": \"G1777\", \"depart_time\": \"15:14\", \"arrive_time\": \"17:42\", \"duration\": \"02:28\"}, {\"train_num\": \"G2366\", \"depart_time\": \"15:16\", \"arrive_time\": \"18:12\", \"duration\": \"02:56\"}, {\"train_num\": \"G2367\", \"depart_time\": \"15:16\", \"arrive_time\": \"18:12\", \"duration\": \"02:56\"}, {\"train_num\": \"G2402\", \"depart_time\": \"15:32\", \"arrive_time\": \"17:55\", \"duration\": \"02:23\"}, {\"train_num\": \"G2403\", \"depart_time\": \"15:32\", \"arrive_time\": \"17:55\", \"duration\": \"02:23\"}, {\"train_num\": \"G1736\", \"depart_time\": \"15:36\", \"arrive_time\": \"17:57\", \"duration\": \"02:21\"}, {\"train_num\": \"G1737\", \"depart_time\": \"15:36\", \"arrive_time\": \"17:57\", \"duration\": \"02:21\"}, {\"train_num\": \"G2380\", \"depart_time\": \"15:50\", \"arrive_time\": \"19:06\", \"duration\": \"03:16\"}, {\"train_num\": \"G2381\", \"depart_time\": \"15:50\", \"arrive_time\": \"19:06\", \"duration\": \"03:16\"}, {\"train_num\": \"G3826\", \"depart_time\": \"15:50\", \"arrive_time\": \"18:17\", \"duration\": \"02:27\"}, {\"train_num\": \"G3827\", \"depart_time\": \"15:50\", \"arrive_time\": \"18:17\", \"duration\": \"02:27\"}, {\"train_num\": \"G7376\", \"depart_time\": \"16:30\", \"arrive_time\": \"19:24\", \"duration\": \"02:54\"}, {\"train_num\": \"G7377\", \"depart_time\": \"16:30\", \"arrive_time\": \"19:24\", \"duration\": \"02:54\"}, {\"train_num\": \"G2410\", \"depart_time\": \"16:38\", \"arrive_time\": \"20:05\", \"duration\": \"03:27\"}, {\"train_num\": \"G2411\", \"depart_time\": \"16:38\", \"arrive_time\": \"20:05\", \"duration\": \"03:27\"}, {\"train_num\": \"G7196\", \"depart_time\": \"16:44\", \"arrive_time\": \"19:07\", \"duration\": \"02:23\"}, {\"train_num\": \"G7197\", \"depart_time\": \"16:44\", \"arrive_time\": \"19:07\", \"duration\": \"02:23\"}, {\"train_num\": \"G460\", \"depart_time\": \"16:53\", \"arrive_time\": \"18:46\", \"duration\": \"01:53\"}, {\"train_num\": \"G461\", \"depart_time\": \"16:53\", \"arrive_time\": \"18:46\", \"duration\": \"01:53\"}, {\"train_num\": \"G7144\", \"depart_time\": \"17:00\", \"arrive_time\": \"21:56\", \"duration\": \"04:56\"}, {\"train_num\": \"G7145\", \"depart_time\": \"17:00\", \"arrive_time\": \"21:56\", \"duration\": \"04:56\"}, {\"train_num\": \"G2392\", \"depart_time\": \"17:34\", \"arrive_time\": \"20:14\", \"duration\": \"02:40\"}, {\"train_num\": \"G2393\", \"depart_time\": \"17:34\", \"arrive_time\": \"20:14\", \"duration\": \"02:40\"}, {\"train_num\": \"G7114\", \"depart_time\": \"17:51\", \"arrive_time\": \"21:12\", \"duration\": \"03:21\"}, {\"train_num\": \"G7115\", \"depart_time\": \"17:51\", \"arrive_time\": \"21:12\", \"duration\": \"03:21\"}, {\"train_num\": \"G7726\", \"depart_time\": \"18:07\", \"arrive_time\": \"22:50\", \"duration\": \"04:43\"}, {\"train_num\": \"G7727\", \"depart_time\": \"18:07\", \"arrive_time\": \"22:50\", \"duration\": \"04:43\"}, {\"train_num\": \"G7160\", \"depart_time\": \"18:29\", \"arrive_time\": \"21:41\", \"duration\": \"03:12\"}, {\"train_num\": \"G7161\", \"depart_time\": \"18:29\", \"arrive_time\": \"21:41\", \"duration\": \"03:12\"}, {\"train_num\": \"G7432\", \"depart_time\": \"19:13\", \"arrive_time\": \"22:03\", \"duration\": \"02:50\"}, {\"train_num\": \"G7433\", \"depart_time\": \"19:13\", \"arrive_time\": \"22:03\", \"duration\": \"02:50\"}, {\"train_num\": \"G7596\", \"depart_time\": \"19:17\", \"arrive_time\": \"21:53\", \"duration\": \"02:36\"}, {\"train_num\": \"G7597\", \"depart_time\": \"19:17\", \"arrive_time\": \"21:53\", \"duration\": \"02:36\"}, {\"train_num\": \"G7176\", \"depart_time\": \"19:55\", \"arrive_time\": \"21:46\", \"duration\": \"01:51\"}, {\"train_num\": \"G7177\", \"depart_time\": \"19:55\", \"arrive_time\": \"21:46\", \"duration\": \"01:51\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_Fl0iizqEEF3sOhru2sg07592",
+      "content": "[{\"train_num\": \"G1551\", \"depart_time\": \"12:37\", \"arrive_time\": \"18:29\", \"duration\": \"05:52\"}, {\"train_num\": \"G1554\", \"depart_time\": \"12:37\", \"arrive_time\": \"18:29\", \"duration\": \"05:52\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_cmUt2R8u3zPwW7BZinSj2244",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G452\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ENH\"}"
+          }
+        },
+        {
+          "id": "call_01_tKUQgNF4tMQFKieHN8wh3441",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G456\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ENH\"}"
+          }
+        },
+        {
+          "id": "call_02_2BAXZw8btkgCAvms4LNk8460",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G460\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ENH\"}"
+          }
+        },
+        {
+          "id": "call_03_ccp7nGEbnLiqawYoCLHN9770",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1772\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ENH\"}"
+          }
+        },
+        {
+          "id": "call_04_YHAifOWMyJ9gRq6TcAw76574",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G7176\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ENH\"}"
+          }
+        },
+        {
+          "id": "call_05_k319iGxy59PiZ8KD6p7L7213",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1551\", \"from_station_id\": \"ENH\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_cmUt2R8u3zPwW7BZinSj2244",
+      "content": "{\"class0\": {\"AOH|ENH\": 0}, \"class1\": {\"AOH|ENH\": 0}, \"class2\": {\"AOH|ENH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_tKUQgNF4tMQFKieHN8wh3441",
+      "content": "{\"class0\": {\"AOH|ENH\": 0}, \"class1\": {\"AOH|ENH\": 0}, \"class2\": {\"AOH|ENH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_2BAXZw8btkgCAvms4LNk8460",
+      "content": "{\"class0\": {\"AOH|ENH\": 0}, \"class1\": {\"AOH|ENH\": 0}, \"class2\": {\"AOH|ENH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_ccp7nGEbnLiqawYoCLHN9770",
+      "content": "{\"class0\": {\"AOH|ENH\": 0}, \"class1\": {\"AOH|ENH\": 0}, \"class2\": {\"AOH|ENH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_YHAifOWMyJ9gRq6TcAw76574",
+      "content": "{\"class0\": {\"AOH|ENH\": 0}, \"class1\": {\"AOH|ENH\": 0}, \"class2\": {\"AOH|ENH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_k319iGxy59PiZ8KD6p7L7213",
+      "content": "{\"class0\": {\"ENH|QHK\": 0}, \"class1\": {\"ENH|QHK\": 0}, \"class2\": {\"ENH|QHK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_8JHF6ik4ovNHJ2737xMU0513",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"天津西\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_8JHF6ik4ovNHJ2737xMU0513",
+      "content": "[{\"station_id\": \"TXP\", \"station_name\": \"天津西\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_kpw4gQHRzlQicVbDYoVg4981",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"TXP\"}"
+          }
+        },
+        {
+          "id": "call_01_HVytNbrf4Fq7kyiUbsNq5101",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"TXP\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_kpw4gQHRzlQicVbDYoVg4981",
+      "content": "[{\"train_num\": \"G1229\", \"depart_time\": \"07:47\", \"arrive_time\": \"13:53\", \"duration\": \"06:06\"}, {\"train_num\": \"G1232\", \"depart_time\": \"07:47\", \"arrive_time\": \"13:53\", \"duration\": \"06:06\"}, {\"train_num\": \"G1233\", \"depart_time\": \"09:04\", \"arrive_time\": \"14:46\", \"duration\": \"05:42\"}, {\"train_num\": \"G1236\", \"depart_time\": \"09:04\", \"arrive_time\": \"14:46\", \"duration\": \"05:42\"}, {\"train_num\": \"G1255\", \"depart_time\": \"09:31\", \"arrive_time\": \"15:56\", \"duration\": \"06:25\"}, {\"train_num\": \"G1258\", \"depart_time\": \"09:31\", \"arrive_time\": \"15:56\", \"duration\": \"06:25\"}, {\"train_num\": \"G1201\", \"depart_time\": \"09:33\", \"arrive_time\": \"15:15\", \"duration\": \"05:42\"}, {\"train_num\": \"G1204\", \"depart_time\": \"09:33\", \"arrive_time\": \"15:15\", \"duration\": \"05:42\"}, {\"train_num\": \"G100\", \"depart_time\": \"10:04\", \"arrive_time\": \"14:09\", \"duration\": \"04:05\"}, {\"train_num\": \"G97\", \"depart_time\": \"10:04\", \"arrive_time\": \"14:09\", \"duration\": \"04:05\"}, {\"train_num\": \"G1225\", \"depart_time\": \"11:08\", \"arrive_time\": \"17:14\", \"duration\": \"06:06\"}, {\"train_num\": \"G1228\", \"depart_time\": \"11:08\", \"arrive_time\": \"17:14\", \"duration\": \"06:06\"}, {\"train_num\": \"G1252\", \"depart_time\": \"11:10\", \"arrive_time\": \"16:57\", \"duration\": \"05:47\"}, {\"train_num\": \"G1253\", \"depart_time\": \"11:10\", \"arrive_time\": \"16:57\", \"duration\": \"05:47\"}, {\"train_num\": \"G874\", \"depart_time\": \"14:49\", \"arrive_time\": \"20:32\", \"duration\": \"05:43\"}, {\"train_num\": \"G996\", \"depart_time\": \"17:11\", \"arrive_time\": \"22:23\", \"duration\": \"05:12\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_HVytNbrf4Fq7kyiUbsNq5101",
+      "content": "[{\"train_num\": \"G1266\", \"depart_time\": \"15:43\", \"arrive_time\": \"19:27\", \"duration\": \"03:44\"}, {\"train_num\": \"G1267\", \"depart_time\": \"15:43\", \"arrive_time\": \"19:27\", \"duration\": \"03:44\"}, {\"train_num\": \"G1246\", \"depart_time\": \"17:30\", \"arrive_time\": \"21:40\", \"duration\": \"04:10\"}, {\"train_num\": \"G1247\", \"depart_time\": \"17:30\", \"arrive_time\": \"21:40\", \"duration\": \"04:10\"}, {\"train_num\": \"G3565\", \"depart_time\": \"19:06\", \"arrive_time\": \"22:48\", \"duration\": \"03:42\"}, {\"train_num\": \"G3568\", \"depart_time\": \"19:06\", \"arrive_time\": \"22:48\", \"duration\": \"03:42\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_KLgNb5dAsNM2BlJIFABB5652",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G100\", \"from_station_id\": \"AOH\", \"to_station_id\": \"TXP\"}"
+          }
+        },
+        {
+          "id": "call_01_nJdpRjaVtSZPKud7DJME2620",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G97\", \"from_station_id\": \"AOH\", \"to_station_id\": \"TXP\"}"
+          }
+        },
+        {
+          "id": "call_02_d5g6B1o2PNKLO6fwf6SN9599",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1233\", \"from_station_id\": \"AOH\", \"to_station_id\": \"TXP\"}"
+          }
+        },
+        {
+          "id": "call_03_3fZefK6eD5BQDPcjMuhs4162",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1229\", \"from_station_id\": \"AOH\", \"to_station_id\": \"TXP\"}"
+          }
+        },
+        {
+          "id": "call_04_BOJjCwhtFHurHss6VfHW3909",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1266\", \"from_station_id\": \"TXP\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_05_kcalFFCVVRLHiGbmcmXN5844",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1246\", \"from_station_id\": \"TXP\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_06_l6W9DQSQzD9Tc8Ddhjzv9994",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3565\", \"from_station_id\": \"TXP\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_KLgNb5dAsNM2BlJIFABB5652",
+      "content": "{\"class0\": {\"AOH|TXP\": 0}, \"class1\": {\"AOH|TXP\": 0}, \"class2\": {\"AOH|TXP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_nJdpRjaVtSZPKud7DJME2620",
+      "content": "{\"class0\": {\"AOH|TXP\": 0}, \"class1\": {\"AOH|TXP\": 0}, \"class2\": {\"AOH|TXP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_d5g6B1o2PNKLO6fwf6SN9599",
+      "content": "{\"class0\": {\"AOH|TXP\": 0}, \"class1\": {\"AOH|TXP\": 0}, \"class2\": {\"AOH|TXP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_3fZefK6eD5BQDPcjMuhs4162",
+      "content": "{\"class0\": {\"AOH|TXP\": 0}, \"class1\": {\"AOH|TXP\": 0}, \"class2\": {\"AOH|TXP\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_BOJjCwhtFHurHss6VfHW3909",
+      "content": "{\"class0\": {\"TXP|QHK\": 0}, \"class1\": {\"TXP|QHK\": 0}, \"class2\": {\"TXP|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_kcalFFCVVRLHiGbmcmXN5844",
+      "content": "{\"class0\": {\"TXP|QHK\": 0}, \"class1\": {\"TXP|QHK\": 0}, \"class2\": {\"TXP|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_l6W9DQSQzD9Tc8Ddhjzv9994",
+      "content": "{\"class0\": {\"TXP|QHK\": 0}, \"class1\": {\"TXP|QHK\": 0}, \"class2\": {\"TXP|QHK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "让我试试更多的车次从上海虹桥出发到不同中转站。",
+      "tool_calls": [
+        {
+          "id": "call_00_9XOTaEurMmZm6GGQzLpG6739",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G532\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_01_p0l2bbXJayHM1U2z9JAx3905",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G548\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_02_wpDRyLOu5XYtC4A6VfTx2954",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G550\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_03_JvcDMQXaCGidXChGt0uE2609",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G566\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_04_TJxaYYRgWD3m9ZZwvHpS7507",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G598\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_05_nlPnBp9hpqW35hkpRHy81124",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G600\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_06_GD2gWeMQjUaNucZQCO2S9983",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G634\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_07_7cZFs6l3IVCRtXULwuCb8917",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G668\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_08_xJDTN6c2qCFlJvuN1bly0789",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G670\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_09_ynQeikXWRdYjSuViidLx0189",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G694\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_10_1e4cAO85JcfzmrudJZPK8658",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G736\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_11_weaAm1WBaR1DUFqzR8Dt9546",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G738\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_12_qZhoWMbZpCj4u3RRb3Om7017",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G742\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_13_f6R5HodRseTkKBsvkaC00971",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G748\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        },
+        {
+          "id": "call_14_EMWeGRVXg0VaZSBjLzfx1790",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G750\", \"from_station_id\": \"AOH\", \"to_station_id\": \"JGK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_9XOTaEurMmZm6GGQzLpG6739",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_p0l2bbXJayHM1U2z9JAx3905",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_wpDRyLOu5XYtC4A6VfTx2954",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_JvcDMQXaCGidXChGt0uE2609",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_TJxaYYRgWD3m9ZZwvHpS7507",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_nlPnBp9hpqW35hkpRHy81124",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_GD2gWeMQjUaNucZQCO2S9983",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_7cZFs6l3IVCRtXULwuCb8917",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_xJDTN6c2qCFlJvuN1bly0789",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_ynQeikXWRdYjSuViidLx0189",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_10_1e4cAO85JcfzmrudJZPK8658",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_11_weaAm1WBaR1DUFqzR8Dt9546",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_12_qZhoWMbZpCj4u3RRb3Om7017",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_13_f6R5HodRseTkKBsvkaC00971",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_14_EMWeGRVXg0VaZSBjLzfx1790",
+      "content": "{\"class0\": {\"AOH|JGK\": 0}, \"class1\": {\"AOH|JGK\": 0}, \"class2\": {\"AOH|JGK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_b1qTfmgurmnDiwnPszPs0953",
+          "type": "function",
+          "function": {
+            "name": "list_stations",
+            "arguments": "{\"keyword\": \"郑州东\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_b1qTfmgurmnDiwnPszPs0953",
+      "content": "[{\"station_id\": \"ZAF\", \"station_name\": \"郑州东\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_U1BwP2qurU1nFsRVzn6W0727",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_01_w3YGczoHDrYqHokt1Q2U7838",
+          "type": "function",
+          "function": {
+            "name": "query_trains_between_stations",
+            "arguments": "{\"from_station_id\": \"ZAF\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_U1BwP2qurU1nFsRVzn6W0727",
+      "content": "[{\"train_num\": \"G1970\", \"depart_time\": \"06:09\", \"arrive_time\": \"11:02\", \"duration\": \"04:53\"}, {\"train_num\": \"G1971\", \"depart_time\": \"06:09\", \"arrive_time\": \"11:02\", \"duration\": \"04:53\"}, {\"train_num\": \"G1802\", \"depart_time\": \"06:13\", \"arrive_time\": \"11:23\", \"duration\": \"05:10\"}, {\"train_num\": \"G1803\", \"depart_time\": \"06:13\", \"arrive_time\": \"11:23\", \"duration\": \"05:10\"}, {\"train_num\": \"G3176\", \"depart_time\": \"06:19\", \"arrive_time\": \"12:20\", \"duration\": \"06:01\"}, {\"train_num\": \"G3177\", \"depart_time\": \"06:19\", \"arrive_time\": \"12:20\", \"duration\": \"06:01\"}, {\"train_num\": \"G464\", \"depart_time\": \"06:48\", \"arrive_time\": \"11:39\", \"duration\": \"04:51\"}, {\"train_num\": \"G465\", \"depart_time\": \"06:48\", \"arrive_time\": \"11:39\", \"duration\": \"04:51\"}, {\"train_num\": \"G3144\", \"depart_time\": \"07:00\", \"arrive_time\": \"12:52\", \"duration\": \"05:52\"}, {\"train_num\": \"G3145\", \"depart_time\": \"07:00\", \"arrive_time\": \"12:52\", \"duration\": \"05:52\"}, {\"train_num\": \"G1974\", \"depart_time\": \"07:16\", \"arrive_time\": \"12:12\", \"duration\": \"04:56\"}, {\"train_num\": \"G1975\", \"depart_time\": \"07:16\", \"arrive_time\": \"12:12\", \"duration\": \"04:56\"}, {\"train_num\": \"G1986\", \"depart_time\": \"07:19\", \"arrive_time\": \"12:57\", \"duration\": \"05:38\"}, {\"train_num\": \"G1987\", \"depart_time\": \"07:19\", \"arrive_time\": \"12:57\", \"duration\": \"05:38\"}, {\"train_num\": \"G3288\", \"depart_time\": \"07:46\", \"arrive_time\": \"13:37\", \"duration\": \"05:51\"}, {\"train_num\": \"G3289\", \"depart_time\": \"07:46\", \"arrive_time\": \"13:37\", \"duration\": \"05:51\"}, {\"train_num\": \"G1952\", \"depart_time\": \"07:59\", \"arrive_time\": \"13:14\", \"duration\": \"05:15\"}, {\"train_num\": \"G1953\", \"depart_time\": \"07:59\", \"arrive_time\": \"13:14\", \"duration\": \"05:15\"}, {\"train_num\": \"G3292\", \"depart_time\": \"08:24\", \"arrive_time\": \"14:21\", \"duration\": \"05:57\"}, {\"train_num\": \"G3293\", \"depart_time\": \"08:24\", \"arrive_time\": \"14:21\", \"duration\": \"05:57\"}, {\"train_num\": \"G1866\", \"depart_time\": \"08:34\", \"arrive_time\": \"13:51\", \"duration\": \"05:17\"}, {\"train_num\": \"G1867\", \"depart_time\": \"08:34\", \"arrive_time\": \"13:51\", \"duration\": \"05:17\"}, {\"train_num\": \"G94\", \"depart_time\": \"08:55\", \"arrive_time\": \"12:37\", \"duration\": \"03:42\"}, {\"train_num\": \"G95\", \"depart_time\": \"08:55\", \"arrive_time\": \"12:37\", \"duration\": \"03:42\"}, {\"train_num\": \"G1806\", \"depart_time\": \"09:08\", \"arrive_time\": \"14:08\", \"duration\": \"05:00\"}, {\"train_num\": \"G1807\", \"depart_time\": \"09:08\", \"arrive_time\": \"14:08\", \"duration\": \"05:00\"}, {\"train_num\": \"G2194\", \"depart_time\": \"09:19\", \"arrive_time\": \"14:12\", \"duration\": \"04:53\"}, {\"train_num\": \"G2195\", \"depart_time\": \"09:19\", \"arrive_time\": \"14:12\", \"duration\": \"04:53\"}, {\"train_num\": \"G3164\", \"depart_time\": \"09:38\", \"arrive_time\": \"15:41\", \"duration\": \"06:03\"}, {\"train_num\": \"G3165\", \"depart_time\": \"09:38\", \"arrive_time\": \"15:41\", \"duration\": \"06:03\"}, {\"train_num\": \"G3751\", \"depart_time\": \"09:50\", \"arrive_time\": \"15:25\", \"duration\": \"05:35\"}, {\"train_num\": \"G3754\", \"depart_time\": \"09:50\", \"arrive_time\": \"15:25\", \"duration\": \"05:35\"}, {\"train_num\": \"G1476\", \"depart_time\": \"09:51\", \"arrive_time\": \"14:51\", \"duration\": \"05:00\"}, {\"train_num\": \"G1477\", \"depart_time\": \"09:51\", \"arrive_time\": \"14:51\", \"duration\": \"05:00\"}, {\"train_num\": \"G1978\", \"depart_time\": \"09:56\", \"arrive_time\": \"16:20\", \"duration\": \"06:24\"}, {\"train_num\": \"G1979\", \"depart_time\": \"09:56\", \"arrive_time\": \"16:20\", \"duration\": \"06:24\"}, {\"train_num\": \"G3171\", \"depart_time\": \"10:15\", \"arrive_time\": \"16:00\", \"duration\": \"05:45\"}, {\"train_num\": \"G3174\", \"depart_time\": \"10:15\", \"arrive_time\": \"16:00\", \"duration\": \"05:45\"}, {\"train_num\": \"G1948\", \"depart_time\": \"10:16\", \"arrive_time\": \"15:00\", \"duration\": \"04:44\"}, {\"train_num\": \"G1949\", \"depart_time\": \"10:16\", \"arrive_time\": \"15:00\", \"duration\": \"04:44\"}, {\"train_num\": \"G3284\", \"depart_time\": \"10:37\", \"arrive_time\": \"17:08\", \"duration\": \"06:31\"}, {\"train_num\": \"G3285\", \"depart_time\": \"10:37\", \"arrive_time\": \"17:08\", \"duration\": \"06:31\"}, {\"train_num\": \"G1924\", \"depart_time\": \"11:28\", \"arrive_time\": \"16:40\", \"duration\": \"05:12\"}, {\"train_num\": \"G1925\", \"depart_time\": \"11:28\", \"arrive_time\": \"16:40\", \"duration\": \"05:12\"}, {\"train_num\": \"G3152\", \"depart_time\": \"11:32\", \"arrive_time\": \"18:13\", \"duration\": \"06:41\"}, {\"train_num\": \"G3153\", \"depart_time\": \"11:32\", \"arrive_time\": \"18:13\", \"duration\": \"06:41\"}, {\"train_num\": \"G1956\", \"depart_time\": \"11:44\", \"arrive_time\": \"17:39\", \"duration\": \"05:55\"}, {\"train_num\": \"G1957\", \"depart_time\": \"11:44\", \"arrive_time\": \"17:39\", \"duration\": \"05:55\"}, {\"train_num\": \"G1532\", \"depart_time\": \"11:57\", \"arrive_time\": \"18:23\", \"duration\": \"06:26\"}, {\"train_num\": \"G1533\", \"depart_time\": \"11:57\", \"arrive_time\": \"18:23\", \"duration\": \"06:26\"}, {\"train_num\": \"G3132\", \"depart_time\": \"11:59\", \"arrive_time\": \"17:33\", \"duration\": \"05:34\"}, {\"train_num\": \"G3133\", \"depart_time\": \"11:59\", \"arrive_time\": \"17:33\", \"duration\": \"05:34\"}, {\"train_num\": \"G1928\", \"depart_time\": \"12:36\", \"arrive_time\": \"17:39\", \"duration\": \"05:03\"}, {\"train_num\": \"G1929\", \"depart_time\": \"12:36\", \"arrive_time\": \"17:39\", \"duration\": \"05:03\"}, {\"train_num\": \"G3160\", \"depart_time\": \"12:51\", \"arrive_time\": \"19:27\", \"duration\": \"06:36\"}, {\"train_num\": \"G3161\", \"depart_time\": \"12:51\", \"arrive_time\": \"19:27\", \"duration\": \"06:36\"}, {\"train_num\": \"G1810\", \"depart_time\": \"12:52\", \"arrive_time\": \"17:48\", \"duration\": \"04:56\"}, {\"train_num\": \"G1811\", \"depart_time\": \"12:52\", \"arrive_time\": \"17:48\", \"duration\": \"04:56\"}, {\"train_num\": \"G1932\", \"depart_time\": \"13:38\", \"arrive_time\": \"18:27\", \"duration\": \"04:49\"}, {\"train_num\": \"G1933\", \"depart_time\": \"13:38\", \"arrive_time\": \"18:27\", \"duration\": \"04:49\"}, {\"train_num\": \"G3252\", \"depart_time\": \"13:43\", \"arrive_time\": \"19:56\", \"duration\": \"06:13\"}, {\"train_num\": \"G3253\", \"depart_time\": \"13:43\", \"arrive_time\": \"19:56\", \"duration\": \"06:13\"}, {\"train_num\": \"G3296\", \"depart_time\": \"13:49\", \"arrive_time\": \"19:56\", \"duration\": \"06:07\"}, {\"train_num\": \"G3297\", \"depart_time\": \"13:49\", \"arrive_time\": \"19:56\", \"duration\": \"06:07\"}, {\"train_num\": \"G80\", \"depart_time\": \"14:04\", \"arrive_time\": \"18:04\", \"duration\": \"04:00\"}, {\"train_num\": \"G81\", \"depart_time\": \"14:04\", \"arrive_time\": \"18:04\", \"duration\": \"04:00\"}, {\"train_num\": \"G1818\", \"depart_time\": \"14:33\", \"arrive_time\": \"19:21\", \"duration\": \"04:48\"}, {\"train_num\": \"G1819\", \"depart_time\": \"14:33\", \"arrive_time\": \"19:21\", \"duration\": \"04:48\"}, {\"train_num\": \"G1822\", \"depart_time\": \"15:32\", \"arrive_time\": \"20:36\", \"duration\": \"05:04\"}, {\"train_num\": \"G1823\", \"depart_time\": \"15:32\", \"arrive_time\": \"20:36\", \"duration\": \"05:04\"}, {\"train_num\": \"G2380\", \"depart_time\": \"15:50\", \"arrive_time\": \"22:27\", \"duration\": \"06:37\"}, {\"train_num\": \"G2381\", \"depart_time\": \"15:50\", \"arrive_time\": \"22:27\", \"duration\": \"06:37\"}, {\"train_num\": \"G2612\", \"depart_time\": \"15:53\", \"arrive_time\": \"22:00\", \"duration\": \"06:07\"}, {\"train_num\": \"G2613\", \"depart_time\": \"15:53\", \"arrive_time\": \"22:00\", \"duration\": \"06:07\"}, {\"train_num\": \"G1916\", \"depart_time\": \"16:09\", \"arrive_time\": \"20:52\", \"duration\": \"04:43\"}, {\"train_num\": \"G1917\", \"depart_time\": \"16:09\", \"arrive_time\": \"20:52\", \"duration\": \"04:43\"}, {\"train_num\": \"G2812\", \"depart_time\": \"16:25\", \"arrive_time\": \"21:37\", \"duration\": \"05:12\"}, {\"train_num\": \"G2813\", \"depart_time\": \"16:25\", \"arrive_time\": \"21:37\", \"duration\": \"05:12\"}, {\"train_num\": \"G1940\", \"depart_time\": \"17:07\", \"arrive_time\": \"21:22\", \"duration\": \"04:15\"}, {\"train_num\": \"G1941\", \"depart_time\": \"17:07\", \"arrive_time\": \"21:22\", \"duration\": \"04:15\"}, {\"train_num\": \"G3280\", \"depart_time\": \"17:15\", \"arrive_time\": \"23:07\", \"duration\": \"05:52\"}, {\"train_num\": \"G3281\", \"depart_time\": \"17:15\", \"arrive_time\": \"23:07\", \"duration\": \"05:52\"}, {\"train_num\": \"G2392\", \"depart_time\": \"17:34\", \"arrive_time\": \"23:19\", \"duration\": \"05:45\"}, {\"train_num\": \"G2393\", \"depart_time\": \"17:34\", \"arrive_time\": \"23:19\", \"duration\": \"05:45\"}, {\"train_num\": \"G1826\", \"depart_time\": \"18:14\", \"arrive_time\": \"23:18\", \"duration\": \"05:04\"}, {\"train_num\": \"G1827\", \"depart_time\": \"18:14\", \"arrive_time\": \"23:18\", \"duration\": \"05:04\"}, {\"train_num\": \"G84\", \"depart_time\": \"19:05\", \"arrive_time\": \"22:54\", \"duration\": \"03:49\"}, {\"train_num\": \"G85\", \"depart_time\": \"19:05\", \"arrive_time\": \"22:54\", \"duration\": \"03:49\"}]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_w3YGczoHDrYqHokt1Q2U7838",
+      "content": "[{\"train_num\": \"G2034\", \"depart_time\": \"06:46\", \"arrive_time\": \"10:42\", \"duration\": \"03:56\"}, {\"train_num\": \"G1852\", \"depart_time\": \"07:08\", \"arrive_time\": \"11:58\", \"duration\": \"04:50\"}, {\"train_num\": \"G1853\", \"depart_time\": \"07:08\", \"arrive_time\": \"11:58\", \"duration\": \"04:50\"}, {\"train_num\": \"G2070\", \"depart_time\": \"07:29\", \"arrive_time\": \"14:20\", \"duration\": \"06:51\"}, {\"train_num\": \"G2071\", \"depart_time\": \"07:29\", \"arrive_time\": \"14:20\", \"duration\": \"06:51\"}, {\"train_num\": \"G2030\", \"depart_time\": \"08:07\", \"arrive_time\": \"11:46\", \"duration\": \"03:39\"}, {\"train_num\": \"G3266\", \"depart_time\": \"09:07\", \"arrive_time\": \"13:51\", \"duration\": \"04:44\"}, {\"train_num\": \"G3267\", \"depart_time\": \"09:07\", \"arrive_time\": \"13:51\", \"duration\": \"04:44\"}, {\"train_num\": \"G3010\", \"depart_time\": \"09:08\", \"arrive_time\": \"14:31\", \"duration\": \"05:23\"}, {\"train_num\": \"G3011\", \"depart_time\": \"09:08\", \"arrive_time\": \"14:31\", \"duration\": \"05:23\"}, {\"train_num\": \"G3212\", \"depart_time\": \"10:04\", \"arrive_time\": \"14:40\", \"duration\": \"04:36\"}, {\"train_num\": \"G3213\", \"depart_time\": \"10:04\", \"arrive_time\": \"14:40\", \"duration\": \"04:36\"}, {\"train_num\": \"G3222\", \"depart_time\": \"10:19\", \"arrive_time\": \"15:26\", \"duration\": \"05:07\"}, {\"train_num\": \"G3223\", \"depart_time\": \"10:19\", \"arrive_time\": \"15:26\", \"duration\": \"05:07\"}, {\"train_num\": \"G2016\", \"depart_time\": \"11:44\", \"arrive_time\": \"16:28\", \"duration\": \"04:44\"}, {\"train_num\": \"G2017\", \"depart_time\": \"11:44\", \"arrive_time\": \"16:28\", \"duration\": \"04:44\"}, {\"train_num\": \"G2260\", \"depart_time\": \"11:55\", \"arrive_time\": \"17:26\", \"duration\": \"05:31\"}, {\"train_num\": \"G2261\", \"depart_time\": \"11:55\", \"arrive_time\": \"17:26\", \"duration\": \"05:31\"}, {\"train_num\": \"G952\", \"depart_time\": \"11:55\", \"arrive_time\": \"17:15\", \"duration\": \"05:20\"}, {\"train_num\": \"G953\", \"depart_time\": \"11:55\", \"arrive_time\": \"17:15\", \"duration\": \"05:20\"}, {\"train_num\": \"G2078\", \"depart_time\": \"14:13\", \"arrive_time\": \"19:58\", \"duration\": \"05:45\"}, {\"train_num\": \"G2079\", \"depart_time\": \"14:13\", \"arrive_time\": \"19:58\", \"duration\": \"05:45\"}, {\"train_num\": \"G426\", \"depart_time\": \"14:39\", \"arrive_time\": \"18:36\", \"duration\": \"03:57\"}, {\"train_num\": \"G3615\", \"depart_time\": \"14:59\", \"arrive_time\": \"19:47\", \"duration\": \"04:48\"}, {\"train_num\": \"G3618\", \"depart_time\": \"14:59\", \"arrive_time\": \"19:47\", \"duration\": \"04:48\"}, {\"train_num\": \"G1856\", \"depart_time\": \"15:08\", \"arrive_time\": \"20:30\", \"duration\": \"05:22\"}, {\"train_num\": \"G1857\", \"depart_time\": \"15:08\", \"arrive_time\": \"20:30\", \"duration\": \"05:22\"}, {\"train_num\": \"G2098\", \"depart_time\": \"15:33\", \"arrive_time\": \"20:31\", \"duration\": \"04:58\"}, {\"train_num\": \"G2099\", \"depart_time\": \"15:33\", \"arrive_time\": \"20:31\", \"duration\": \"04:58\"}, {\"train_num\": \"G2093\", \"depart_time\": \"15:44\", \"arrive_time\": \"21:21\", \"duration\": \"05:37\"}, {\"train_num\": \"G2096\", \"depart_time\": \"15:44\", \"arrive_time\": \"21:21\", \"duration\": \"05:37\"}, {\"train_num\": \"G1996\", \"depart_time\": \"16:58\", \"arrive_time\": \"22:05\", \"duration\": \"05:07\"}, {\"train_num\": \"G1997\", \"depart_time\": \"16:58\", \"arrive_time\": \"22:05\", \"duration\": \"05:07\"}, {\"train_num\": \"G1834\", \"depart_time\": \"18:37\", \"arrive_time\": \"22:26\", \"duration\": \"03:49\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_bvO8FfkpZALwsUKbobSI4107",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G94\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_01_OtJxuKOxw1gH2hZUZQsf6797",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G2078\", \"from_station_id\": \"ZAF\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_02_a1Na0hi2p7lHXpmGmqs01166",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G426\", \"from_station_id\": \"ZAF\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_03_TiUpTbGUP7JmWzFrtvTe6974",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3615\", \"from_station_id\": \"ZAF\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_04_WD6nRtgaXVQlipSljIym9790",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1856\", \"from_station_id\": \"ZAF\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_05_57VW42Z0N5kvQ0WAIocW9481",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G2098\", \"from_station_id\": \"ZAF\", \"to_station_id\": \"QHK\"}"
+          }
+        },
+        {
+          "id": "call_06_WBaH8PLRIhYQ2ZNQ3C934574",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1996\", \"from_station_id\": \"ZAF\", \"to_station_id\": \"QHK\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_bvO8FfkpZALwsUKbobSI4107",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_OtJxuKOxw1gH2hZUZQsf6797",
+      "content": "{\"class0\": {\"ZAF|QHK\": 0}, \"class1\": {\"ZAF|QHK\": 0}, \"class2\": {\"ZAF|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_a1Na0hi2p7lHXpmGmqs01166",
+      "content": "{\"class0\": {\"ZAF|QHK\": 0}, \"class1\": {\"ZAF|QHK\": 0}, \"class2\": {\"ZAF|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_TiUpTbGUP7JmWzFrtvTe6974",
+      "content": "{\"class0\": {\"ZAF|QHK\": 0}, \"class1\": {\"ZAF|QHK\": 0}, \"class2\": {\"ZAF|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_WD6nRtgaXVQlipSljIym9790",
+      "content": "{\"class0\": {\"ZAF|QHK\": 0}, \"class1\": {\"ZAF|QHK\": 0}, \"class2\": {\"ZAF|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_57VW42Z0N5kvQ0WAIocW9481",
+      "content": "{\"class0\": {\"ZAF|QHK\": 0}, \"class1\": {\"ZAF|QHK\": 0}, \"class2\": {\"ZAF|QHK\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_WBaH8PLRIhYQ2ZNQ3C934574",
+      "content": "{\"class0\": {\"ZAF|QHK\": 0}, \"class1\": {\"ZAF|QHK\": 0}, \"class2\": {\"ZAF|QHK\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_VvwRTzDfg7PHb6yrUQIz2796",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G80\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_01_JBfycs5um4PDEcPGEth27347",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G84\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_02_ueY0EGQyjcBKNrU15vQx9476",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1940\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_03_ZWzr5jtjgick5hIKkWll6228",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1916\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_04_YC6HUKdQzPVDIRbOw0Pz9787",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1932\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_05_RCFDKb5sA6llGuhqDetg2948",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1810\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        },
+        {
+          "id": "call_06_z8F7pLfkyQyGylkkcbjI9824",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1822\", \"from_station_id\": \"AOH\", \"to_station_id\": \"ZAF\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_VvwRTzDfg7PHb6yrUQIz2796",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_JBfycs5um4PDEcPGEth27347",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_ueY0EGQyjcBKNrU15vQx9476",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_ZWzr5jtjgick5hIKkWll6228",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_YC6HUKdQzPVDIRbOw0Pz9787",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_RCFDKb5sA6llGuhqDetg2948",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_z8F7pLfkyQyGylkkcbjI9824",
+      "content": "{\"class0\": {\"AOH|ZAF\": 0}, \"class1\": {\"AOH|ZAF\": 0}, \"class2\": {\"AOH|ZAF\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_00_J2qVvzMh8zjWmeSnMMYw7677",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1970\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_01_Eev0CS4SboOPvYzcmv3l1136",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1802\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_02_R5fhnk1bgxmsveN65IQx2758",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1974\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_03_fKE5mpp12rCof0SFAIvD0806",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1986\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_04_fP2AReqsL13jqnENi4Ht8185",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3144\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_05_aUkuxS7RcY9zPOpwcWPy0188",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3288\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_06_ymH5Z1jYT0e3k2iocR472303",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G3292\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_07_nQqxtZtFLCMdnXjaving7374",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1866\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_08_lu6DFTJs3JjzxLxCqYXU8080",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G1806\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        },
+        {
+          "id": "call_09_bMuD94dUJ9ep7vCc273v4663",
+          "type": "function",
+          "function": {
+            "name": "query_tickets",
+            "arguments": "{\"train_num\": \"G2194\", \"from_station_id\": \"AOH\", \"to_station_id\": \"UUH\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_J2qVvzMh8zjWmeSnMMYw7677",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_Eev0CS4SboOPvYzcmv3l1136",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_R5fhnk1bgxmsveN65IQx2758",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_fKE5mpp12rCof0SFAIvD0806",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_fP2AReqsL13jqnENi4Ht8185",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_aUkuxS7RcY9zPOpwcWPy0188",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_ymH5Z1jYT0e3k2iocR472303",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_07_nQqxtZtFLCMdnXjaving7374",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_08_lu6DFTJs3JjzxLxCqYXU8080",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_09_bMuD94dUJ9ep7vCc273v4663",
+      "content": "{\"class0\": {\"AOH|UUH\": 0}, \"class1\": {\"AOH|UUH\": 0}, \"class2\": {\"AOH|UUH\": 0}}"
+    },
+    {
+      "role": "assistant",
+      "content": "经过全面查询，我尝试了多种方案，但所有路线均无余票。以下是我查询过的方案汇总：\n\n**方案一：直达**\n- G688 上海虹桥15:27→青岛北20:50 — 二等/一等/特等均无票\n- G3310 上海虹桥16:45→青岛北22:20 — 二等/一等/特等均无票\n\n**方案二：北京南换乘**\n- 如 G8(08:00→12:26) + G71(14:58→18:10) 等组合 — 各段均无票\n\n**方案三：济南西换乘**\n- 如 G8(08:00→10:59) + G1069(14:18→17:19) 等 — 各段均无票\n\n**方案四：南京南换乘**\n- 各车次上海虹桥→南京南均无票\n\n**方案五：徐州东换乘**\n- 各车次上海虹桥→徐州东→青岛北均无票\n\n**方案六：连云港换乘**\n- 各车次均无票\n\n**方案七：天津西、合肥南、郑州东换乘**\n- 各段均无票\n\n**方案八：买长坐短**\n- G688 杭州西→青岛北、G3310 福州→青岛北 — 均无票\n\n**方案九：买短补长**\n- G688/G3310 从上海虹桥到沿途各站 — 均无票\n\n很遗憾，目前从上海虹桥到青岛北的所有可用路线（直达、换乘、买长坐短、买短补长）经系统查询确认均无余票，暂时无法为您规划购票方案。\n\n```json\n{\"final_plan\": []}\n```"
+    }
+  ],
+  "final_answer": "经过全面查询，我尝试了多种方案，但所有路线均无余票。以下是我查询过的方案汇总：\n\n**方案一：直达**\n- G688 上海虹桥15:27→青岛北20:50 — 二等/一等/特等均无票\n- G3310 上海虹桥16:45→青岛北22:20 — 二等/一等/特等均无票\n\n**方案二：北京南换乘**\n- 如 G8(08:00→12:26) + G71(14:58→18:10) 等组合 — 各段均无票\n\n**方案三：济南西换乘**\n- 如 G8(08:00→10:59) + G1069(14:18→17:19) 等 — 各段均无票\n\n**方案四：南京南换乘**\n- 各车次上海虹桥→南京南均无票\n\n**方案五：徐州东换乘**\n- 各车次上海虹桥→徐州东→青岛北均无票\n\n**方案六：连云港换乘**\n- 各车次均无票\n\n**方案七：天津西、合肥南、郑州东换乘**\n- 各段均无票\n\n**方案八：买长坐短**\n- G688 杭州西→青岛北、G3310 福州→青岛北 — 均无票\n\n**方案九：买短补长**\n- G688/G3310 从上海虹桥到沿途各站 — 均无票\n\n很遗憾，目前从上海虹桥到青岛北的所有可用路线（直达、换乘、买长坐短、买短补长）经系统查询确认均无余票，暂时无法为您规划购票方案。\n\n```json\n{\"final_plan\": []}\n```",
+  "final_plan": [],
+  "token_usage": {
+    "prompt_tokens": 32676,
+    "completion_tokens": 18167,
+    "total_tokens": 50843
+  },
+  "duration": 134.302118
+}

@@ -1,0 +1,697 @@
+{
+  "1": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G3502"
+    ]
+  },
+  "2": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G815"
+    ]
+  },
+  "3": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G819"
+    ]
+  },
+  "4": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G321"
+    ]
+  },
+  "5": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G651"
+    ]
+  },
+  "6": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G301"
+    ]
+  },
+  "7": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G3310"
+    ]
+  },
+  "8": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G381"
+    ]
+  },
+  "9": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G2058"
+    ]
+  },
+  "10": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G3486"
+    ]
+  },
+  "12": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G1704"
+    ]
+  },
+  "11": {
+    "status": "completed",
+    "train_count": 1,
+    "trains": [
+      "G3463"
+    ]
+  },
+  "18": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G1071",
+      "G2551"
+    ]
+  },
+  "20": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G2551",
+      "G2631"
+    ]
+  },
+  "21": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G1554",
+      "G550"
+    ]
+  },
+  "22": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G550",
+      "G949"
+    ]
+  },
+  "23": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G2551",
+      "G2631"
+    ]
+  },
+  "24": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G550",
+      "G6977"
+    ]
+  },
+  "25": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G550",
+      "G949"
+    ]
+  },
+  "26": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G550",
+      "G949"
+    ]
+  },
+  "27": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G3618",
+      "G550"
+    ]
+  },
+  "28": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G3618",
+      "G550"
+    ]
+  },
+  "29": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G1207",
+      "G550"
+    ]
+  },
+  "30": {
+    "status": "completed",
+    "train_count": 2,
+    "trains": [
+      "G3223",
+      "G550"
+    ]
+  },
+  "a1": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "transfer",
+    "answer": "乘坐 G2812 从 苏州北 到 安阳东（有票），换乘 G979 从 安阳东 到 昆明南（有票）",
+    "question": "苏州北到昆明南",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G2812",
+      "G979"
+    ]
+  },
+  "a2": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "transfer",
+    "answer": "乘坐 G3387 从 泰安 到 宿迁（有票），换乘 G8265 从 宿迁 到 上海（有票）",
+    "question": "泰安到上海",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G3387",
+      "G8265"
+    ]
+  },
+  "a3": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "transfer",
+    "answer": "乘坐 G977 从 泰安 到 潍坊（有票），换乘 G2080 从 潍坊 到 广州南（有票）",
+    "question": "泰安到广州南",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G2080",
+      "G977"
+    ]
+  },
+  "a4": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "transfer",
+    "answer": "乘坐 G6296 从 天津西 到 白洋淀（有票），换乘 G903 从 白洋淀 到 广州南（有票）",
+    "question": "天津西到广州南",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G6296",
+      "G903"
+    ]
+  },
+  "a5": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "transfer",
+    "answer": "乘坐 G3492 从 哈尔滨西 到 绥中北（有票），换乘 G1257 从 绥中北 到 宿迁（有票）",
+    "question": "哈尔滨西到宿迁",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G1257",
+      "G3492"
+    ]
+  },
+  "a6": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "short_buy",
+    "answer": "乘坐 G985 从 潍坊 到 青州市（有票），补票段 青州市→上海虹桥 无余票需上车补票",
+    "question": "潍坊到上海虹桥",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G985"
+    ]
+  },
+  "a7": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "short_buy",
+    "answer": "乘坐 G3828 从 孝感东 到 汉口（有票），补票段 汉口→上海虹桥 无余票需上车补票",
+    "question": "孝感东到上海虹桥",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G3828"
+    ]
+  },
+  "a8": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "short_buy",
+    "answer": "乘坐 G337 从 北京西 到 石家庄（有票），补票段 石家庄→武汉 无余票需上车补票",
+    "question": "北京西到武汉",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G337"
+    ]
+  },
+  "a9": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "short_buy",
+    "answer": "乘坐 G1233 从 济南西 到 山海关（有票），补票段 山海关→吉林 无余票需上车补票",
+    "question": "济南西到吉林",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G1233"
+    ]
+  },
+  "a10": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "short_buy",
+    "answer": "乘坐 G1025 从 北京西 到 新乡东（有票），补票段 新乡东→长沙南 无余票需上车补票",
+    "question": "北京西到长沙南",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G1025"
+    ]
+  },
+  "a11": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_front",
+    "answer": "乘坐 G1846 从 威海南海 到 徐州东 有票（前额外），可在 潍坊 站上车，实际乘坐 潍坊→徐州东",
+    "question": "潍坊到徐州东",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G1846"
+    ]
+  },
+  "a12": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_front",
+    "answer": "乘坐 G1997 从 汉川 到 徐州东 有票（前额外），可在 汉口 站上车，实际乘坐 汉口→徐州东",
+    "question": "汉口到徐州东",
+    "interference": false,
+    "interference_density": 0.08,
+    "segment_plans": [],
+    "trains": [
+      "G1997"
+    ]
+  },
+  "a13": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_front",
+    "answer": "乘坐 G2087 从 邹平 到 成都东 有票（前额外），可在 济南东 站上车，实际乘坐 济南东→成都东",
+    "question": "济南东到成都东",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G2087"
+    ]
+  },
+  "a14": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_front",
+    "answer": "乘坐 G2239 从 璧山 到 桂林西 有票（前额外），可在 遵义 站上车，实际乘坐 遵义→桂林西",
+    "question": "遵义到桂林西",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G2239"
+    ]
+  },
+  "a15": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_front",
+    "answer": "乘坐 G1884 从 渭南北 到 合肥南 有票（前额外），可在 郑州东 站上车，实际乘坐 郑州东→合肥南",
+    "question": "郑州东到合肥南",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G1884"
+    ]
+  },
+  "a16": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_rear",
+    "answer": "乘坐 G1965 从 淮南南 到 湖州 有票（后额外），在 芜湖 站提前下车，实际乘坐 淮南南→芜湖",
+    "question": "淮南南到芜湖",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G1965"
+    ]
+  },
+  "a17": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_rear",
+    "answer": "乘坐 G5026 从 南昌东 到 婺源 有票（后额外），在 景德镇北 站提前下车，实际乘坐 南昌东→景德镇北",
+    "question": "南昌东到景德镇北",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G5026"
+    ]
+  },
+  "a18": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_rear",
+    "answer": "乘坐 G3326 从 马鞍山东 到 黟县东 有票（后额外），在 黄山北 站提前下车，实际乘坐 马鞍山东→黄山北",
+    "question": "马鞍山东到黄山北",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G3326"
+    ]
+  },
+  "a19": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_rear",
+    "answer": "乘坐 G1527 从 北京南 到 滕州东 有票（后额外），在 德州东 站提前下车，实际乘坐 北京南→德州东",
+    "question": "北京南到德州东",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G1527"
+    ]
+  },
+  "a20": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "extra_rear",
+    "answer": "乘坐 G1389 从 北京 到 秦皇岛 有票（后额外），在 唐山西 站提前下车，实际乘坐 北京→唐山西",
+    "question": "北京到唐山西",
+    "interference": false,
+    "segment_plans": [],
+    "trains": [
+      "G1389"
+    ]
+  },
+  "a21": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G885 从 北京南 到 杭州东（有票），然后 乘坐 G1335 从 杭州东 到 金山北（有票），补票段 金山北→上海虹桥 无余票需上车补票",
+    "question": "北京南到上海虹桥",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "short_buy"
+    ],
+    "trains": [
+      "G1335",
+      "G885"
+    ]
+  },
+  "a22": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G65 从 北京南 到 徐州东（有票），然后 乘坐 G1817 从 徐州东 到 南京南（有票），补票段 南京南→上海虹桥 无余票需上车补票",
+    "question": "北京南到上海虹桥",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "short_buy"
+    ],
+    "trains": [
+      "G1817",
+      "G65"
+    ]
+  },
+  "a23": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G202 从 昆明南 到 南昌西（有票），然后 乘坐 G265 从 南昌西 到 金华（有票），补票段 金华→杭州南 无余票需上车补票",
+    "question": "昆明南到杭州南",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "short_buy"
+    ],
+    "trains": [
+      "G202",
+      "G265"
+    ]
+  },
+  "a24": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G1378 从 昆明南 到 诸暨（有票），然后 乘坐 G7336 从 武义北 到 杭州南 有票（前额外），可在 诸暨 站上车，实际乘坐 诸暨→杭州南",
+    "question": "昆明南到杭州南",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "extra_front"
+    ],
+    "trains": [
+      "G1378",
+      "G7336"
+    ]
+  },
+  "a25": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G1765 从 上海虹桥 到 镇江南（有票），然后 乘坐 G586 从 苏州北 到 武汉 有票（前额外），可在 镇江南 站上车，实际乘坐 镇江南→武汉",
+    "question": "上海虹桥到武汉",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "extra_front"
+    ],
+    "trains": [
+      "G1765",
+      "G586"
+    ]
+  },
+  "a26": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G1055 从 北京南 到 德州东（有票），然后 乘坐 G1079 从 北京南 到 青岛 有票（前额外），可在 德州东 站上车，实际乘坐 德州东→青岛",
+    "question": "北京南到青岛",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "extra_front"
+    ],
+    "trains": [
+      "G1055",
+      "G1079"
+    ]
+  },
+  "a27": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G657 从 北京南 到 南京南（有票），然后 乘坐 G3007 从 南京南 到 青岛 有票（后额外），在 潍坊 站提前下车，实际乘坐 南京南→潍坊",
+    "question": "北京南到潍坊",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "extra_rear"
+    ],
+    "trains": [
+      "G3007",
+      "G657"
+    ]
+  },
+  "a28": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G1045 从 北京南 到 长清（有票），然后 乘坐 G2016 从 长清 到 青岛北 有票（后额外），在 潍坊 站提前下车，实际乘坐 长清→潍坊",
+    "question": "北京南到潍坊",
+    "interference": false,
+    "segment_plans": [
+      "direct",
+      "extra_rear"
+    ],
+    "trains": [
+      "G1045",
+      "G2016"
+    ]
+  },
+  "a29": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G1051 从 长沙南 到 广州南 有票（后额外），在 衡阳东 站提前下车，实际乘坐 长沙南→衡阳东，然后 乘坐 G6115 从 衡阳东 到 湛江北（有票）",
+    "question": "长沙南到湛江北",
+    "interference": false,
+    "segment_plans": [
+      "extra_rear",
+      "direct"
+    ],
+    "trains": [
+      "G1051",
+      "G6115"
+    ]
+  },
+  "a30": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G1079 从 北京南 到 济南西（有票），补票段 济南西→淄博 无余票需上车补票，然后 乘坐 G988 从 淄博 到 泰安（有票），补票段 泰安→上海虹桥 无余票需上车补票",
+    "question": "北京南到上海虹桥",
+    "interference": false,
+    "segment_plans": [
+      "short_buy",
+      "short_buy"
+    ],
+    "trains": [
+      "G1079",
+      "G988"
+    ]
+  },
+  "a31": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G2585 从 北京南 到 徐州东（有票），补票段 徐州东→蚌埠南 无余票需上车补票，然后 乘坐 G1947 从 商丘 到 上海虹桥 有票（前额外），可在 蚌埠南 站上车，实际乘坐 蚌埠南→上海虹桥",
+    "question": "北京南到上海虹桥",
+    "interference": false,
+    "segment_plans": [
+      "short_buy",
+      "extra_front"
+    ],
+    "trains": [
+      "G1947",
+      "G2585"
+    ]
+  },
+  "a33": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G2580 从 济南西 到 天津南 有票（前额外），可在 德州东 站上车，实际乘坐 德州东→天津南，然后 乘坐 G3483 从 唐山 到 郑州东 有票（前额外），可在 天津南 站上车，实际乘坐 天津南→郑州东",
+    "question": "德州东到郑州东",
+    "interference": false,
+    "segment_plans": [
+      "extra_front",
+      "extra_front"
+    ],
+    "trains": [
+      "G2580",
+      "G3483"
+    ]
+  },
+  "a34": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G2644 从 滦河 到 曲阜东 有票（前额外），可在 天津西 站上车，实际乘坐 天津西→曲阜东，然后 乘坐 G1501 从 曲阜东 到 绍兴北 有票（后额外），在 杭州东 站提前下车，实际乘坐 曲阜东→杭州东",
+    "question": "天津西到杭州东",
+    "interference": false,
+    "segment_plans": [
+      "extra_front",
+      "extra_rear"
+    ],
+    "trains": [
+      "G1501",
+      "G2644"
+    ]
+  },
+  "a35": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "type": "mixed",
+    "answer": "乘坐 G2628 从 天津西 到 安阳东 有票（后额外），在 石家庄 站提前下车，实际乘坐 天津西→石家庄，然后 乘坐 G2810 从 石家庄 到 宁波 有票（后额外），在 杭州东 站提前下车，实际乘坐 石家庄→杭州东",
+    "question": "天津西到杭州东",
+    "interference": false,
+    "segment_plans": [
+      "extra_rear",
+      "extra_rear"
+    ],
+    "trains": [
+      "G2628",
+      "G2810"
+    ]
+  }
+}

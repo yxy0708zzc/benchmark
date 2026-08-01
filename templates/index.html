@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Benchmark - 高铁购票测试</title>
+  <link rel="stylesheet" href="/static/styles.css?v=17">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/static/api.js?v=27"></script>
+  <script src="/static/components.js?v=27"></script>
+  <script src="/static/app.js?v=27"></script>
+</head>
+<body>
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="topbar-logo">
+      Benchmark
+      <span class="badge">高铁购票测试</span>
+    </div>
+    <div class="topbar-right">
+      <div class="topbar-status">
+        <span><span class="status-dot"></span> 模型: <strong class="test-model-status">● 未连接</strong></span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="App._showApiKeyModal()" title="API Key 设置">
+        <i data-lucide="settings" style="width:16px;height:16px"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- 导航栏 -->
+  <nav class="navbar">
+    <a href="javascript:void(0)" class="nav-item active" data-page="test" onclick="App._switchToPage('test')">测试</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="manual-question" onclick="App._switchToPage('manual-question')">出题</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="edit-question" onclick="App._switchToPage('edit-question')">改题</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="auto-question" onclick="App._switchToPage('auto-question')">存在性问题出题</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="selective-question" onclick="App._switchToPage('selective-question')">选择性问题出题</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="question-manager" onclick="App._switchToPage('question-manager')">题目管理</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="eval" onclick="App._switchToPage('eval')">测评</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="stats" onclick="App._switchToPage('stats')">统计</a>
+  </nav>
+
+  <!-- 测试页 -->
+  <div id="page-test" class="page-section active" style="display:flex;gap:24px;padding:var(--spacing-lg);height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <!-- 左栏：题目列表 -->
+    <div class="sidebar">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">📋 题目列表</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+          <div style="display:flex;gap:6px">
+            <select class="select" id="q-filter-source" style="flex:1;font-size:12px">
+              <option value="">全部来源</option>
+              <option value="auto">auto</option>
+              <option value="manual">manual</option>
+            </select>
+            <select class="select" id="q-filter-type" style="flex:1;font-size:12px">
+              <option value="">全部题型</option>
+              <option value="direct">直达</option>
+              <option value="transfer">换乘</option>
+              <option value="short_buy">买短补长</option>
+              <option value="extra_front">额外(前)</option>
+              <option value="extra_rear">额外(后)</option>
+              <option value="mixed">混合</option>
+            </select>
+          </div>
+          <input class="input" id="q-filter-keyword" placeholder="搜索题名..." style="font-size:12px">
+        </div>
+        <div id="question-list" style="max-height:300px;overflow-y:auto"></div>
+        <div style="margin-top:12px">
+          <button class="btn btn-primary btn-sm" id="btn-load-question" style="width:100%">加载选中题目</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">模型信息</div>
+        <div style="font-size:var(--font-size-small)">
+          <div>模型: <span class="test-model-status">● 未连接</span></div>
+          <div style="margin-top:8px">当前题目: <strong id="current-question">未选择</strong></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">会话控制</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:6px;font-size:var(--font-size-small)">
+            <label style="white-space:nowrap">最大工具调用:</label>
+            <input class="input" id="max-iterations" type="number" value="100" min="1" max="200" style="width:70px">
+            <span style="color:var(--gray-4)">次</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-reset">🔄 重置对话</button>
+          <button class="btn btn-success btn-sm" id="btn-complete">✅ 测试完成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右栏：对话区域 -->
+    <div class="flex-1" style="display:flex;flex-direction:column">
+      <div class="card flex-1" style="display:flex;flex-direction:column;min-height:0">
+        <div class="card-header">💬 对话</div>
+        <div id="chat-messages" style="padding:8px 0"></div>
+        <div style="display:flex;gap:8px;border-top:1px solid var(--gray-2);padding-top:12px;margin-top:12px;flex-shrink:0">
+          <input class="input chat-input" id="chat-input" placeholder="输入购票需求，如：从北京南到上海虹桥，二等座，2张" style="flex:1">
+          <button class="btn btn-primary" id="btn-send">发送</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 手动出题页 -->
+  <div id="page-manual-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <!-- 左栏：控制面板 -->
+    <div class="sidebar">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">📝 题目信息</div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
+          <div>当前题目: <strong id="current-question">-</strong></div>
+          <div>当前车次: <strong id="current-train">-</strong></div>
+          <div>
+            <label>题目编号:</label>
+            <input class="input" id="question-id-input" placeholder="请输入题号" style="margin-top:4px">
+          </div>
+          <div>
+            <label>座位类型:</label>
+            <select class="select" id="seat-type-select" style="margin-top:4px">
+              <option value="class2">二等座 (class2)</option>
+              <option value="class1">一等座 (class1)</option>
+              <option value="class0">特等座 (class0)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">🚄 车次选择</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input class="input" id="train-input" placeholder="输入车次号，如 G1">
+          <button class="btn btn-primary btn-sm" id="btn-load-train">加载车次</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">已填车次</div>
+        <div id="filled-trains" style="max-height:200px;overflow-y:auto;font-size:var(--font-size-small)">
+          <div style="color:var(--gray-4)">请先加载车次</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">操作</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-secondary btn-sm" id="btn-random-fill">🎲 随机填充当前车次</button>
+          <button class="btn btn-success btn-sm" id="btn-save">💾 保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右栏：矩阵编辑区域 -->
+    <div class="flex-1">
+      <div class="card">
+        <div class="card-header">半矩阵编辑（右上三角可编辑，数字 0-30）</div>
+        <div id="matrix-container" style="overflow-x:auto;padding:12px 0">
+          <div style="text-align:center;color:var(--gray-4);padding:40px">请先输入车次号并点击"加载车次"</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;font-size:var(--font-size-small);color:var(--gray-4)">
+          <span>💡 修改格子后立即保存到数据库</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 改题页 -->
+  <div id="page-edit-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <!-- 左栏 -->
+    <div class="sidebar">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">📂 选择题目</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <select class="select" id="edit-question-select">
+            <option value="">-- 选择题目 --</option>
+          </select>
+          <button class="btn btn-primary btn-sm" id="edit-btn-load-question">加载题目</button>
+        </div>
+        <div style="margin-top:12px;font-size:var(--font-size-small)">
+          <div>当前题目: <strong id="edit-current-question">-</strong></div>
+          <div>当前车次: <strong id="edit-current-train">-</strong></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">🚄 车次选择</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <input class="input" id="edit-train-input" placeholder="输入车次号，如 G1">
+          <button class="btn btn-secondary btn-sm" id="edit-btn-load-train">加载车次</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">座位类型</div>
+        <select class="select" id="edit-seat-type-select">
+          <option value="class2">二等座 (class2)</option>
+          <option value="class1">一等座 (class1)</option>
+          <option value="class0">特等座 (class0)</option>
+        </select>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">已填车次</div>
+        <div id="edit-filled-trains" style="max-height:200px;overflow-y:auto;font-size:var(--font-size-small)">
+          <div style="color:var(--gray-4)">请先加载车次</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">操作</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-secondary btn-sm" id="edit-btn-random-fill">🎲 随机填充当前车次</button>
+          <button class="btn btn-success btn-sm" id="edit-btn-save">💾 标记完成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右栏 -->
+    <div class="flex-1">
+      <div class="card">
+        <div class="card-header">半矩阵编辑（修改即保存）</div>
+        <div id="edit-matrix-container" style="overflow-x:auto;padding:12px 0">
+          <div style="text-align:center;color:var(--gray-4);padding:40px">请先选择题目，再输入车次号加载</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- auto出题页 -->
+  <div id="page-auto-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <!-- 左栏：参数面板 -->
+    <div class="sidebar" style="width:320px">
+      <div class="card">
+        <div class="card-header">⚙️ 自动化出题参数</div>
+        <div style="display:flex;flex-direction:column;gap:12px;font-size:var(--font-size-small)">
+          <div>
+            <label style="font-weight:600">题型:</label>
+            <select class="select" id="question-type" style="margin-top:4px">
+              <option value="transfer">换乘</option>
+              <option value="short_buy">买短补长</option>
+              <option value="extra_front">额外购买（前）</option>
+              <option value="extra_rear">额外购买（后）</option>
+              <option value="mixed">混合</option>
+            </select>
+          </div>
+
+          <div>
+            <label style="font-weight:600">出发站：</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="input" id="auto-from-station" placeholder="如 北京南 或 VNP" style="margin-top:4px;flex:1">
+              <button class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="App._randomStation('auto-from-station')" title="随机选站">🎲</button>
+            </div>
+          </div>
+
+          <div>
+            <label style="font-weight:600">到达站：</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="input" id="auto-to-station" placeholder="如 上海虹桥 或 AOH" style="margin-top:4px;flex:1">
+              <button class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="App._randomStation('auto-to-station')" title="随机选站">🎲</button>
+            </div>
+          </div>
+
+          <div id="mixed-config" style="display:none">
+            <label style="font-weight:600">换乘次数:</label>
+            <input type="number" class="input" id="auto-mixed-transfers" value="1" min="1" max="3" style="margin-top:4px;width:80px">
+            <div id="auto-mixed-segment-plans" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+
+          <div>
+            <label style="font-weight:600">自定义题名（可选）:</label>
+            <input class="input" id="output-qid" placeholder="留空自动生成" style="margin-top:4px">
+          </div>
+
+          <button class="btn btn-primary" id="btn-generate" style="margin-top:8px">🎯 生成并预览</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右栏：预览区域 -->
+    <div class="flex-1">
+      <div class="card">
+        <div class="card-header">👁️ 预览结果</div>
+        <div id="preview-container" style="min-height:300px">
+          <div style="text-align:center;color:var(--gray-4);padding:60px 20px">
+            设置参数后点击"生成并预览"<br>
+            <span style="font-size:var(--font-size-small)">系统将自动匹配目标区间，生成合法解和干扰项</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-success" id="btn-confirm-generate" style="display:none">✅ 确认生成</button>
+          <button class="btn btn-secondary" id="btn-regenerate" style="display:none">🔄 重新出题</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 选择性问题出题页 -->
+  <div id="page-selective-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <div class="sidebar" style="width:320px">
+      <div class="card">
+        <div class="card-header">⚙️ 选择性出题参数</div>
+        <div style="display:flex;flex-direction:column;gap:12px;font-size:var(--font-size-small)">
+          <div>
+            <label style="font-weight:600">题型:</label>
+            <select class="select" id="sel-question-type" style="margin-top:4px">
+              <option value="transfer">换乘</option>
+              <option value="short_buy">买短补长</option>
+              <option value="extra_front">额外购买（前）</option>
+              <option value="extra_rear">额外购买（后）</option>
+              <option value="mixed">混合</option>
+            </select>
+          </div>
+
+          <div>
+            <label style="font-weight:600">出发站：</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="input" id="sel-from-station" placeholder="如 北京南 或 VNP" style="margin-top:4px;flex:1">
+              <button class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="App._randomStation('sel-from-station')" title="随机选站">🎲</button>
+            </div>
+          </div>
+
+          <div>
+            <label style="font-weight:600">到达站：</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="input" id="sel-to-station" placeholder="如 上海虹桥 或 AOH" style="margin-top:4px;flex:1">
+              <button class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="App._randomStation('sel-to-station')" title="随机选站">🎲</button>
+            </div>
+          </div>
+
+          <div>
+            <label style="font-weight:600">干扰密度:</label>
+            <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
+              <input type="range" id="sel-density" min="0" max="0.15" step="0.01" value="0.08" style="flex:1">
+              <span id="sel-density-label" style="width:40px;text-align:right">8%</span>
+            </div>
+          </div>
+
+          <div id="sel-mixed-config" style="display:none">
+            <label style="font-weight:600">换乘次数:</label>
+            <input type="number" class="input" id="sel-mixed-transfers" value="1" min="1" max="3" style="margin-top:4px;width:80px">
+            <div id="sel-mixed-segment-plans" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+
+          <div>
+            <label style="font-weight:600">自定义题名（可选）:</label>
+            <input class="input" id="sel-output-qid" placeholder="留空自动生成" style="margin-top:4px">
+          </div>
+
+          <button class="btn btn-primary" id="btn-sel-generate" style="margin-top:8px">🎯 生成并预览</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex-1">
+      <div class="card">
+        <div class="card-header">👁️ 预览结果</div>
+        <div id="sel-preview-container" style="min-height:300px">
+          <div style="text-align:center;color:var(--gray-4);padding:60px 20px">
+            设置参数后点击"生成并预览"<br>
+            <span style="font-size:var(--font-size-small)">系统将自动生成合法解并添加随机干扰票</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-success" id="btn-sel-confirm" style="display:none">✅ 确认生成</button>
+          <button class="btn btn-secondary" id="btn-sel-regenerate" style="display:none">🔄 重新出题</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 统计页 -->
+  <div id="page-stats" class="page-section" style="display:none;flex-direction:column;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <!-- 顶部：统计卡片 -->
+    <div id="stat-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px">
+      <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">总测试数</div></div>
+      <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">平均分</div></div>
+      <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">完成率</div></div>
+      <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">错误率</div></div>
+    </div>
+
+    <!-- 中部：图表区域 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+      <div class="card">
+        <div class="card-header">📊 模型对比</div>
+        <div style="height:300px">
+          <canvas id="modelChart"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">🏆 模型排名</div>
+        <div id="insights" style="padding:12px 0">
+          <div style="color:var(--gray-4)">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部：详细数据 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        <span>📋 模型对比详情</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" id="btn-refresh-stats">🔄 刷新</button>
+          <button class="btn btn-secondary btn-sm" id="btn-export-json">📥 导出 JSON</button>
+          <button class="btn btn-secondary btn-sm" id="btn-export-md">📥 导出 Markdown</button>
+        </div>
+      </div>
+      <div id="model-comparison-table" style="overflow-x:auto">
+        <div style="text-align:center;color:var(--gray-4);padding:20px">加载中...</div>
+      </div>
+    </div>
+
+    <!-- initStats 由 _switchToPage 自动调用，无需额外初始化 -->
+  </div>
+
+  <!-- 题目管理页 -->
+  <div id="page-question-manager" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <!-- 左栏：筛选 -->
+    <div class="sidebar" style="width:240px">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">📋 筛选</div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:var(--font-size-small)">
+          <div>
+            <label style="font-weight:600">状态:</label>
+            <select class="select" id="qm-status" style="margin-top:4px">
+              <option value="">全部</option>
+              <option value="completed" selected>已完成</option>
+              <option value="draft">草稿</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-weight:600">来源:</label>
+            <select class="select" id="qm-source" style="margin-top:4px">
+              <option value="">全部</option>
+              <option value="manual">手动</option>
+              <option value="auto">自动</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-weight:600">题型:</label>
+            <select class="select" id="qm-type" style="margin-top:4px">
+              <option value="">全部</option>
+              <option value="transfer">换乘</option>
+              <option value="short_buy">买短补长</option>
+              <option value="extra_front">额外购买（前）</option>
+              <option value="extra_rear">额外购买（后）</option>
+              <option value="mixed">混合</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-weight:600">搜索题号:</label>
+            <input class="input" id="qm-keyword" placeholder="输入题号关键词" style="margin-top:4px">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右栏：题目表格 -->
+    <div class="flex-1">
+      <div class="card">
+        <div class="card-header">📄 题目列表 <span id="qm-count" style="font-weight:400;font-size:var(--font-size-small);color:var(--gray-4)"></span></div>
+        <div id="qm-table-wrapper" style="overflow-x:auto">
+          <table class="table" style="font-size:var(--font-size-small);width:100%">
+            <thead><tr>
+              <th>题号</th><th>来源</th><th>题型</th><th>车次数</th><th>状态</th><th>标准答案</th><th>操作</th>
+            </tr></thead>
+            <tbody id="qm-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 测评页 -->
+  <div id="page-eval" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+    <!-- 左栏 -->
+    <div class="sidebar">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">📋 测试记录</div>
+        <div id="eval-record-list" style="max-height:300px;overflow-y:auto"></div>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-primary btn-sm" id="btn-eval-load">加载选中记录</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">⚙️ 操作</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-secondary btn-sm" id="btn-eval-verify">🔍 代码核查</button>
+          <button class="btn btn-success btn-sm" id="btn-eval-complete">💾 保存测评结果</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右栏：测评结果 -->
+    <div class="flex-1">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header" style="display:flex;gap:12px;align-items:center">
+          <span>📊 测评结果</span>
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button class="btn btn-sm btn-secondary tab-btn active" data-tab="verify">代码核查</button>
+            <button class="btn btn-sm btn-secondary tab-btn" data-tab="details">测试详情</button>
+          </div>
+        </div>
+        <div id="eval-verify-panel">
+          <div style="color:var(--gray-4);padding:20px;text-align:center">请先加载一条测试记录，然后点击"代码核查"</div>
+        </div>
+        <div id="eval-details-panel" style="display:none">
+          <div style="color:var(--gray-4);padding:20px;text-align:center">加载记录后显示 token 用量、耗时等详情</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 底栏 -->
+  <footer class="footer">© 2026 Benchmark | 版本 1.0</footer>
+
+  <script>lucide.createIcons();</script>
+</body>
+</html>
