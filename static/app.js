@@ -12,6 +12,8 @@ const App = {
   messages: [],
   /** 出题页当前会话已加载的车次列表（仅出题模式使用） */
   loadedTrains: [],
+  /** 题目 ID → 自然语言问法（nl_question）映射，用于加载题目时自动填充 */
+  _questionNlMap: {},
   /** 当前加载的测评记录中的工具调用记录（结构化换乘方案） */
   _currentToolRecords: [],
   /** 编辑器前缀：出题=''，改题='edit-' */
@@ -247,6 +249,9 @@ const App = {
     try {
       const data = await API.getQuestionList({ status: 'completed', source, type, keyword });
       const sorted = this._sortQuestionsByQid(data.questions);
+      // 记录每题的 nl_question，供加载题目时自动填充
+      this._questionNlMap = {};
+      sorted.forEach(q => { this._questionNlMap[q.question_id] = q.nl_question || ''; });
       let html = '';
       sorted.forEach(q => {
         const sourceTag = q.source === 'auto' ? 'auto' : (q.source || 'manual');
@@ -282,6 +287,13 @@ const App = {
     const qid = selected.dataset.qid;
     this.currentQuestionId = qid;
     document.getElementById('current-question').textContent = qid;
+
+    // 若该题有自然语言问法（nl_question），自动填充到聊天输入框
+    const nl = this._questionNlMap[qid];
+    if (nl) {
+      const input = document.getElementById('chat-input');
+      if (input) input.value = nl;
+    }
 
     // 重置对话
     this._onResetChat();

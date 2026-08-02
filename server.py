@@ -1285,6 +1285,7 @@ def api_question_list(
             "train_count": meta.get("train_count", 0),
             "answer": meta.get("answer", ""),
             "question": meta.get("question", ""),
+            "nl_question": meta.get("nl_question", ""),
             "db_exists": qid in db_files,
         })
 

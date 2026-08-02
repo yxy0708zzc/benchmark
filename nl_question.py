@@ -6,9 +6,10 @@
 经人工确认后写回 metadata.json 的 nl_question 字段（原 question 保留）。
 
 用法：
-    python nl_question.py                         # 交互式填写 API/模型/URL
+    python nl_question.py                         # 交互式填写 API/模型/URL（默认跳过已保存的）
     python nl_question.py --api-key sk-xxx        # 直接传 API Key（也可交互改）
     python nl_question.py --model deepseek-chat --base-url https://api.deepseek.com
+    python nl_question.py --force                 # 强制重新生成已保存 nl_question 的题目
 
 交互键位：
     [Enter]  接受并保存当前生成
@@ -126,6 +127,7 @@ def main():
     parser.add_argument("--api-key", type=str, default="", help="API Key")
     parser.add_argument("--model", type=str, default="deepseek-v4-flash", help="模型名称")
     parser.add_argument("--base-url", type=str, default="https://api.deepseek.com", help="API Base URL")
+    parser.add_argument("--force", action="store_true", help="强制重新生成已保存 nl_question 的题目")
     args = parser.parse_args()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -135,13 +137,27 @@ def main():
     metadata = load_metadata(metadata_path)
 
     # 找出含 question 字段的题目
-    targets = [(qid, entry) for qid, entry in metadata.items()
-               if isinstance(entry, dict) and entry.get("question")]
-    if not targets:
+    raw_targets = [(qid, entry) for qid, entry in metadata.items()
+                   if isinstance(entry, dict) and entry.get("question")]
+    if not raw_targets:
         print("❌ 没有找到含 question 字段的题目")
         sys.exit(1)
 
-    print(f"开始逐个处理 {len(targets)} 道有 question 的题目...\n")
+    # 默认跳过已有 nl_question 的题目，避免重复生成；--force 强制重新生成
+    if args.force:
+        targets = raw_targets
+        skipped_count = 0
+    else:
+        targets = [(qid, e) for qid, e in raw_targets if not e.get("nl_question")]
+        skipped_count = len(raw_targets) - len(targets)
+
+    if skipped_count:
+        print(f"⏭ 跳过 {skipped_count} 道已有自然语言（用 --force 可强制重新生成）")
+    if not targets:
+        print("✅ 所有题目都已有自然语言，无需生成")
+        sys.exit(0)
+
+    print(f"开始逐个处理 {len(targets)} 道题...\n")
 
     accepted = {}  # qid -> nl_question
     aborted = False
