@@ -160,10 +160,12 @@ const Components = {
 
   /**
    * 渲染消息气泡
+   * @param {boolean} plain  true=纯文本渲染（流式期间），false=Markdown 渲染（完成后）
    */
-  renderMessage: function(role, content, toolCalls = [], reasoning = '') {
+  renderMessage: function(role, content, toolCalls = [], reasoning = '', plain = false) {
     const roleClass = role === 'user' ? 'message-user' : 'message-assistant';
     const roleLabel = role === 'user' ? '用户' : '助手';
+    const fmt = plain ? this._escapeHtml.bind(this) : this._formatContent.bind(this);
 
     let html = `<div class="message ${roleClass}">`;
     html += `<div class="message-bubble">`;
@@ -174,11 +176,11 @@ const Components = {
       html += `<details style="margin-bottom:8px;font-size:var(--font-size-small)">
         <summary style="cursor:pointer;color:var(--gray-4);user-select:none">💭 思考过程</summary>
         <div style="margin-top:6px;padding:8px 10px;background:#f8f9fa;border-radius:6px;color:#555;line-height:1.6;border-left:3px solid #ddd">`;
-      html += this._formatContent(reasoning);
+      html += fmt(reasoning);
       html += `</div></details>`;
     }
 
-    html += `<div>${this._formatContent(content)}</div>`;
+    html += `<div>${fmt(content)}</div>`;
 
     // 工具调用：统一折叠目录（默认展开，避免流式刷新时自动合上）
     if (toolCalls && toolCalls.length > 0) {
@@ -208,6 +210,18 @@ const Components = {
       // fallback
     }
     return content.replace(/\n/g, '<br>');
+  },
+
+  /** 纯文本渲染（流式期间）：转义 HTML，仅处理换行，避免中间状态被误渲染 */
+  _escapeHtml: function(content) {
+    if (!content) return '';
+    return String(content)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/\n/g, '<br>');
   },
 
   /**

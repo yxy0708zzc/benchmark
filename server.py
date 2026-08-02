@@ -817,17 +817,21 @@ def _clear_direct_route(q_conn: sqlite3.Connection, train_num: str,
 
 def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
                          train_num: str, solution_pairs: set,
-                         density: float = 0.15):
+                         density: float = 0.15,
+                         block_pairs: set = None):
     """
     在指定车次的所有站对上随机放置干扰票（跳过合法解占用的站对）。
     solution_pairs: {(from_id, to_id)} 合法解的站对
+    block_pairs: 额外禁止生成的站对（如全局直达 A→B），所有车次一律跳过
     """
+    if block_pairs is None:
+        block_pairs = set()
     n = len(stops)
     candidates = []
     for i in range(n):
         for j in range(i + 1, n):
             pair = (stops[i]["station_id"], stops[j]["station_id"])
-            if pair not in solution_pairs:
+            if pair not in solution_pairs and pair not in block_pairs:
                 candidates.append(pair)
 
     random.shuffle(candidates)
@@ -846,11 +850,13 @@ def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
 
 def _add_interference_all_trains(q_conn: sqlite3.Connection, rw_conn: sqlite3.Connection,
                                   target_train_num: str, target_solution_pairs: set,
-                                  density: float = 0.15):
+                                  density: float = 0.15,
+                                  block_pairs: set = None):
     """
     在所有车次上添加随机干扰票。
     - target_train_num 的经停站对上跳过合法解占用的站对
     - 其他车次在所有经停站对随机添加
+    - block_pairs 在所有车次上一律跳过（防止生成直达 A→B 逃逸）
     """
     all_trains = get_all_train_nums(rw_conn)
     for train_num in all_trains:
@@ -859,7 +865,7 @@ def _add_interference_all_trains(q_conn: sqlite3.Connection, rw_conn: sqlite3.Co
             continue
         # 目标车次跳过合法解站对，其他车次不跳过
         local_pairs = target_solution_pairs if train_num == target_train_num else set()
-        _add_random_tickets(q_conn, stops, train_num, local_pairs, density)
+        _add_random_tickets(q_conn, stops, train_num, local_pairs, density, block_pairs)
 
 
 # --- POST /api/auto_generate auto出题器生成题目 ---
@@ -992,7 +998,8 @@ def api_auto_generate(req: AutoGenerateRequest):
                 if req.random_tickets:
                     _add_interference_all_trains(
                         q_conn, rw_conn, target_train_num,
-                        solution_pairs, req.interference_density
+                        solution_pairs, req.interference_density,
+                        block_pairs={(cur_from_id, cur_to_id)}
                     )
                     _clear_direct_route(q_conn, target_train_num, cur_from_id, cur_to_id)
 
@@ -1195,7 +1202,8 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
             try:
                 _add_interference_all_trains(
                     q_conn, rw_conn, cached["target_train_num"],
-                    solution_pairs, cached["interference_density"]
+                    solution_pairs, cached["interference_density"],
+                    block_pairs={(cached["cur_from_id"], cached["cur_to_id"])}
                 )
             finally:
                 rw_conn.close()

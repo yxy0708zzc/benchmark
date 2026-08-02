@@ -705,5 +705,19 @@
       "G1325",
       "G3473"
     ]
+  },
+  "b1": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "type": "short_buy",
+    "answer": "乘坐 G549 从 北京南 到 滁州（有票），补票段 滁州→上海虹桥 无余票需上车补票",
+    "question": "北京南到上海虹桥",
+    "interference": true,
+    "interference_density": 0.0,
+    "segment_plans": [],
+    "trains": [
+      "G549"
+    ]
   }
 }

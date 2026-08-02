@@ -20,6 +20,11 @@ const App = {
   _editorPrefix: '',
   /** AbortController，用于中断流式请求 */
   _abortController: null,
+  /** 聊天区是否自动滚动到底部（用户上翻时置 false） */
+  _autoScroll: true,
+  /** 工具调用概览：序号与记录列表 */
+  _toolOverviewSeq: 0,
+  _toolOverviewItems: [],
   /** API Key 配置 */
   apiConfig: {
     configs: [{ name: '默认配置', key: '', baseUrl: 'https://api.deepseek.com', model: '' }],
@@ -188,6 +193,19 @@ const App = {
     const msgContainer = document.getElementById('chat-messages');
     if (msgContainer) msgContainer.innerHTML = '';
 
+    // 重置工具调用概览与自动滚动状态
+    this._toolOverviewSeq = 0;
+    this._toolOverviewItems = [];
+    this._autoScroll = true;
+    this._renderToolOverview(false);
+
+    // 智能滚动：仅在用户接近底部时自动滚到底
+    if (msgContainer) {
+      msgContainer.addEventListener('scroll', () => {
+        this._autoScroll = (msgContainer.scrollHeight - msgContainer.scrollTop - msgContainer.clientHeight) < 80;
+      });
+    }
+
     this._loadQuestionList();
 
     // 题目列表筛选事件
@@ -249,6 +267,8 @@ const App = {
     try {
       const data = await API.getQuestionList({ status: 'completed', source, type, keyword });
       const sorted = this._sortQuestionsByQid(data.questions);
+      // 保留列表滚动位置（避免刷新/筛选后跳到顶部或底部）
+      const prevScroll = container.scrollTop;
       // 记录每题的 nl_question，供加载题目时自动填充
       this._questionNlMap = {};
       sorted.forEach(q => { this._questionNlMap[q.question_id] = q.nl_question || ''; });
@@ -264,6 +284,7 @@ const App = {
         </div>`;
       });
       container.innerHTML = html || '<div style="color:var(--gray-4);padding:12px">暂无符合条件的题目</div>';
+      container.scrollTop = prevScroll;
     } catch (e) {
       container.innerHTML = '<div style="color:var(--error-red)">加载题目列表失败</div>';
     }
@@ -475,7 +496,8 @@ const App = {
     this._abortController = new AbortController();
     const signal = this._abortController.signal;
 
-    // 添加用户消息
+    // 添加用户消息（发送时必然在底部，恢复自动滚动）
+    this._autoScroll = true;
     this._appendMessage('user', text);
 
     // 禁用发送按钮
@@ -486,14 +508,15 @@ const App = {
     const container = document.getElementById('chat-messages');
     const placeholderHtml = Components.renderMessage('assistant', '<span style="color:var(--gray-4)">思考中...</span>', [], '');
     container.insertAdjacentHTML('beforeend', placeholderHtml);
-    container.scrollTop = container.scrollHeight;
+    this._scrollChatToBottom();
 
     let fullContent = '';
     let fullReasoning = '';
     let toolCallsList = [];
 
-    /** 更新最后一条助手消息的显示内容（保留展开/折叠状态） */
-    const updateMsg = (cursor = false) => {
+    /** 更新最后一条助手消息的显示内容（保留展开/折叠状态）
+     *  plain=true：流式期间纯文本渲染；plain=false：完成后用 marked 渲染 Markdown */
+    const updateMsg = (cursor = false, plain = true) => {
       const displayContent = fullContent + (cursor ? '<span style="color:var(--gray-4)">▌</span>' : '');
       const lastMsg = container.lastElementChild;
 
@@ -503,7 +526,7 @@ const App = {
         lastMsg.querySelectorAll('details').forEach(d => savedDetailsStates.push(d.open));
       }
 
-      const html = Components.renderMessage('assistant', displayContent || ' ', toolCallsList, fullReasoning);
+      const html = Components.renderMessage('assistant', displayContent || ' ', toolCallsList, fullReasoning, plain);
 
       if (lastMsg && lastMsg.classList.contains('message-assistant')) {
         // 先替换为新的 outerHTML
@@ -521,7 +544,7 @@ const App = {
       } else {
         container.insertAdjacentHTML('beforeend', html);
       }
-      container.scrollTop = container.scrollHeight;
+      this._scrollChatToBottom();
     };
 
     let doneCalled = false;
@@ -567,7 +590,7 @@ const App = {
 
               case 'token':
                 fullContent += evt.content || '';
-                updateMsg(true);  // 显示光标
+                updateMsg(true, true);  // 显示光标（纯文本）
                 break;
 
               case 'tool_call':
@@ -576,9 +599,10 @@ const App = {
                     let args = {};
                     try { args = JSON.parse(argsStr); } catch (e) {}
                     toolCallsList.push({ tool_name: name, arguments: args, result: {}, _pending: true });
+                    this._addToolOverviewItem(name, args);
                   }
                 }
-                updateMsg();
+                updateMsg(false, true);
                 break;
 
               case 'tool_result':
@@ -592,20 +616,21 @@ const App = {
                       break;
                     }
                   }
+                  this._updateToolOverviewStatus(evt.tool_name, evt.result);
                 }
-                updateMsg();
+                updateMsg(false, true);
                 break;
 
               case 'done':
                 // 前端已通过 token 事件累加完整内容，不再用 evt.content 覆盖
                 doneCalled = true;
-                updateMsg(false);  // 移除光标，最终显示
+                updateMsg(false, false);  // 移除光标，最终用 marked 渲染
                 break;
 
               case 'error':
                 fullContent = '错误: ' + (evt.content || '未知错误');
                 toolCallsList = [];
-                updateMsg();
+                updateMsg(false, true);
                 doneCalled = true;
                 break;
             }
@@ -623,7 +648,7 @@ const App = {
         fullContent = `请求失败: ${e.message}`;
         toolCallsList = [];
         fullReasoning = '';
-        updateMsg();
+        updateMsg(false, true);
       }
     } finally {
       if (sendBtn) sendBtn.disabled = false;
@@ -637,7 +662,62 @@ const App = {
 
     const html = Components.renderMessage(role, content, toolCalls, reasoning);
     container.insertAdjacentHTML('beforeend', html);
-    container.scrollTop = container.scrollHeight;
+    this._scrollChatToBottom();
+  },
+
+  /** 仅当用户接近底部时自动滚动到聊天区底部 */
+  _scrollChatToBottom: function() {
+    if (!this._autoScroll) return;
+    const container = document.getElementById('chat-messages');
+    if (container) container.scrollTop = container.scrollHeight;
+  },
+
+  /** 渲染工具调用概览面板 */
+  _renderToolOverview: function(scrollBottom = false) {
+    const container = document.getElementById('tool-overview');
+    if (!container) return;
+    if (!this._toolOverviewItems.length) {
+      container.innerHTML = '<div style="color:var(--gray-4);padding:12px;font-size:var(--font-size-small)">暂无工具调用</div>';
+      return;
+    }
+    const statusMap = { pending: '⏳ 进行中', done: '✓ 完成', error: '✗ 失败' };
+    const clsMap = { pending: 'pending', done: 'done', error: 'error' };
+    let html = '';
+    this._toolOverviewItems.forEach(item => {
+      html += `<div class="tool-overview-item">
+        <span class="ov-idx">[${item.seq}]</span>
+        <span class="ov-info"><span class="ov-name">${item.tool_name}</span>${item.summary ? `<span class="ov-args">${item.summary}</span>` : ''}</span>
+        <span class="ov-status ${clsMap[item.status]}">${statusMap[item.status]}</span>
+      </div>`;
+    });
+    container.innerHTML = html;
+    if (scrollBottom) container.scrollTop = container.scrollHeight;
+  },
+
+  /** 新增一条工具调用记录（状态：进行中） */
+  _addToolOverviewItem: function(toolName, args) {
+    this._toolOverviewSeq += 1;
+    let summary = '';
+    if (args && args.from_station_id && args.to_station_id) {
+      summary = `${args.from_station_id}→${args.to_station_id}`;
+    } else if (args && args.train_num) {
+      summary = args.train_num;
+    } else if (args && args.station_id) {
+      summary = args.station_id;
+    } else if (args && args.keyword) {
+      summary = args.keyword;
+    }
+    this._toolOverviewItems.push({ seq: this._toolOverviewSeq, tool_name: toolName, summary, status: 'pending' });
+    this._renderToolOverview(true);
+  },
+
+  /** 更新工具调用记录状态（结果含 error 视为失败） */
+  _updateToolOverviewStatus: function(toolName, result) {
+    const item = this._toolOverviewItems.find(i => i.tool_name === toolName && i.status === 'pending');
+    if (item) {
+      item.status = (result && result.error) ? 'error' : 'done';
+      this._renderToolOverview(false);
+    }
   },
 
   /** 测试完成 */
@@ -687,6 +767,11 @@ const App = {
       this._abortController.abort();
       this._abortController = null;
     }
+    // 重置工具调用概览与自动滚动
+    this._toolOverviewSeq = 0;
+    this._toolOverviewItems = [];
+    this._autoScroll = true;
+    this._renderToolOverview(false);
     try {
       await API.resetChat(this.sessionId);
       const container = document.getElementById('chat-messages');

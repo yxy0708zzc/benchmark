@@ -8,9 +8,9 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="/static/api.js?v=28"></script>
-  <script src="/static/components.js?v=28"></script>
-  <script src="/static/app.js?v=28"></script>
+    <script src="/static/api.js?v=32"></script>
+    <script src="/static/components.js?v=32"></script>
+    <script src="/static/app.js?v=32"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -42,10 +42,10 @@
   </nav>
 
   <!-- 测试页 -->
-  <div id="page-test" class="page-section active" style="display:flex;gap:24px;padding:var(--spacing-lg);height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
+  <div id="page-test" class="page-section active" style="display:flex;gap:24px;padding:var(--spacing-lg);height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height));overflow:hidden">
     <!-- 左栏：题目列表 -->
     <div class="sidebar">
-      <div class="card" style="margin-bottom:16px">
+      <div class="card" style="display:flex;flex-direction:column;min-height:0;flex:1;margin-bottom:16px">
         <div class="card-header">📋 题目列表</div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
           <div style="display:flex;gap:6px">
@@ -66,21 +66,14 @@
           </div>
           <input class="input" id="q-filter-keyword" placeholder="搜索题名..." style="font-size:12px">
         </div>
-        <div id="question-list" style="max-height:300px;overflow-y:auto"></div>
-        <div style="margin-top:12px">
+        <div id="question-list" style="flex:1;min-height:0;max-height:40vh;overflow-y:auto"></div>
+        <div style="margin-top:12px;flex-shrink:0">
           <button class="btn btn-primary btn-sm" id="btn-load-question" style="width:100%">加载选中题目</button>
+          <div style="margin-top:8px;font-size:var(--font-size-small);color:var(--gray-5)">当前题目: <strong id="current-question">未选择</strong></div>
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">模型信息</div>
-        <div style="font-size:var(--font-size-small)">
-          <div>模型: <span class="test-model-status">● 未连接</span></div>
-          <div style="margin-top:8px">当前题目: <strong id="current-question">未选择</strong></div>
-        </div>
-      </div>
-
-      <div class="card">
+      <div class="card" style="flex-shrink:0">
         <div class="card-header">会话控制</div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <div style="display:flex;align-items:center;gap:6px;font-size:var(--font-size-small)">
@@ -94,9 +87,13 @@
       </div>
     </div>
 
-    <!-- 右栏：对话区域 -->
-    <div class="flex-1" style="display:flex;flex-direction:column">
-      <div class="card flex-1" style="display:flex;flex-direction:column;min-height:0">
+    <!-- 右栏：工具调用概览 + 对话区域 -->
+    <div class="flex-1" style="display:flex;gap:16px;min-width:0;min-height:0;overflow:hidden">
+      <div class="card" style="width:280px;flex-shrink:0;display:flex;flex-direction:column;min-height:0">
+        <div class="card-header">🔧 工具调用概览</div>
+        <div id="tool-overview" style="flex:1;overflow-y:auto;min-height:0;padding:8px 0"></div>
+      </div>
+      <div class="card flex-1" style="display:flex;flex-direction:column;min-height:0;min-width:0">
         <div class="card-header">💬 对话</div>
         <div id="chat-messages" style="padding:8px 0"></div>
         <div style="display:flex;gap:8px;border-top:1px solid var(--gray-2);padding-top:12px;margin-top:12px;flex-shrink:0">
