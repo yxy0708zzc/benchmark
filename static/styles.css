@@ -667,42 +667,8 @@ a:hover {
   overflow: hidden;
 }
 
-/* === 工具调用概览面板 === */
-.tool-overview-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: var(--font-size-small);
-  border-bottom: 1px solid var(--gray-1);
-}
-.tool-overview-item .ov-idx {
-  color: var(--gray-4);
-  flex-shrink: 0;
-}
-.tool-overview-item .ov-info {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tool-overview-item .ov-info .ov-name {
-  color: var(--gray-6);
-  font-weight: 600;
-}
-.tool-overview-item .ov-info .ov-args {
-  color: var(--gray-4);
-  margin-left: 4px;
-}
-.tool-overview-item .ov-status {
-  flex-shrink: 0;
-  font-size: var(--font-size-small);
-}
-.tool-overview-item .ov-status.pending { color: var(--warning-orange); }
-.tool-overview-item .ov-status.done { color: var(--success-green); }
-.tool-overview-item .ov-status.error { color: var(--error-red); }
-.tool-call-header {
+/* === 工具调用折叠卡片 === */
+.tool-call-card {
   display: flex;
   align-items: center;
   justify-content: space-between;

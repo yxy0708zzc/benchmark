@@ -22,9 +22,6 @@ const App = {
   _abortController: null,
   /** 聊天区是否自动滚动到底部（用户上翻时置 false） */
   _autoScroll: true,
-  /** 工具调用概览：序号与记录列表 */
-  _toolOverviewSeq: 0,
-  _toolOverviewItems: [],
   /** API Key 配置 */
   apiConfig: {
     configs: [{ name: '默认配置', key: '', baseUrl: 'https://api.deepseek.com', model: '' }],
@@ -193,11 +190,8 @@ const App = {
     const msgContainer = document.getElementById('chat-messages');
     if (msgContainer) msgContainer.innerHTML = '';
 
-    // 重置工具调用概览与自动滚动状态
-    this._toolOverviewSeq = 0;
-    this._toolOverviewItems = [];
+    // 重置自动滚动状态
     this._autoScroll = true;
-    this._renderToolOverview(false);
 
     // 智能滚动：仅在用户接近底部时自动滚到底
     if (msgContainer) {
@@ -245,13 +239,22 @@ const App = {
     });
   },
 
-  /** 按题目编号数字升序排序 */
+  /** 按题号分组自然序排序：数字题在前（1,2,3,10…），字母前缀题在后（a1,a2,a10…），其他格式最后 */
   _sortQuestionsByQid: function(questions) {
-    return questions.sort((a, b) => {
-      const numA = parseInt(a.question_id.replace(/[^\d]/g, ''), 10) || 0;
-      const numB = parseInt(b.question_id.replace(/[^\d]/g, ''), 10) || 0;
-      return numA - numB;
-    });
+    const keyOf = (id) => {
+      const s = String(id || '');
+      const m = s.match(/^([a-z]*)(\d+)$/i);
+      if (!m) return [2, s, 0];
+      const prefix = (m[1] || '').toLowerCase();
+      return [prefix === '' ? 0 : 1, prefix, parseInt(m[2], 10)];
+    };
+    const cmp = (ka, kb) => {
+      if (ka[0] !== kb[0]) return ka[0] - kb[0];
+      if (ka[0] === 2) return ka[1] < kb[1] ? -1 : ka[1] > kb[1] ? 1 : 0;
+      if (ka[1] !== kb[1]) return ka[1] < kb[1] ? -1 : 1;
+      return ka[2] - kb[2];
+    };
+    return questions.sort((a, b) => cmp(keyOf(a.question_id), keyOf(b.question_id)));
   },
 
   /** 加载题目列表 */
@@ -269,9 +272,9 @@ const App = {
       const sorted = this._sortQuestionsByQid(data.questions);
       // 保留列表滚动位置（避免刷新/筛选后跳到顶部或底部）
       const prevScroll = container.scrollTop;
-      // 记录每题的 nl_question，供加载题目时自动填充
+      // 记录每题的填充文本（优先 nl_question，其次原始 question），供加载题目时自动填充
       this._questionNlMap = {};
-      sorted.forEach(q => { this._questionNlMap[q.question_id] = q.nl_question || ''; });
+      sorted.forEach(q => { this._questionNlMap[q.question_id] = q.nl_question || q.question || ''; });
       let html = '';
       sorted.forEach(q => {
         const sourceTag = q.source === 'auto' ? 'auto' : (q.source || 'manual');
@@ -309,12 +312,10 @@ const App = {
     this.currentQuestionId = qid;
     document.getElementById('current-question').textContent = qid;
 
-    // 若该题有自然语言问法（nl_question），自动填充到聊天输入框
-    const nl = this._questionNlMap[qid];
-    if (nl) {
-      const input = document.getElementById('chat-input');
-      if (input) input.value = nl;
-    }
+    // 自动填充：优先自然语言问法（nl_question），其次原始题面（question），都没有则清空输入框
+    const nl = this._questionNlMap[qid] || '';
+    const input = document.getElementById('chat-input');
+    if (input) input.value = nl;
 
     // 重置对话
     this._onResetChat();
@@ -599,7 +600,6 @@ const App = {
                     let args = {};
                     try { args = JSON.parse(argsStr); } catch (e) {}
                     toolCallsList.push({ tool_name: name, arguments: args, result: {}, _pending: true });
-                    this._addToolOverviewItem(name, args);
                   }
                 }
                 updateMsg(false, true);
@@ -616,7 +616,6 @@ const App = {
                       break;
                     }
                   }
-                  this._updateToolOverviewStatus(evt.tool_name, evt.result);
                 }
                 updateMsg(false, true);
                 break;
@@ -672,54 +671,6 @@ const App = {
     if (container) container.scrollTop = container.scrollHeight;
   },
 
-  /** 渲染工具调用概览面板 */
-  _renderToolOverview: function(scrollBottom = false) {
-    const container = document.getElementById('tool-overview');
-    if (!container) return;
-    if (!this._toolOverviewItems.length) {
-      container.innerHTML = '<div style="color:var(--gray-4);padding:12px;font-size:var(--font-size-small)">暂无工具调用</div>';
-      return;
-    }
-    const statusMap = { pending: '⏳ 进行中', done: '✓ 完成', error: '✗ 失败' };
-    const clsMap = { pending: 'pending', done: 'done', error: 'error' };
-    let html = '';
-    this._toolOverviewItems.forEach(item => {
-      html += `<div class="tool-overview-item">
-        <span class="ov-idx">[${item.seq}]</span>
-        <span class="ov-info"><span class="ov-name">${item.tool_name}</span>${item.summary ? `<span class="ov-args">${item.summary}</span>` : ''}</span>
-        <span class="ov-status ${clsMap[item.status]}">${statusMap[item.status]}</span>
-      </div>`;
-    });
-    container.innerHTML = html;
-    if (scrollBottom) container.scrollTop = container.scrollHeight;
-  },
-
-  /** 新增一条工具调用记录（状态：进行中） */
-  _addToolOverviewItem: function(toolName, args) {
-    this._toolOverviewSeq += 1;
-    let summary = '';
-    if (args && args.from_station_id && args.to_station_id) {
-      summary = `${args.from_station_id}→${args.to_station_id}`;
-    } else if (args && args.train_num) {
-      summary = args.train_num;
-    } else if (args && args.station_id) {
-      summary = args.station_id;
-    } else if (args && args.keyword) {
-      summary = args.keyword;
-    }
-    this._toolOverviewItems.push({ seq: this._toolOverviewSeq, tool_name: toolName, summary, status: 'pending' });
-    this._renderToolOverview(true);
-  },
-
-  /** 更新工具调用记录状态（结果含 error 视为失败） */
-  _updateToolOverviewStatus: function(toolName, result) {
-    const item = this._toolOverviewItems.find(i => i.tool_name === toolName && i.status === 'pending');
-    if (item) {
-      item.status = (result && result.error) ? 'error' : 'done';
-      this._renderToolOverview(false);
-    }
-  },
-
   /** 测试完成 */
   _onTestComplete: async function() {
     if (!confirm('确认测试完成？这将保存当前对话记录。')) return;
@@ -767,11 +718,8 @@ const App = {
       this._abortController.abort();
       this._abortController = null;
     }
-    // 重置工具调用概览与自动滚动
-    this._toolOverviewSeq = 0;
-    this._toolOverviewItems = [];
+    // 重置自动滚动
     this._autoScroll = true;
-    this._renderToolOverview(false);
     try {
       await API.resetChat(this.sessionId);
       const container = document.getElementById('chat-messages');
@@ -1273,6 +1221,23 @@ const App = {
         });
       }
     });
+
+    // 伪干扰密度滑块联动
+    const aiDensitySlider = document.getElementById('auto-interference-density');
+    const aiDensityLabel = document.getElementById('auto-interference-density-label');
+    if (aiDensitySlider && aiDensityLabel) {
+      aiDensitySlider.oninput = function() {
+        aiDensityLabel.textContent = parseFloat((this.value * 100).toFixed(3)) + '%';
+      };
+    }
+    // 伪干扰开关：关闭时淡化密度配置
+    const aiCheckbox = document.getElementById('auto-fake-interference');
+    if (aiCheckbox) {
+      aiCheckbox.onchange = function() {
+        const cfg = document.getElementById('auto-fake-interference-config');
+        if (cfg) cfg.style.opacity = this.checked ? '1' : '0.4';
+      };
+    }
   },
 
   /** 渲染混合题段方案下拉框 */
@@ -1300,8 +1265,11 @@ const App = {
       question_type: document.getElementById('question-type')?.value || 'direct',
       from_station_id: document.getElementById('auto-from-station')?.value.trim(),
       to_station_id: document.getElementById('auto-to-station')?.value.trim(),
-      solution_ticket_min: parseInt(document.getElementById('solution-min')?.value || '1'),
-      solution_ticket_max: parseInt(document.getElementById('solution-max')?.value || '5'),
+      people_count: parseInt(document.getElementById('auto-people-count')?.value || '2', 10),
+      seat_type: document.getElementById('auto-seat-type')?.value || 'class2',
+      random_tickets: document.getElementById('auto-fake-interference')?.checked ?? true,
+      fake_interference: true,
+      interference_density: parseFloat(document.getElementById('auto-interference-density')?.value || '0.001'),
       custom_qid: document.getElementById('output-qid')?.value.trim() || '',
     };
 
@@ -1367,6 +1335,8 @@ const App = {
         <div style="display:flex;flex-direction:column;gap:12px">
           <div><strong>题目名：</strong>${data.question_id}</div>
           <div><strong>题型：</strong>${preview.question_type}</div>
+          <div><strong>需求人数：</strong>${document.getElementById('auto-people-count')?.value || '2'} 人</div>
+          <div><strong>答案票等级：</strong>${document.getElementById('auto-seat-type')?.value || 'class2'}</div>
           <div><strong>目标区间：</strong>${preview.target_section}</div>
           <div><strong>路径描述：</strong>${pathDesc}</div>
           <div><strong>合法路径（有票段）：</strong></div>
@@ -1466,7 +1436,7 @@ const App = {
     const densityLabel = document.getElementById('sel-density-label');
     if (densitySlider && densityLabel) {
       densitySlider.oninput = function() {
-        densityLabel.textContent = Math.round(this.value * 100) + '%';
+        densityLabel.textContent = parseFloat((this.value * 100).toFixed(3)) + '%';
       };
     }
 
@@ -1511,7 +1481,10 @@ const App = {
       from_station_id: document.getElementById('sel-from-station')?.value.trim(),
       to_station_id: document.getElementById('sel-to-station')?.value.trim(),
       random_tickets: true,
-      interference_density: parseFloat(document.getElementById('sel-density')?.value || '0.08'),
+      fake_interference: false,
+      interference_density: parseFloat(document.getElementById('sel-density')?.value || '0.02'),
+      people_count: parseInt(document.getElementById('sel-people-count')?.value || '2', 10),
+      seat_type: document.getElementById('sel-seat-type')?.value || 'class2',
       custom_qid: document.getElementById('sel-output-qid')?.value.trim() || '',
     };
 
@@ -1576,6 +1549,8 @@ const App = {
         <div style="display:flex;flex-direction:column;gap:12px">
           <div><strong>题目名：</strong>${data.question_id}</div>
           <div><strong>题型：</strong>${preview.question_type}</div>
+          <div><strong>需求人数：</strong>${document.getElementById('sel-people-count')?.value || '2'} 人</div>
+          <div><strong>答案票等级：</strong>${document.getElementById('sel-seat-type')?.value || 'class2'}</div>
           <div><strong>干扰密度：</strong>${Math.round(parseFloat(density) * 100)}%</div>
           <div><strong>目标区间：</strong>${preview.target_section}</div>
           <div><strong>路径描述：</strong>${pathDesc}</div>
@@ -1695,8 +1670,9 @@ const App = {
         return;
       }
 
+      const sorted = this._sortQuestionsByQid(data.questions);
       let html = '';
-      data.questions.forEach(q => {
+      sorted.forEach(q => {
         const typeLabel = this._questionTypeLabel(q.type);
         const ansPreview = q.answer ? q.answer.substring(0, 30) + (q.answer.length > 30 ? '...' : '') : '-';
         html += `<tr>

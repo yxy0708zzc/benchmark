@@ -212,10 +212,22 @@ const Components = {
     return content.replace(/\n/g, '<br>');
   },
 
-  /** 纯文本渲染（流式期间）：转义 HTML，仅处理换行，避免中间状态被误渲染 */
+  /** 流式纯文本渲染：先剥离 Markdown 语法标记（避免中间态显示源码乱码），再转义 HTML */
   _escapeHtml: function(content) {
     if (!content) return '';
-    return String(content)
+    let s = String(content)
+      .replace(/^#{1,6}\s*/gm, '')            // 标题 #、##
+      .replace(/^\s*[-*+]\s+/gm, '')          // 无序列表 - * +
+      .replace(/^\s*\d+[.)]\s+/gm, '')        // 有序列表 1. 1)
+      .replace(/\*\*([^*]+)\*\*/g, '$1')      // 粗体 **x**
+      .replace(/\*([^*]+)\*/g, '$1')           // 斜体 *x*
+      .replace(/`{1,3}([^`]+)`{1,3}/g, '$1')    // 行内代码 `x`
+      .replace(/^\s*>\s?/gm, '')              // 引用 >
+      .replace(/!\[(.*?)\]\(.*?\)/g, '$1')   // 图片 ![alt](url)
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')    // 链接 [text](url)
+      .replace(/\|/g, '')                      // 表格管道符
+      .replace(/^[\s-]+$/gm, '');              // 分隔线 / 表格分割行 ---
+    return s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')

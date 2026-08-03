@@ -10,6 +10,7 @@
     python nl_question.py --api-key sk-xxx        # 直接传 API Key（也可交互改）
     python nl_question.py --model deepseek-chat --base-url https://api.deepseek.com
     python nl_question.py --force                 # 强制重新生成已保存 nl_question 的题目
+    python nl_question.py --question a1 --question a2   # 只处理指定题目（可多次指定，即使已有也处理）
 
 交互键位：
     [Enter]  接受并保存当前生成
@@ -29,20 +30,38 @@ import requests
 # ============================================================
 # 提示词（可自行修改）
 # ============================================================
-NL_PROMPT_TEMPLATE = """你是一个想购买高铁票的用户。请根据下面的题目信息，生成一段自然、口语化的购票需求。
+NL_PROMPT_TEMPLATE = """你是一个想购买高铁票的真实用户。请根据下面的题目约束，生成一段自然、口语化的购票需求。
 
-题目信息：
-- 出发地到目的地：{question}
+题目约束：
+- 行程：{question}
+- 人数：{people_count} 人
+- 期望座位等级：{seat_label}
 
-要求：
-1. 用自然口语化中文，像真实用户向购票助手提问
-2. 必须保留出发站和到达站
-3. 换乘或者任何需求不要指定中间站
-4. 避免添加与题目设计矛盾的硬性要求（如换乘题不能说"必须直达"）
-5. 每次生成要多样化，不要千篇一律
-6. 不泄露车票信息或策略
+【生成要求】
+1. 你可以以任何口气说，包括但不限于：尊敬、无奈、请求、无礼
+2. 必须隐含"人数"和"座位等级"这两个约束，但不要用"买X张""买X等座""二等座"这种硬性指令式表达
+3. 表达人数和座位等级要自然、口语化地带出
+4. 座位等级：
+  - class2:二等座,经济型,价格较低,不太舒适
+  - class1:一等座,更舒适,价格中等
+  - class0:特等座,可躺,十分舒适,价格更高
+5. 必须保留出发站和到达站
+6. 每次生成要多样化，不要千篇一律
+7. 不要自称"用户"或提及"题目/约束"，直接说出需求本身
+8. 约束的语序要随机，可以任意布置约束的要求，口语词也可以有
+9. 要求要适当隐讳
+10. 不要涉及“座位挨着”。不必先从人数开始，座位等级的暗示也可以先提到。
 
-只输出购票需求本身，不要输出其他解释或前后缀。"""
+[实例]:
+1. 我们五个同事下周要从北京南去上海虹桥，帮忙看看怎么安排最合适，预算有限，实惠点就行。
+2. 爸妈一起从成都东去西安北，我们年纪大了路上想躺一躺，看看有没有能躺的座位
+"""
+# 座位等级中文标签
+SEAT_LABELS = {
+    "class2": "二等座",
+    "class1": "一等座",
+    "class0": "特等座",
+}
 
 # 题型中文标签
 TYPE_LABELS = {
@@ -70,11 +89,18 @@ def save_metadata(metadata_path: str, metadata: dict):
 
 def build_prompt(entry: dict) -> str:
     """组装发送给大模型的提示词
-
-    只传出发/到达（question），不传题型、分段策略、标准路径或任何车票信息。
+    传入出发/到达（question）以及出题约束（人数 people_count、答案票等级 seat_type），
+    让模型根据约束生成自然口吻的购票需求。不传题型、分段策略、标准路径或任何车票信息。
     """
     question = entry.get("question", "")
-    return NL_PROMPT_TEMPLATE.format(question=question)
+    people_count = entry.get("people_count", 2)
+    seat_type = entry.get("seat_type", "class2")
+    seat_label = SEAT_LABELS.get(seat_type, seat_type)
+    return NL_PROMPT_TEMPLATE.format(
+        question=question,
+        people_count=people_count,
+        seat_label=seat_label,
+    )
 
 
 def generate_nl(api_key: str, model: str, base_url: str, prompt: str) -> str:
@@ -87,7 +113,7 @@ def generate_nl(api_key: str, model: str, base_url: str, prompt: str) -> str:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 2,  # 提高多样性
+        "temperature": 1.9,  # 提高多样性
     }
     resp = requests.post(url, json=payload, headers=headers, timeout=60)
     if resp.status_code != 200:
@@ -128,6 +154,8 @@ def main():
     parser.add_argument("--model", type=str, default="deepseek-v4-flash", help="模型名称")
     parser.add_argument("--base-url", type=str, default="https://api.deepseek.com", help="API Base URL")
     parser.add_argument("--force", action="store_true", help="强制重新生成已保存 nl_question 的题目")
+    parser.add_argument("--question", action="append", default=[],
+                        help="仅处理指定题目ID（可多次指定，如 --question a1 --question a2；指定题即使已有 nl_question 也会处理）")
     args = parser.parse_args()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -143,8 +171,17 @@ def main():
         print("❌ 没有找到含 question 字段的题目")
         sys.exit(1)
 
+    # 指定题目：只处理指定题（即使已有 nl_question 也会重新生成），未指定的不受影响
+    if args.question:
+        qset = set(args.question)
+        targets = [(qid, e) for qid, e in raw_targets if qid in qset]
+        missing = [q for q in qset if q not in metadata]
+        if missing:
+            print(f"❌ 指定题目不存在于 metadata: {', '.join(missing)}")
+            sys.exit(1)
+        skipped_count = 0
     # 默认跳过已有 nl_question 的题目，避免重复生成；--force 强制重新生成
-    if args.force:
+    elif args.force:
         targets = raw_targets
         skipped_count = 0
     else:
@@ -168,6 +205,8 @@ def main():
             print(f"[{idx}/{len(targets)}] 题目: {qid}")
             print(f"  题型:     {TYPE_LABELS.get(entry.get('type',''), entry.get('type','未知'))}")
             print(f"  原题面:   {entry.get('question','')}")
+            _seat = entry.get('seat_type', 'class2')
+            print(f"  约束:     {entry.get('people_count', 2)} 人 / {SEAT_LABELS.get(_seat, _seat)}")
             if qid in entry and entry.get("nl_question"):
                 print(f"  已有自然语言: {entry['nl_question']}")
 

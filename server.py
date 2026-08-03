@@ -344,12 +344,15 @@ class AutoGenerateRequest(BaseModel):
     question_type: str  # direct/transfer/short_buy/extra_front/extra_rear/mixed
     from_station_id: str  # 可接受站名（如"北京南"）或站ID（如"VNP"），服务端自动解析
     to_station_id: str  # 同上
-    random_tickets: bool = False  # 是否添加随机干扰票（选择性题型）
+    random_tickets: bool = False  # 是否添加干扰票
+    fake_interference: bool = False  # 伪干扰模式：干扰票数 ≤ people_count；False=真干扰(随机1~10)
     interference_density: float = 0.08
     transfers: int = 0  # 换乘次数（仅 mixed 题型）
     segment_plans: List[str] = []  # 每段策略，长度 = transfers + 1
     custom_qid: str = ""  # 自定义题名，为空则自动生成
     seed: Optional[int] = None
+    people_count: int = 2  # 需求人数：答案票数 ≥ 此值
+    seat_type: str = "class2"  # 答案票等级（class0/class1/class2）
 
 
 # --- POST /api/update_ticket 实时更新余票 ---
@@ -499,6 +502,11 @@ def _find_transfer_trains(rw_conn: sqlite3.Connection,
     return candidates
 
 
+def _random_solution_tickets(people_count: int) -> int:
+    """生成答案票数：保证 ≥ 需求人数，上限 max(people_count, 5)"""
+    return random.randint(people_count, max(people_count, 5))
+
+
 def _write_legal_solution(q_conn: sqlite3.Connection,
                           rw_conn: sqlite3.Connection,
                           question_type: str,
@@ -507,13 +515,14 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                           from_id: str, to_id: str,
                           from_idx: int, to_idx: int,
                           segment_plans: List[str] = None,
-                          transfer_dest: str = None) -> Dict:
+                          transfer_dest: str = None,
+                          seat_type: str = "class2",
+                          people_count: int = 1) -> Dict:
     """
     写入合法解（正数票）。
     返回包含 segments 和 target_mid_idx 的字典。
     """
     segments = []
-    seat_type = "class2"  # 默认写入二等座
     target_mid_idx = None  # 记录 short_buy 的目标中间站索引
 
     # 获取站名映射
@@ -560,8 +569,8 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                 detail=f"未找到合适的换乘车次从 {mid_id} 到 {actual_dest}（已重试 3 次）"
             )
 
-        tickets1 = random.randint(5, 10)
-        tickets2 = random.randint(5, 10)
+        tickets1 = _random_solution_tickets(people_count)
+        tickets2 = _random_solution_tickets(people_count)
 
         # 写入 T 的第一段
         db_update_ticket(q_conn, train_num, from_id, mid_id, seat_type, tickets1)
@@ -597,7 +606,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
             raise HTTPException(status_code=400, detail="目标车次无合适的中间站")
         target_mid_idx = random.choice(middle_indices)
         mid_id = stops[target_mid_idx]["station_id"]
-        tickets = random.randint(5, 10)
+        tickets = _random_solution_tickets(people_count)
         db_update_ticket(q_conn, train_num, from_id, mid_id, seat_type, tickets)
         # M→B 不写票（买短补长，补票段无票）
         segments.append({
@@ -618,7 +627,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
         k = random.randint(1, max_extra)
         extra_from_idx = from_idx - k
         extra_from_id = stops[extra_from_idx]["station_id"]
-        tickets = random.randint(5, 10)
+        tickets = _random_solution_tickets(people_count)
         db_update_ticket(q_conn, train_num, extra_from_id, to_id, seat_type, tickets)
         segments.append({
             "train_num": train_num,
@@ -638,7 +647,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
         k = random.randint(1, max_extra)
         extra_to_idx = to_idx + k
         extra_to_id = stops[extra_to_idx]["station_id"]
-        tickets = random.randint(5, 10)
+        tickets = _random_solution_tickets(people_count)
         db_update_ticket(q_conn, train_num, from_id, extra_to_id, seat_type, tickets)
         segments.append({
             "train_num": train_num,
@@ -723,7 +732,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                 raise HTTPException(status_code=400, detail=f"车次 {current_train} 不经过 {seg_from} 或 {seg_to}")
 
             if strategy == "direct":
-                tickets = random.randint(5, 10)
+                tickets = _random_solution_tickets(people_count)
                 db_update_ticket(q_conn, current_train, seg_from, seg_to, seat_type, tickets)
                 segments.append({
                     "train_num": current_train,
@@ -743,7 +752,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                     raise HTTPException(status_code=400, detail=f"段 {seg_idx} 买短补长无中间站")
                 mid_idx = random.choice(mid_indices)
                 mid_id = current_stops[mid_idx]["station_id"]
-                tickets = random.randint(5, 10)
+                tickets = _random_solution_tickets(people_count)
                 db_update_ticket(q_conn, current_train, seg_from, mid_id, seat_type, tickets)
                 segments.append({
                     "train_num": current_train,
@@ -763,7 +772,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                     raise HTTPException(status_code=400, detail=f"段 {seg_idx} 前额外无足够车站")
                 k = random.randint(1, max_extra)
                 extra_from_id = current_stops[cur_from_idx - k]["station_id"]
-                tickets = random.randint(5, 10)
+                tickets = _random_solution_tickets(people_count)
                 db_update_ticket(q_conn, current_train, extra_from_id, seg_to, seat_type, tickets)
                 segments.append({
                     "train_num": current_train,
@@ -783,7 +792,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                     raise HTTPException(status_code=400, detail=f"段 {seg_idx} 后额外无足够车站")
                 k = random.randint(1, max_extra)
                 extra_to_id = current_stops[cur_to_idx + k]["station_id"]
-                tickets = random.randint(5, 10)
+                tickets = _random_solution_tickets(people_count)
                 db_update_ticket(q_conn, current_train, seg_from, extra_to_id, seat_type, tickets)
                 segments.append({
                     "train_num": current_train,
@@ -818,11 +827,13 @@ def _clear_direct_route(q_conn: sqlite3.Connection, train_num: str,
 def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
                          train_num: str, solution_pairs: set,
                          density: float = 0.15,
-                         block_pairs: set = None):
+                         block_pairs: set = None,
+                         people_count: int = None):
     """
     在指定车次的所有站对上随机放置干扰票（跳过合法解占用的站对）。
     solution_pairs: {(from_id, to_id)} 合法解的站对
     block_pairs: 额外禁止生成的站对（如全局直达 A→B），所有车次一律跳过
+    people_count: 非空=伪干扰模式（干扰票数 ≤ people_count）；空=真干扰（票数随机 1~10）
     """
     if block_pairs is None:
         block_pairs = set()
@@ -835,11 +846,15 @@ def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
                 candidates.append(pair)
 
     random.shuffle(candidates)
-    selected = candidates[:max(1, int(len(candidates) * density))]
+    n = int(len(candidates) * density)
+    selected = candidates[:n] if n > 0 else []
 
     for from_id, to_id in selected:
         seat = random.choice(TICKET_TABLES)
-        tickets = random.randint(1, 3)
+        if people_count is not None:
+            tickets = random.randint(1, max(1, people_count))  # 伪干扰：票数 ≤ 人数
+        else:
+            tickets = random.randint(1, 10)  # 真干扰：票数随机 1~10
         q_conn.execute(f"""
             INSERT OR REPLACE INTO {seat}
             (train_num, from_station_id, to_station_id, tickets)
@@ -851,12 +866,14 @@ def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
 def _add_interference_all_trains(q_conn: sqlite3.Connection, rw_conn: sqlite3.Connection,
                                   target_train_num: str, target_solution_pairs: set,
                                   density: float = 0.15,
-                                  block_pairs: set = None):
+                                  block_pairs: set = None,
+                                  people_count: int = None):
     """
     在所有车次上添加随机干扰票。
     - target_train_num 的经停站对上跳过合法解占用的站对
     - 其他车次在所有经停站对随机添加
     - block_pairs 在所有车次上一律跳过（防止生成直达 A→B 逃逸）
+    - people_count 非空=伪干扰模式（票数 ≤ 人数），空=真干扰（随机 1~10）
     """
     all_trains = get_all_train_nums(rw_conn)
     for train_num in all_trains:
@@ -865,7 +882,7 @@ def _add_interference_all_trains(q_conn: sqlite3.Connection, rw_conn: sqlite3.Co
             continue
         # 目标车次跳过合法解站对，其他车次不跳过
         local_pairs = target_solution_pairs if train_num == target_train_num else set()
-        _add_random_tickets(q_conn, stops, train_num, local_pairs, density, block_pairs)
+        _add_random_tickets(q_conn, stops, train_num, local_pairs, density, block_pairs, people_count)
 
 
 # --- POST /api/auto_generate auto出题器生成题目 ---
@@ -875,6 +892,12 @@ def api_auto_generate(req: AutoGenerateRequest):
     valid_types = ["transfer", "short_buy", "extra_front", "extra_rear", "mixed"]
     if req.question_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"无效的题型: {req.question_type}")
+
+    # 校验需求人数与答案票等级
+    if not (1 <= req.people_count <= QUESTION_CONFIG["ticket_max_value"]):
+        raise HTTPException(status_code=400, detail=f"人数超出范围: {req.people_count}")
+    if req.seat_type not in TICKET_TABLES:
+        raise HTTPException(status_code=400, detail=f"无效的座位类型: {req.seat_type}")
 
     if req.question_type == "mixed":
         if req.transfers < 1:
@@ -986,6 +1009,8 @@ def api_auto_generate(req: AutoGenerateRequest):
                     from_idx=cur_from_idx, to_idx=cur_to_idx,
                     segment_plans=req.segment_plans,
                     transfer_dest=transfer_dest,
+                    seat_type=req.seat_type,
+                    people_count=req.people_count,
                 )
                 solution_segments = solution_result["segments"]
 
@@ -999,7 +1024,8 @@ def api_auto_generate(req: AutoGenerateRequest):
                     _add_interference_all_trains(
                         q_conn, rw_conn, target_train_num,
                         solution_pairs, req.interference_density,
-                        block_pairs={(cur_from_id, cur_to_id)}
+                        block_pairs={(cur_from_id, cur_to_id)},
+                        people_count=req.people_count if req.fake_interference else None,
                     )
                     _clear_direct_route(q_conn, target_train_num, cur_from_id, cur_to_id)
 
@@ -1058,9 +1084,12 @@ def api_auto_generate(req: AutoGenerateRequest):
                     "cur_to_id": cur_to_id,
                     "stops": stops,
                     "random_tickets": req.random_tickets,
+                    "fake_interference": req.fake_interference,
                     "interference_density": req.interference_density,
                     "segment_plans": req.segment_plans,
                     "interference": req.random_tickets,
+                    "people_count": req.people_count,
+                    "seat_type": req.seat_type,
                     "question": question_str,
                 }
 
@@ -1203,7 +1232,8 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
                 _add_interference_all_trains(
                     q_conn, rw_conn, cached["target_train_num"],
                     solution_pairs, cached["interference_density"],
-                    block_pairs={(cached["cur_from_id"], cached["cur_to_id"])}
+                    block_pairs={(cached["cur_from_id"], cached["cur_to_id"])},
+                    people_count=cached.get("people_count") if cached.get("fake_interference") else None,
                 )
             finally:
                 rw_conn.close()
@@ -1237,6 +1267,12 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
         "question": cached.get("question"),
         "segment_plans": cached.get("segment_plans"),
         "interference": cached.get("interference"),
+        "interference_mode": (
+            "fake" if cached.get("fake_interference")
+            else ("real" if cached.get("interference") else None)
+        ),
+        "people_count": cached.get("people_count"),
+        "seat_type": cached.get("seat_type"),
     }
     # 仅选择性题（有干扰票）才记录干扰密度，存在性题不写入该字段
     if cached.get("interference"):

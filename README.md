@@ -180,12 +180,17 @@ python server.py
 人工逐格设置余票数量，适合精细控制。
 
 ### 2. 存在性自动出题
-- 只写合法解（稀疏存储），无干扰票
-- 模型只需找到**一条**可行路径
+- 答案**唯一**，模型只需找到**一条**可行路径
+- 可设置**需求人数**（答案票数 ≥ 人数）和**答案票等级**（class0/1/2）
+- 默认加入**伪干扰**（干扰票数 ≤ 人数，制造"看起来像但票不够"的干扰项），密度滑条 **0~1%**（默认 0.1%，步长 0.01%）
+- 模型需通过"票数是否够 + 等级是否匹配"筛选出**唯一**正确答案
 
 ### 3. 选择性自动出题
-- 在合法解基础上添加随机干扰票（`interference: true`）
-- 模型需**筛选最优**方案
+- 答案**多个**，模型需**筛选最优**方案
+- 可设置需求人数（答案票数 ≥ 人数）和答案票等级
+- 在合法解基础上添加**真干扰**（票数随机 1~10、等级随机），密度滑条 **0~5%**（默认 2%，步长 0.01%）
+
+> 生成后 metadata 中 `interference_mode` 字段区分干扰类型：`fake`=存在性伪干扰、`real`=选择性真干扰。
 
 ### 支持题型
 `transfer`（换乘）/ `short_buy`（买短补长）/ `extra_front`（额外前）/ `extra_rear`（额外后）/ `mixed`（混合，每段可独立选策略）
@@ -212,33 +217,92 @@ python server.py
 
 ---
 
-## 常用工具脚本
+## 脚本与命令行工具
 
-| 脚本 | 用途 |
-|------|------|
-| `cleanup_incomplete_trains.py` | 清理票价不全的车次（逐个确认） |
-| `nl_question.py` | 调用大模型将题目 `question` 转化为自然购票需求（见下文） |
-
----
-
-### 题目自然语言化工具（`nl_question.py`）
-
-把 metadata 中僵硬的 `question`（如 `"北京南到上海虹桥"`）转化为自然、口语化的购票需求，写回 `nl_question` 字段（原 `question` 保留）。
+### ① 基础数据爬虫 `collector.py`（车次 / 经停站 / 车站 / 同车映射）
 
 ```bash
-python nl_question.py                        # 交互式填写 API/模型/URL
-python nl_question.py --api-key sk-xxx       # 直接传 API Key
+python collector.py
 ```
 
-**交互键位**：
+- **无参数**，一键执行全流程（7 个阶段）：
+  采集车站列表 → 初始化 HTTP 会话 → 枚举 G 车次 → 采集经停站 → 物化 station_trains 表 → 构建同车多号映射 → 数据完整性验证
+- 需联网访问 12306，数据写入 `data/railway.db`（stations / trains / train_stops / station_trains）和 `data/same_trains.json`
+- 若 12306 数据有更新，重新运行即可
+
+### ② 票价爬虫 `price_collector.py`
+
+```bash
+python price_collector.py                 # 全量爬取
+python price_collector.py --resume        # 断点续爬（跳过已完整爬取的车次）
+python price_collector.py --supplement    # 补充模式：仅补爬缺失站对，保留已有数据
+python price_collector.py --train G1      # 只爬指定车次
+python price_collector.py --workers 4     # 4 线程并发（默认 1，建议 3~5）
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--resume` | 断点续爬；会校验每个车次的站对完整性，不完整的自动重爬 |
+| `--supplement` | 只补爬缺失的站对，不删除已有票价数据 |
+| `--train` | 仅爬取指定车次（如 `G1`） |
+| `--workers` | 并发线程数，默认 1，建议 3~5 |
+
+> 票价数据写入 `data/prices.db`。查询日期来自 `config.py` 的 `CRAWLER_CONFIG["query_date_days_list"]`（默认未来 3/9/13 天）。
+
+### ③ 题目自然语言化工具 `nl_question.py`（重点）
+
+把 metadata 中僵硬的 `question`（如 `"北京南到上海虹桥"`）转化为自然、口语化的**购票者口吻**需求，写回 `nl_question` 字段（原 `question` 保留）。测试器加载题目时会自动用 `nl_question` 填充对话输入框。
+
+```bash
+# 交互式填写 API Key / 模型 / URL（默认跳过已有 nl_question 的题目）
+python nl_question.py
+
+# 直接传 API Key
+python nl_question.py --api-key sk-xxx
+
+# 指定模型与 API 地址
+python nl_question.py --model deepseek-chat --base-url https://api.deepseek.com
+
+# 强制重新生成已有 nl_question 的题目
+python nl_question.py --force
+
+# 只处理指定题目（可多次指定；指定题即使已有 nl_question 也会重新生成）
+python nl_question.py --question a1 --question a2
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--api-key` | 空（交互填写） | 大模型 API Key |
+| `--model` | `deepseek-v4-flash` | 模型名称 |
+| `--base-url` | `https://api.deepseek.com` | OpenAI 兼容 API 地址 |
+| `--force` | 关 | 强制重新生成已保存 `nl_question` 的题目（默认跳过） |
+| `--question` | 无 | 只处理指定题目 ID，可多次指定（`--question a1 --question a2`）；指定题即使已有 `nl_question` 也会重新生成 |
+
+**交互键位**（逐题生成，人工确认后保存）：
+
 | 按键 | 行为 |
 |------|------|
 | `Enter` | 接受并保存当前生成 |
 | `x` | 重新生成一条 |
 | `n` | 跳过此题（不保存） |
-| `Ctrl+C` | 中止整个脚本 |
+| `Ctrl+C` | 中止整个脚本（已保存的不受影响） |
 
-**设计原则**：生成器只"知道"题目结构与题型（`question`/`type`/混合的 `segment_plans`），**不泄露车票存在信息**（不含 `answer` 标准路径）。提示词模板 `NL_PROMPT_TEMPLATE` 为独立常量，可自行修改。
+**约束传递（重要）**：`build_prompt` 会把题目的**需求人数 `people_count` 和答案票等级 `seat_type`** 一并传给模型（旧题缺字段自动回落默认 2 人 / 二等座）。提示词要求：
+- 以**真实购票者身份**、自然口语化提问
+- **自然隐含**人数与等级（如"我们五个同事…""带爸妈想躺一躺…"），**禁止**"买 X 张 / 买 X 等座"式硬性表达
+- 内置 4 个 few-shot 示例；保留出发/到达站、不指定中间站、不泄露车票信息/策略
+
+> 提示词模板 `NL_PROMPT_TEMPLATE` 为 `nl_question.py` 顶部独立常量，可自行修改。生成器只"知道"题目结构、题型与人数/等级约束，**不泄露车票存在信息**（不含 `answer` 标准路径）。
+
+### ④ 清理数据不全车次 `cleanup_incomplete_trains.py`
+
+```bash
+python cleanup_incomplete_trains.py
+```
+
+- 逐个检查车次的票价数据完整性，发现数据不全的车次**逐个确认**：`y`=删除 / `n`=跳过（`Enter` 默认删除）
+- 删除的车次会同步从 `trains` 表移除，避免出题/测评引用到"幽灵车次"
+
 ---
 
 ## 技术栈
