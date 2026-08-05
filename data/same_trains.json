@@ -326,19 +326,6 @@
   },
   {
     "trains": [
-      "G1166",
-      "G1167"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "广州南",
-    "num_stops": 20,
-    "start_time": "10:33",
-    "end_time": "23:03",
-    "route": "银川 → 广州南"
-  },
-  {
-    "trains": [
       "G1171",
       "G1174"
     ],
@@ -2562,16 +2549,16 @@
   },
   {
     "trains": [
-      "G1786",
-      "G1787"
+      "G1785",
+      "G1788"
     ],
     "count": 2,
-    "start_station": "上海虹桥",
-    "end_station": "武汉",
+    "start_station": "武汉",
+    "end_station": "上海虹桥",
     "num_stops": 11,
-    "start_time": "06:00",
-    "end_time": "10:43",
-    "route": "上海虹桥 → 武汉"
+    "start_time": "18:52",
+    "end_time": "23:30",
+    "route": "武汉 → 上海虹桥"
   },
   {
     "trains": [
@@ -2715,19 +2702,6 @@
     "start_time": "09:01",
     "end_time": "15:27",
     "route": "安阳东 → 上海虹桥"
-  },
-  {
-    "trains": [
-      "G1817",
-      "G1820"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "上海虹桥",
-    "num_stops": 20,
-    "start_time": "07:40",
-    "end_time": "18:10",
-    "route": "银川 → 上海虹桥"
   },
   {
     "trains": [
@@ -3043,19 +3017,6 @@
   },
   {
     "trains": [
-      "G1873",
-      "G1876"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "杭州东",
-    "num_stops": 21,
-    "start_time": "12:11",
-    "end_time": "23:26",
-    "route": "兰州西 → 杭州东"
-  },
-  {
-    "trains": [
       "G1874",
       "G1875"
     ],
@@ -3212,19 +3173,6 @@
   },
   {
     "trains": [
-      "G1901",
-      "G1904"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "福州南",
-    "num_stops": 27,
-    "start_time": "07:41",
-    "end_time": "21:24",
-    "route": "兰州西 → 福州南"
-  },
-  {
-    "trains": [
       "G1902",
       "G1903"
     ],
@@ -3235,19 +3183,6 @@
     "start_time": "07:50",
     "end_time": "21:22",
     "route": "福州南 → 兰州西"
-  },
-  {
-    "trains": [
-      "G1907",
-      "G1910"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "济南西",
-    "num_stops": 19,
-    "start_time": "13:17",
-    "end_time": "22:42",
-    "route": "银川 → 济南西"
   },
   {
     "trains": [
@@ -3381,19 +3316,6 @@
   },
   {
     "trains": [
-      "G1943",
-      "G1946"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "杭州西",
-    "num_stops": 22,
-    "start_time": "11:22",
-    "end_time": "22:47",
-    "route": "银川 → 杭州西"
-  },
-  {
-    "trains": [
       "G1944",
       "G1945"
     ],
@@ -3485,19 +3407,6 @@
   },
   {
     "trains": [
-      "G1969",
-      "G1972"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "上海虹桥",
-    "num_stops": 24,
-    "start_time": "10:48",
-    "end_time": "22:01",
-    "route": "兰州西 → 上海虹桥"
-  },
-  {
-    "trains": [
       "G1970",
       "G1971"
     ],
@@ -3534,19 +3443,6 @@
     "start_time": "07:16",
     "end_time": "19:54",
     "route": "上海虹桥 → 重庆西"
-  },
-  {
-    "trains": [
-      "G1977",
-      "G1980"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "上海虹桥",
-    "num_stops": 24,
-    "start_time": "07:58",
-    "end_time": "20:07",
-    "route": "兰州西 → 上海虹桥"
   },
   {
     "trains": [
@@ -3677,19 +3573,6 @@
     "start_time": "07:35",
     "end_time": "15:13",
     "route": "济南东 → 兰州西"
-  },
-  {
-    "trains": [
-      "G2004",
-      "G2005"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "济南东",
-    "num_stops": 11,
-    "start_time": "15:35",
-    "end_time": "23:02",
-    "route": "兰州西 → 济南东"
   },
   {
     "trains": [
@@ -4109,19 +3992,6 @@
   },
   {
     "trains": [
-      "G2093",
-      "G2096"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "青岛北",
-    "num_stops": 21,
-    "start_time": "10:13",
-    "end_time": "21:21",
-    "route": "兰州西 → 青岛北"
-  },
-  {
-    "trains": [
       "G2094",
       "G2095"
     ],
@@ -4314,19 +4184,6 @@
     "start_time": "09:30",
     "end_time": "20:28",
     "route": "荣成 → 兰州西"
-  },
-  {
-    "trains": [
-      "G2146",
-      "G2147"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "荣成",
-    "num_stops": 21,
-    "start_time": "09:12",
-    "end_time": "19:54",
-    "route": "兰州西 → 荣成"
   },
   {
     "trains": [
@@ -4785,19 +4642,6 @@
   },
   {
     "trains": [
-      "G2256",
-      "G2257"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "郑州东",
-    "num_stops": 13,
-    "start_time": "15:33",
-    "end_time": "21:26",
-    "route": "银川 → 郑州东"
-  },
-  {
-    "trains": [
       "G2259",
       "G2262"
     ],
@@ -4808,19 +4652,6 @@
     "start_time": "07:44",
     "end_time": "18:49",
     "route": "青岛北 → 银川"
-  },
-  {
-    "trains": [
-      "G2260",
-      "G2261"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "青岛北",
-    "num_stops": 22,
-    "start_time": "06:24",
-    "end_time": "17:26",
-    "route": "银川 → 青岛北"
   },
   {
     "trains": [
@@ -6121,19 +5952,6 @@
     "start_time": "08:49",
     "end_time": "22:32",
     "route": "贵阳北 → 南通"
-  },
-  {
-    "trains": [
-      "G2683",
-      "G2686"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "烟台",
-    "num_stops": 27,
-    "start_time": "06:45",
-    "end_time": "19:05",
-    "route": "兰州西 → 烟台"
   },
   {
     "trains": [
@@ -7541,19 +7359,6 @@
   },
   {
     "trains": [
-      "G3163",
-      "G3166"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "上海虹桥",
-    "num_stops": 23,
-    "start_time": "08:29",
-    "end_time": "20:15",
-    "route": "兰州西 → 上海虹桥"
-  },
-  {
-    "trains": [
       "G3164",
       "G3165"
     ],
@@ -7580,19 +7385,6 @@
   },
   {
     "trains": [
-      "G3168",
-      "G3169"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "威海",
-    "num_stops": 19,
-    "start_time": "10:43",
-    "end_time": "21:30",
-    "route": "兰州西 → 威海"
-  },
-  {
-    "trains": [
       "G3171",
       "G3174"
     ],
@@ -7603,19 +7395,6 @@
     "start_time": "10:15",
     "end_time": "21:45",
     "route": "上海虹桥 → 银川"
-  },
-  {
-    "trains": [
-      "G3172",
-      "G3173"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "上海虹桥",
-    "num_stops": 25,
-    "start_time": "07:00",
-    "end_time": "19:14",
-    "route": "银川 → 上海虹桥"
   },
   {
     "trains": [
@@ -7645,19 +7424,6 @@
   },
   {
     "trains": [
-      "G3179",
-      "G3182"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "武汉",
-    "num_stops": 15,
-    "start_time": "12:39",
-    "end_time": "20:34",
-    "route": "兰州西 → 武汉"
-  },
-  {
-    "trains": [
       "G3180",
       "G3181"
     ],
@@ -7668,19 +7434,6 @@
     "start_time": "09:42",
     "end_time": "17:17",
     "route": "武汉 → 兰州西"
-  },
-  {
-    "trains": [
-      "G3183",
-      "G3186"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "南昌东",
-    "num_stops": 26,
-    "start_time": "09:07",
-    "end_time": "21:40",
-    "route": "兰州西 → 南昌东"
   },
   {
     "trains": [
@@ -7710,16 +7463,16 @@
   },
   {
     "trains": [
-      "G3188",
-      "G3189"
+      "G3191",
+      "G3194"
     ],
     "count": 2,
-    "start_station": "银川",
-    "end_station": "杭州西",
-    "num_stops": 19,
-    "start_time": "09:02",
-    "end_time": "20:25",
-    "route": "银川 → 杭州西"
+    "start_station": "焦作",
+    "end_station": "温岭",
+    "num_stops": 20,
+    "start_time": "15:35",
+    "end_time": "23:30",
+    "route": "焦作 → 温岭"
   },
   {
     "trains": [
@@ -7983,19 +7736,6 @@
   },
   {
     "trains": [
-      "G3255",
-      "G3258"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "上海南",
-    "num_stops": 20,
-    "start_time": "07:17",
-    "end_time": "19:02",
-    "route": "兰州西 → 上海南"
-  },
-  {
-    "trains": [
       "G3256",
       "G3257"
     ],
@@ -8058,6 +7798,32 @@
     "start_time": "07:05",
     "end_time": "14:30",
     "route": "杭州西 → 武汉"
+  },
+  {
+    "trains": [
+      "G3275",
+      "G3278"
+    ],
+    "count": 2,
+    "start_station": "西安北",
+    "end_station": "江阴",
+    "num_stops": 12,
+    "start_time": "06:36",
+    "end_time": "14:54",
+    "route": "西安北 → 江阴"
+  },
+  {
+    "trains": [
+      "G3276",
+      "G3277"
+    ],
+    "count": 2,
+    "start_station": "江阴",
+    "end_station": "西安北",
+    "num_stops": 12,
+    "start_time": "15:16",
+    "end_time": "23:41",
+    "route": "江阴 → 西安北"
   },
   {
     "trains": [
@@ -8698,19 +8464,6 @@
   },
   {
     "trains": [
-      "G3440",
-      "G3441"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "沙坪坝",
-    "num_stops": 20,
-    "start_time": "13:28",
-    "end_time": "23:02",
-    "route": "银川 → 沙坪坝"
-  },
-  {
-    "trains": [
       "G3445",
       "G3448"
     ],
@@ -8955,19 +8708,6 @@
     "start_time": "12:55",
     "end_time": "20:20",
     "route": "北京西 → 银川"
-  },
-  {
-    "trains": [
-      "G354",
-      "G355"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "北京西",
-    "num_stops": 9,
-    "start_time": "08:56",
-    "end_time": "16:32",
-    "route": "银川 → 北京西"
   },
   {
     "trains": [
@@ -10115,19 +9855,6 @@
   },
   {
     "trains": [
-      "G3918",
-      "G3919"
-    ],
-    "count": 2,
-    "start_station": "银川",
-    "end_station": "汉口",
-    "num_stops": 16,
-    "start_time": "08:00",
-    "end_time": "15:48",
-    "route": "银川 → 汉口"
-  },
-  {
-    "trains": [
       "G3921",
       "G3924"
     ],
@@ -10203,19 +9930,6 @@
     "start_time": "14:54",
     "end_time": "21:16",
     "route": "商洛西 → 北京西"
-  },
-  {
-    "trains": [
-      "G403",
-      "G406"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "广州南",
-    "num_stops": 9,
-    "start_time": "09:35",
-    "end_time": "19:30",
-    "route": "兰州西 → 广州南"
   },
   {
     "trains": [
@@ -10323,6 +10037,19 @@
   },
   {
     "trains": [
+      "G4392",
+      "G4393"
+    ],
+    "count": 2,
+    "start_station": "福州南",
+    "end_station": "武汉",
+    "num_stops": 17,
+    "start_time": "15:58",
+    "end_time": "22:30",
+    "route": "福州南 → 武汉"
+  },
+  {
+    "trains": [
       "G451",
       "G454"
     ],
@@ -10424,19 +10151,6 @@
     "start_time": "06:52",
     "end_time": "15:24",
     "route": "太原南 → 汉口"
-  },
-  {
-    "trains": [
-      "G463",
-      "G466"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "上海虹桥",
-    "num_stops": 14,
-    "start_time": "12:56",
-    "end_time": "23:02",
-    "route": "兰州西 → 上海虹桥"
   },
   {
     "trains": [
@@ -10580,6 +10294,32 @@
     "start_time": "12:30",
     "end_time": "14:34",
     "route": "南昌 → 景德镇北"
+  },
+  {
+    "trains": [
+      "G5035",
+      "G5038"
+    ],
+    "count": 2,
+    "start_station": "南昌",
+    "end_station": "南 昌",
+    "num_stops": 14,
+    "start_time": "15:32",
+    "end_time": "21:04",
+    "route": "南昌 → 南 昌"
+  },
+  {
+    "trains": [
+      "G5036",
+      "G5037"
+    ],
+    "count": 2,
+    "start_station": "南昌",
+    "end_station": "南 昌",
+    "num_stops": 14,
+    "start_time": "09:05",
+    "end_time": "14:25",
+    "route": "南昌 → 南 昌"
   },
   {
     "trains": [
@@ -10797,7 +10537,7 @@
     "count": 2,
     "start_station": "深圳",
     "end_station": "湛江北",
-    "num_stops": 9,
+    "num_stops": 8,
     "start_time": "15:18",
     "end_time": "18:36",
     "route": "深圳 → 湛江北"
@@ -10892,6 +10632,58 @@
     "start_time": "19:00",
     "end_time": "22:22",
     "route": "湛江北 → 深圳"
+  },
+  {
+    "trains": [
+      "G5249",
+      "G5252"
+    ],
+    "count": 2,
+    "start_station": "广州",
+    "end_station": "深圳",
+    "num_stops": 20,
+    "start_time": "08:36",
+    "end_time": "15:15",
+    "route": "广州 → 深圳"
+  },
+  {
+    "trains": [
+      "G5253",
+      "G5256"
+    ],
+    "count": 2,
+    "start_station": "深圳",
+    "end_station": "深  圳",
+    "num_stops": 20,
+    "start_time": "16:16",
+    "end_time": "22:41",
+    "route": "深圳 → 深  圳"
+  },
+  {
+    "trains": [
+      "G5254",
+      "G5255"
+    ],
+    "count": 2,
+    "start_station": "深圳",
+    "end_station": "深  圳",
+    "num_stops": 14,
+    "start_time": "07:41",
+    "end_time": "13:11",
+    "route": "深圳 → 深  圳"
+  },
+  {
+    "trains": [
+      "G5257",
+      "G5260"
+    ],
+    "count": 2,
+    "start_station": "深圳",
+    "end_station": "广州东",
+    "num_stops": 17,
+    "start_time": "13:43",
+    "end_time": "19:39",
+    "route": "深圳 → 广州东"
   },
   {
     "trains": [
@@ -11009,6 +10801,32 @@
     "start_time": "10:22",
     "end_time": "11:35",
     "route": "平度 → 青岛"
+  },
+  {
+    "trains": [
+      "G5336",
+      "G5337"
+    ],
+    "count": 2,
+    "start_station": "威海",
+    "end_station": "聊城西",
+    "num_stops": 11,
+    "start_time": "09:54",
+    "end_time": "14:04",
+    "route": "威海 → 聊城西"
+  },
+  {
+    "trains": [
+      "G5338",
+      "G5339"
+    ],
+    "count": 2,
+    "start_station": "聊城西",
+    "end_station": "威海",
+    "num_stops": 8,
+    "start_time": "14:28",
+    "end_time": "18:52",
+    "route": "聊城西 → 威海"
   },
   {
     "trains": [
@@ -11389,6 +11207,32 @@
   },
   {
     "trains": [
+      "G5555",
+      "G5558"
+    ],
+    "count": 2,
+    "start_station": "济南",
+    "end_station": "济  南",
+    "num_stops": 14,
+    "start_time": "15:22",
+    "end_time": "21:30",
+    "route": "济南 → 济  南"
+  },
+  {
+    "trains": [
+      "G5556",
+      "G5557"
+    ],
+    "count": 2,
+    "start_station": "济南",
+    "end_station": "济  南",
+    "num_stops": 19,
+    "start_time": "07:39",
+    "end_time": "14:48",
+    "route": "济南 → 济  南"
+  },
+  {
+    "trains": [
       "G5562",
       "G5563"
     ],
@@ -11571,6 +11415,19 @@
   },
   {
     "trains": [
+      "G5597",
+      "G5600"
+    ],
+    "count": 2,
+    "start_station": "临沂北",
+    "end_station": "临  沂北",
+    "num_stops": 12,
+    "start_time": "06:57",
+    "end_time": "12:17",
+    "route": "临沂北 → 临  沂北"
+  },
+  {
+    "trains": [
       "G5665",
       "G5668"
     ],
@@ -11619,6 +11476,19 @@
     "num_stops": 5,
     "start_time": "18:16",
     "end_time": "20:28",
+    "route": "重庆西 → 成都东"
+  },
+  {
+    "trains": [
+      "G5762",
+      "G5763"
+    ],
+    "count": 2,
+    "start_station": "重庆西",
+    "end_station": "成都东",
+    "num_stops": 8,
+    "start_time": "08:49",
+    "end_time": "11:19",
     "route": "重庆西 → 成都东"
   },
   {
@@ -12793,6 +12663,19 @@
   },
   {
     "trains": [
+      "G6341",
+      "G6344"
+    ],
+    "count": 2,
+    "start_station": "广州南",
+    "end_station": "汕头",
+    "num_stops": 6,
+    "start_time": "21:13",
+    "end_time": "23:55",
+    "route": "广州南 → 汕头"
+  },
+  {
+    "trains": [
       "G6346",
       "G6347"
     ],
@@ -12911,9 +12794,11 @@
   {
     "trains": [
       "G6365",
-      "G6368"
+      "G6368",
+      "G9679",
+      "G9682"
     ],
-    "count": 2,
+    "count": 4,
     "start_station": "张家界西",
     "end_station": "长沙南",
     "num_stops": 8,
@@ -12949,19 +12834,6 @@
   },
   {
     "trains": [
-      "G639",
-      "G642"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "南昌西",
-    "num_stops": 16,
-    "start_time": "08:40",
-    "end_time": "18:56",
-    "route": "兰州西 → 南昌西"
-  },
-  {
-    "trains": [
       "G640",
       "G641"
     ],
@@ -12985,6 +12857,19 @@
     "start_time": "20:03",
     "end_time": "23:01",
     "route": "张家界西 → 长沙南"
+  },
+  {
+    "trains": [
+      "G6422",
+      "G6423"
+    ],
+    "count": 2,
+    "start_station": "长沙南",
+    "end_station": "张家界西",
+    "num_stops": 7,
+    "start_time": "07:02",
+    "end_time": "10:02",
+    "route": "长沙南 → 张家界西"
   },
   {
     "trains": [
@@ -13391,6 +13276,58 @@
   },
   {
     "trains": [
+      "G6771",
+      "G6774"
+    ],
+    "count": 2,
+    "start_station": "襄阳东",
+    "end_station": "襄阳  东",
+    "num_stops": 15,
+    "start_time": "09:07",
+    "end_time": "14:33",
+    "route": "襄阳东 → 襄阳  东"
+  },
+  {
+    "trains": [
+      "G6772",
+      "G6773"
+    ],
+    "count": 2,
+    "start_station": "宜昌东",
+    "end_station": "宜昌  东",
+    "num_stops": 14,
+    "start_time": "08:05",
+    "end_time": "13:48",
+    "route": "宜昌东 → 宜昌  东"
+  },
+  {
+    "trains": [
+      "G6775",
+      "G6778"
+    ],
+    "count": 2,
+    "start_station": "襄阳东",
+    "end_station": "襄阳  东",
+    "num_stops": 12,
+    "start_time": "15:03",
+    "end_time": "20:40",
+    "route": "襄阳东 → 襄阳  东"
+  },
+  {
+    "trains": [
+      "G6776",
+      "G6777"
+    ],
+    "count": 2,
+    "start_station": "宜昌东",
+    "end_station": "宜昌  东",
+    "num_stops": 13,
+    "start_time": "14:07",
+    "end_time": "19:38",
+    "route": "宜昌东 → 宜昌  东"
+  },
+  {
+    "trains": [
       "G6857",
       "G6860"
     ],
@@ -13544,6 +13481,84 @@
     "start_time": "07:41",
     "end_time": "12:44",
     "route": "临沂北 → 青岛"
+  },
+  {
+    "trains": [
+      "G6955",
+      "G6958"
+    ],
+    "count": 2,
+    "start_station": "青岛北",
+    "end_station": "青  岛北",
+    "num_stops": 17,
+    "start_time": "09:20",
+    "end_time": "15:23",
+    "route": "青岛北 → 青  岛北"
+  },
+  {
+    "trains": [
+      "G6956",
+      "G6957"
+    ],
+    "count": 2,
+    "start_station": "青岛北",
+    "end_station": "青  岛北",
+    "num_stops": 18,
+    "start_time": "07:58",
+    "end_time": "14:12",
+    "route": "青岛北 → 青  岛北"
+  },
+  {
+    "trains": [
+      "G6965",
+      "G6968"
+    ],
+    "count": 2,
+    "start_station": "济南西",
+    "end_station": "济  南西",
+    "num_stops": 16,
+    "start_time": "16:01",
+    "end_time": "22:31",
+    "route": "济南西 → 济  南西"
+  },
+  {
+    "trains": [
+      "G6966",
+      "G6967"
+    ],
+    "count": 2,
+    "start_station": "济南西",
+    "end_station": "济  南西",
+    "num_stops": 12,
+    "start_time": "09:08",
+    "end_time": "14:41",
+    "route": "济南西 → 济  南西"
+  },
+  {
+    "trains": [
+      "G6975",
+      "G6978"
+    ],
+    "count": 2,
+    "start_station": "青岛北",
+    "end_station": "青  岛北",
+    "num_stops": 13,
+    "start_time": "16:29",
+    "end_time": "22:14",
+    "route": "青岛北 → 青  岛北"
+  },
+  {
+    "trains": [
+      "G6976",
+      "G6977"
+    ],
+    "count": 2,
+    "start_station": "青岛北",
+    "end_station": "青  岛北",
+    "num_stops": 15,
+    "start_time": "14:30",
+    "end_time": "20:24",
+    "route": "青岛北 → 青  岛北"
   },
   {
     "trains": [
@@ -14623,6 +14638,19 @@
     "start_time": "17:43",
     "end_time": "21:35",
     "route": "上海 → 淮北"
+  },
+  {
+    "trains": [
+      "G7295",
+      "G7298"
+    ],
+    "count": 2,
+    "start_station": "淮北",
+    "end_station": "上海",
+    "num_stops": 10,
+    "start_time": "15:49",
+    "end_time": "19:33",
+    "route": "淮北 → 上海"
   },
   {
     "trains": [
@@ -16277,6 +16305,32 @@
   },
   {
     "trains": [
+      "G8131",
+      "G8134"
+    ],
+    "count": 2,
+    "start_station": "沈阳北",
+    "end_station": "沈  阳北",
+    "num_stops": 12,
+    "start_time": "07:29",
+    "end_time": "13:28",
+    "route": "沈阳北 → 沈  阳北"
+  },
+  {
+    "trains": [
+      "G8132",
+      "G8133"
+    ],
+    "count": 2,
+    "start_station": "沈阳北",
+    "end_station": "沈  阳北",
+    "num_stops": 13,
+    "start_time": "13:48",
+    "end_time": "19:55",
+    "route": "沈阳北 → 沈  阳北"
+  },
+  {
+    "trains": [
       "G8135",
       "G8138"
     ],
@@ -16472,6 +16526,19 @@
   },
   {
     "trains": [
+      "G8331",
+      "G8334"
+    ],
+    "count": 2,
+    "start_station": "合肥南",
+    "end_station": "合肥 南",
+    "num_stops": 6,
+    "start_time": "07:41",
+    "end_time": "10:12",
+    "route": "合肥南 → 合肥 南"
+  },
+  {
+    "trains": [
       "G8335",
       "G8338"
     ],
@@ -16521,6 +16588,32 @@
     "start_time": "13:55",
     "end_time": "17:05",
     "route": "合肥 → 合肥南"
+  },
+  {
+    "trains": [
+      "G8344",
+      "G8345"
+    ],
+    "count": 2,
+    "start_station": "合肥南",
+    "end_station": "合肥 南",
+    "num_stops": 9,
+    "start_time": "15:43",
+    "end_time": "18:44",
+    "route": "合肥南 → 合肥 南"
+  },
+  {
+    "trains": [
+      "G8347",
+      "G8350"
+    ],
+    "count": 2,
+    "start_station": "合肥南",
+    "end_station": "南京南",
+    "num_stops": 9,
+    "start_time": "18:12",
+    "end_time": "21:09",
+    "route": "合肥南 → 南京南"
   },
   {
     "trains": [
@@ -16641,6 +16734,19 @@
   },
   {
     "trains": [
+      "G8431",
+      "G8432"
+    ],
+    "count": 2,
+    "start_station": "广州东",
+    "end_station": "深圳",
+    "num_stops": 15,
+    "start_time": "07:00",
+    "end_time": "12:32",
+    "route": "广州东 → 深圳"
+  },
+  {
+    "trains": [
       "G8445",
       "G8448"
     ],
@@ -16664,19 +16770,6 @@
     "start_time": "13:41",
     "end_time": "19:42",
     "route": "广州东 → 广州南"
-  },
-  {
-    "trains": [
-      "G845",
-      "G848"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "广州南",
-    "num_stops": 20,
-    "start_time": "09:58",
-    "end_time": "22:18",
-    "route": "兰州西 → 广州南"
   },
   {
     "trains": [
@@ -16716,6 +16809,32 @@
     "start_time": "09:20",
     "end_time": "19:27",
     "route": "深圳北 → 西安北"
+  },
+  {
+    "trains": [
+      "G8466",
+      "G8467"
+    ],
+    "count": 2,
+    "start_station": "广州东",
+    "end_station": "潮汕",
+    "num_stops": 12,
+    "start_time": "19:45",
+    "end_time": "23:08",
+    "route": "广州东 → 潮汕"
+  },
+  {
+    "trains": [
+      "G8479",
+      "G8482"
+    ],
+    "count": 2,
+    "start_station": "深圳",
+    "end_station": "广州",
+    "num_stops": 17,
+    "start_time": "12:50",
+    "end_time": "19:14",
+    "route": "深圳 → 广州"
   },
   {
     "trains": [
@@ -16784,10 +16903,37 @@
   },
   {
     "trains": [
-      "G8535",
-      "G8538"
+      "G8531",
+      "G8534"
     ],
     "count": 2,
+    "start_station": "重庆西",
+    "end_station": "重  庆西",
+    "num_stops": 7,
+    "start_time": "10:50",
+    "end_time": "15:13",
+    "route": "重庆西 → 重  庆西"
+  },
+  {
+    "trains": [
+      "G8532",
+      "G8533"
+    ],
+    "count": 2,
+    "start_station": "重庆西",
+    "end_station": "重  庆西",
+    "num_stops": 8,
+    "start_time": "15:38",
+    "end_time": "19:59",
+    "route": "重庆西 → 重  庆西"
+  },
+  {
+    "trains": [
+      "G8535",
+      "G8538",
+      "G8540"
+    ],
+    "count": 3,
     "start_station": "泸州",
     "end_station": "泸  州",
     "num_stops": 12,
@@ -16798,9 +16944,10 @@
   {
     "trains": [
       "G8536",
-      "G8537"
+      "G8537",
+      "G8539"
     ],
-    "count": 2,
+    "count": 3,
     "start_station": "泸州",
     "end_station": "泸  州",
     "num_stops": 13,
@@ -16898,19 +17045,6 @@
     "start_time": "15:33",
     "end_time": "19:34",
     "route": "巫山 → 成都东"
-  },
-  {
-    "trains": [
-      "G863",
-      "G866"
-    ],
-    "count": 2,
-    "start_station": "兰州西",
-    "end_station": "长沙南",
-    "num_stops": 16,
-    "start_time": "07:27",
-    "end_time": "17:00",
-    "route": "兰州西 → 长沙南"
   },
   {
     "trains": [
@@ -17044,6 +17178,19 @@
   },
   {
     "trains": [
+      "G8728",
+      "G8729"
+    ],
+    "count": 2,
+    "start_station": "重庆西",
+    "end_station": "重  庆西",
+    "num_stops": 18,
+    "start_time": "11:12",
+    "end_time": "19:53",
+    "route": "重庆西 → 重  庆西"
+  },
+  {
+    "trains": [
       "G8732",
       "G8733"
     ],
@@ -17057,6 +17204,71 @@
   },
   {
     "trains": [
+      "G8737",
+      "G8740"
+    ],
+    "count": 2,
+    "start_station": "成都东",
+    "end_station": "成  都东",
+    "num_stops": 13,
+    "start_time": "06:40",
+    "end_time": "10:37",
+    "route": "成都东 → 成  都东"
+  },
+  {
+    "trains": [
+      "G8738",
+      "G8739"
+    ],
+    "count": 2,
+    "start_station": "成都东",
+    "end_station": "成  都东",
+    "num_stops": 11,
+    "start_time": "11:00",
+    "end_time": "14:41",
+    "route": "成都东 → 成  都东"
+  },
+  {
+    "trains": [
+      "G8741",
+      "G8744"
+    ],
+    "count": 2,
+    "start_station": "成都东",
+    "end_station": "成  都东",
+    "num_stops": 8,
+    "start_time": "15:04",
+    "end_time": "18:24",
+    "route": "成都东 → 成  都东"
+  },
+  {
+    "trains": [
+      "G8742",
+      "G8743"
+    ],
+    "count": 2,
+    "start_station": "成都东",
+    "end_station": "成  都东",
+    "num_stops": 12,
+    "start_time": "18:53",
+    "end_time": "22:41",
+    "route": "成都东 → 成  都东"
+  },
+  {
+    "trains": [
+      "G8745",
+      "G8748"
+    ],
+    "count": 2,
+    "start_station": "贵阳北",
+    "end_station": "贵  阳北",
+    "num_stops": 16,
+    "start_time": "12:45",
+    "end_time": "21:05",
+    "route": "贵阳北 → 贵  阳北"
+  },
+  {
+    "trains": [
       "G8746",
       "G8747"
     ],
@@ -17067,6 +17279,32 @@
     "start_time": "16:13",
     "end_time": "21:26",
     "route": "宜宾 → 贵阳北"
+  },
+  {
+    "trains": [
+      "G8751",
+      "G8754"
+    ],
+    "count": 2,
+    "start_station": "贵阳北",
+    "end_station": "贵  阳北",
+    "num_stops": 10,
+    "start_time": "16:52",
+    "end_time": "22:45",
+    "route": "贵阳北 → 贵  阳北"
+  },
+  {
+    "trains": [
+      "G8752",
+      "G8753"
+    ],
+    "count": 2,
+    "start_station": "贵阳北",
+    "end_station": "贵  阳北",
+    "num_stops": 14,
+    "start_time": "09:56",
+    "end_time": "16:28",
+    "route": "贵阳北 → 贵  阳北"
   },
   {
     "trains": [
@@ -17551,6 +17789,32 @@
   },
   {
     "trains": [
+      "G9545",
+      "G9548"
+    ],
+    "count": 2,
+    "start_station": "深圳",
+    "end_station": "湛江北",
+    "num_stops": 9,
+    "start_time": "13:49",
+    "end_time": "17:23",
+    "route": "深圳 → 湛江北"
+  },
+  {
+    "trains": [
+      "G9546",
+      "G9547"
+    ],
+    "count": 2,
+    "start_station": "湛江北",
+    "end_station": "深圳",
+    "num_stops": 8,
+    "start_time": "10:20",
+    "end_time": "13:31",
+    "route": "湛江北 → 深圳"
+  },
+  {
+    "trains": [
       "G955",
       "G958"
     ],
@@ -17652,6 +17916,19 @@
     "start_time": "14:38",
     "end_time": "22:06",
     "route": "重庆北 → 济南东"
+  },
+  {
+    "trains": [
+      "G9716",
+      "G9717"
+    ],
+    "count": 2,
+    "start_station": "湛江北",
+    "end_station": "深圳",
+    "num_stops": 12,
+    "start_time": "17:41",
+    "end_time": "21:29",
+    "route": "湛江北 → 深圳"
   },
   {
     "trains": [
