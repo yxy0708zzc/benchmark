@@ -71,7 +71,7 @@ def _create_in_memory_question_db() -> sqlite3.Connection:
             )
         """)
     return conn
-from verifier import verify_final_plan
+from verifier import verify_final_plan, normalize_final_plan
 
 
 # ============================================================
@@ -1273,6 +1273,7 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
         ),
         "people_count": cached.get("people_count"),
         "seat_type": cached.get("seat_type"),
+        "ground_truth": cached.get("segments"),   # BUG6: 结构化标答存进 metadata
     }
     # 仅选择性题（有干扰票）才记录干扰密度，存在性题不写入该字段
     if cached.get("interference"):
@@ -1971,23 +1972,8 @@ def _parse_ai_final_plan(assistant_content: str) -> Optional[List[Dict]]:
             return None
         if len(plan) == 0:
             return []  # 模型明确输出无解
-        # 验证每条记录的必要字段
-        validated = []
-        for item in plan:
-            if all(k in item for k in ("train_num", "from", "to", "seat_type", "tickets")):
-                entry = {
-                    "train_num": item["train_num"],
-                    "from_station_id": item["from"],
-                    "to_station_id": item["to"],
-                    "seat_type": item["seat_type"],
-                    "tickets": int(item["tickets"]),
-                }
-                if "price" in item and item["price"] is not None:
-                    try:
-                        entry["price"] = float(item["price"])
-                    except (ValueError, TypeError):
-                        pass
-                validated.append(entry)
+        # 用 verifier 的统一字段契约归一化（兼容 from/to 与 from_station_id/to_station_id）
+        validated = [e for e in normalize_final_plan(plan) if not e.get("__invalid__")]
         if validated:
             return validated
         # 有 final_plan JSON 但无有效条目

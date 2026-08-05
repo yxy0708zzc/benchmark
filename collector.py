@@ -55,6 +55,15 @@ ANTICRAWL_KEYWORDS = [
     "触发风控", "trigger", "您的请求过于频繁",
 ]
 
+# 站名归一化：车站名均为汉字，去掉所有非汉字字符后用于 name→id 匹配与去重
+_NON_HANZI = re.compile(r"[^\u4e00-\u9fff]")
+
+
+def _norm_station(name: str) -> str:
+    """去除站名中的所有非汉字字符（空格/符号/字母/数字等）。"""
+    return _NON_HANZI.sub("", name or "")
+
+
 class RateLimiter:
     """请求限速器，控制请求间隔"""
 
@@ -205,7 +214,8 @@ class TicketCrawler:
                 station_id = parts[2].strip()
                 if station_id and station_name:
                     self.stations[station_id] = station_name
-                    self.station_name_to_id[station_name] = station_id
+                    # 以“去非汉字”后的站名为 key（车站名均为汉字，避免空格/符号导致匹配不上）
+                    self.station_name_to_id[_norm_station(station_name)] = station_id
                     count += 1
 
         logger.info(f"[车站] 采集完成，共 {count} 个车站")
@@ -403,14 +413,15 @@ class TicketCrawler:
                         stop_time = v
                         break
 
-            # 查找车站电报码（通过站名反向映射）
-            station_id = self.station_name_to_id.get(station_name, "")
+            # 查找车站电报码（通过“去非汉字”后的站名反向映射，避免空格/符号差异 miss）
+            norm_name = _norm_station(station_name)
+            station_id = self.station_name_to_id.get(norm_name, "")
             if not station_id:
                 # 自动注册未知车站（防止外键约束失败）
-                # 使用 "@" 前缀标记为自动生成 ID
+                # 使用 "@" 前缀标记为自动生成 ID；仅在确无合法映射时才注册，且不覆盖已有合法映射
                 station_id = f"@{station_name}"
                 self.stations[station_id] = station_name
-                self.station_name_to_id[station_name] = station_id
+                self.station_name_to_id.setdefault(norm_name, station_id)
 
             stops.append({
                 "stop_no": item.get("station_no", 0),

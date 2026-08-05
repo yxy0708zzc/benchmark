@@ -11,39 +11,95 @@ from config import get_question_db_path
 from database import TICKET_TABLES, get_price, get_prices_conn
 
 
+def normalize_final_plan(raw_plan: List[Dict]) -> List[Dict]:
+    """统一 final_plan 字段契约（唯一入口）。
+
+    兼容两种字段命名：
+      - prompt / 模型输出：train_num, from, to, seat_type, tickets[, price]
+      - 内部存储 / 旧格式：train_num, from_station_id, to_station_id, seat_type, tickets[, price]
+    统一输出 from_station_id / to_station_id，并做类型归一（tickets→int, price→float）。
+
+    缺关键字段或非对象条目：返回条目带 "__invalid__": True，
+    调用方应将其作为 invalid_plan_item 处理（而不是误判为幻觉）。
+    """
+    out: List[Dict] = []
+    for item in raw_plan or []:
+        if not isinstance(item, dict):
+            out.append({"__invalid__": True, "error": "条目非对象", "raw": item})
+            continue
+        train_num = item.get("train_num", "")
+        seat_type = item.get("seat_type", "")
+        from_id = item.get("from_station_id") or item.get("from", "")
+        to_id = item.get("to_station_id") or item.get("to", "")
+        if not (train_num and seat_type and from_id and to_id):
+            out.append({"__invalid__": True, "error": "缺关键字段(train_num/seat_type/from/to)", "raw": item})
+            continue
+        entry: Dict[str, Any] = {
+            "train_num": str(train_num),
+            "from_station_id": str(from_id),
+            "to_station_id": str(to_id),
+            "seat_type": str(seat_type),
+            "tickets": int(item.get("tickets", 0) or 0),
+        }
+        price = item.get("price")
+        if price is not None:
+            try:
+                entry["price"] = float(price)
+            except (ValueError, TypeError):
+                pass
+        out.append(entry)
+    return out
+
+
 def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any]:
     """
     验证最终乘车方案：查余票数据库 + 核验票价。
-    
+
+    字段契约已由 normalize_final_plan 统一：兼容模型输出的 from/to 与内部 from_station_id/to_station_id，
+    外部工具（如 run_benchmark.py）可直接把模型原始 final_plan 传入本函数。
+
     Args:
-        final_plan: 测试记录中的最终方案，每条含 train_num, seat_type, 
-                    from_station_id, to_station_id, tickets[, price]
+        final_plan: 测试记录中的最终方案，每条含 train_num, seat_type,
+                    from_station_id/to_station_id（或 from/to）, tickets[, price]
         question_id: 题目 ID，用于定位对应数据库
-    
+
     Returns:
         {
             "total_items": int,
             "correct_items": int,
             "issue_count": int,
+            "invalid_plan_count": int,
             "results": [{...}],   # 每条方案的验证明细
             "issues": [{...}],    # 有问题的条目
             "summary": str,
         }
     """
+    # ---- 字段契约归一化：任何来源的 final_plan 先归一，缺字段的记为 invalid ----
+    valid_items: List[Dict] = []
+    invalid_items: List[Dict] = []
+    for it in normalize_final_plan(final_plan):
+        (valid_items if not it.get("__invalid__") else invalid_items).append(it)
+    final_plan = valid_items
+    invalid_issues = [{
+        "type": "invalid_plan_item",
+        "detail": f"计划条目无效: {inv.get('error', '未知')} | raw={inv.get('raw')}",
+    } for inv in invalid_items]
+
     db_path = get_question_db_path(question_id)
     if not os.path.exists(db_path):
         return {
             "total_items": 0,
             "correct_items": 0,
-            "issue_count": 1,
+            "issue_count": 1 + len(invalid_issues),
             "hallucination_count": 0,
             "price_issue_count": 0,
+            "invalid_plan_count": len(invalid_items),
             "verdict": "db_not_found",
             "results": [],
             "issues": [{
                 "type": "db_not_found",
                 "detail": f"题目 {question_id} 的数据库不存在",
-            }],
+            }] + invalid_issues,
             "summary": "❌ 题目数据库不存在",
         }
 
@@ -53,7 +109,7 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
         cursor = conn.cursor()
 
         results = []
-        issues = []
+        issues = list(invalid_issues)   # 归一化发现的无效条目一并计入问题
 
         for item in final_plan:
             train_num = item.get("train_num", "")
@@ -175,6 +231,7 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
         "issue_count": total_issue_count,
         "hallucination_count": hallucination_count,
         "price_issue_count": price_issue_count,
+        "invalid_plan_count": len(invalid_items),
         "verdict": verdict,
         "results": results,
         "issues": issues,
