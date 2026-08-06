@@ -468,7 +468,9 @@ def update_question_metadata(question_id: str, status: str,
                              people_count: int = None,
                              seat_type: str = None,
                              interference_mode: str = None,
-                             ground_truth: list = None):
+                             ground_truth: list = None,
+                             start_station_id: str = None,
+                             end_station_id: str = None):
     """更新单条题目的元数据"""
     metadata = load_metadata()
     if question_id in metadata:
@@ -498,6 +500,10 @@ def update_question_metadata(question_id: str, status: str,
             entry["interference_mode"] = interference_mode
         if ground_truth is not None:
             entry["ground_truth"] = ground_truth
+        if start_station_id is not None:
+            entry["start_station_id"] = start_station_id
+        if end_station_id is not None:
+            entry["end_station_id"] = end_station_id
         if trains is not None:
             existing = set(entry.get("trains", []))
             existing.update(trains)
@@ -530,6 +536,10 @@ def update_question_metadata(question_id: str, status: str,
             entry["interference_mode"] = interference_mode
         if ground_truth is not None:
             entry["ground_truth"] = ground_truth
+        if start_station_id is not None:
+            entry["start_station_id"] = start_station_id
+        if end_station_id is not None:
+            entry["end_station_id"] = end_station_id
         if trains is not None:
             entry["trains"] = sorted(set(trains))
         metadata[question_id] = entry

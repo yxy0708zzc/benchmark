@@ -587,8 +587,13 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
             "to": station_names.get(mid_id, mid_id),
             "from_station_id": from_id,
             "to_station_id": mid_id,
+            "ride_from": station_names.get(from_id, from_id),
+            "ride_to": station_names.get(mid_id, mid_id),
+            "ride_from_station_id": from_id,
+            "ride_to_station_id": mid_id,
             "tickets": tickets1,
             "seat_type": seat_type,
+            "seg_type": "purchase",
         })
         segments.append({
             "train_num": u_train["train_num"],
@@ -596,8 +601,13 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
             "to": u_station_names.get(actual_dest, actual_dest),
             "from_station_id": mid_id,
             "to_station_id": actual_dest,
+            "ride_from": u_station_names.get(mid_id, mid_id),
+            "ride_to": u_station_names.get(actual_dest, actual_dest),
+            "ride_from_station_id": mid_id,
+            "ride_to_station_id": actual_dest,
             "tickets": tickets2,
             "seat_type": seat_type,
+            "seg_type": "purchase",
         })
 
     elif question_type == "short_buy":
@@ -608,15 +618,20 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
         mid_id = stops[target_mid_idx]["station_id"]
         tickets = _random_solution_tickets(people_count)
         db_update_ticket(q_conn, train_num, from_id, mid_id, seat_type, tickets)
-        # M→B 不写票（买短补长，补票段无票）
+        # 买短补长：买 A→M 有票，实际乘坐 A→B（M→B 无票，上车补票）
         segments.append({
             "train_num": train_num,
             "from": station_names.get(from_id, from_id),
             "to": station_names.get(mid_id, mid_id),
             "from_station_id": from_id,
             "to_station_id": mid_id,
+            "ride_from": station_names.get(from_id, from_id),
+            "ride_to": station_names.get(to_id, to_id),
+            "ride_from_station_id": from_id,
+            "ride_to_station_id": to_id,
             "tickets": tickets,
             "seat_type": seat_type,
+            "seg_type": "purchase",
         })
 
     elif question_type == "extra_front":
@@ -635,8 +650,13 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
             "to": station_names.get(to_id, to_id),
             "from_station_id": extra_from_id,
             "to_station_id": to_id,
+            "ride_from": station_names.get(from_id, from_id),
+            "ride_to": station_names.get(to_id, to_id),
+            "ride_from_station_id": from_id,
+            "ride_to_station_id": to_id,
             "tickets": tickets,
             "seat_type": seat_type,
+            "seg_type": "purchase",
         })
 
     elif question_type == "extra_rear":
@@ -655,8 +675,13 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
             "to": station_names.get(extra_to_id, extra_to_id),
             "from_station_id": from_id,
             "to_station_id": extra_to_id,
+            "ride_from": station_names.get(from_id, from_id),
+            "ride_to": station_names.get(to_id, to_id),
+            "ride_from_station_id": from_id,
+            "ride_to_station_id": to_id,
             "tickets": tickets,
             "seat_type": seat_type,
+            "seg_type": "purchase",
         })
 
     elif question_type == "mixed" and segment_plans:
@@ -740,11 +765,16 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                     "to": current_names.get(seg_to, seg_to),
                     "from_station_id": seg_from,
                     "to_station_id": seg_to,
+                    "ride_from": current_names.get(seg_from, seg_from),
+                    "ride_to": current_names.get(seg_to, seg_to),
+                    "ride_from_station_id": seg_from,
+                    "ride_to_station_id": seg_to,
                     "tickets": tickets,
                     "seat_type": seat_type,
                     "strategy": strategy,
                     "actual_from": current_names.get(seg_from, seg_from),
                     "actual_to": current_names.get(seg_to, seg_to),
+                    "seg_type": "purchase",
                 })
             elif strategy == "short_buy":
                 mid_indices = [i for i in range(cur_from_idx + 1, cur_to_idx)]
@@ -754,17 +784,23 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                 mid_id = current_stops[mid_idx]["station_id"]
                 tickets = _random_solution_tickets(people_count)
                 db_update_ticket(q_conn, current_train, seg_from, mid_id, seat_type, tickets)
+                # 买短补长：买 seg_from→mid_id 有票，实际乘坐 seg_from→seg_to（mid→seg_to 补票）
                 segments.append({
                     "train_num": current_train,
                     "from": current_names.get(seg_from, seg_from),
                     "to": current_names.get(mid_id, mid_id),
                     "from_station_id": seg_from,
                     "to_station_id": mid_id,
+                    "ride_from": current_names.get(seg_from, seg_from),
+                    "ride_to": current_names.get(seg_to, seg_to),
+                    "ride_from_station_id": seg_from,
+                    "ride_to_station_id": seg_to,
                     "tickets": tickets,
                     "seat_type": seat_type,
                     "strategy": strategy,
                     "actual_from": current_names.get(seg_from, seg_from),
                     "actual_to": current_names.get(seg_to, seg_to),
+                    "seg_type": "purchase",
                 })
             elif strategy == "extra_front":
                 max_extra = min(cur_from_idx, 3)
@@ -780,11 +816,16 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                     "to": current_names.get(seg_to, seg_to),
                     "from_station_id": extra_from_id,
                     "to_station_id": seg_to,
+                    "ride_from": current_names.get(seg_from, seg_from),
+                    "ride_to": current_names.get(seg_to, seg_to),
+                    "ride_from_station_id": seg_from,
+                    "ride_to_station_id": seg_to,
                     "tickets": tickets,
                     "seat_type": seat_type,
                     "strategy": strategy,
                     "actual_from": current_names.get(seg_from, seg_from),
                     "actual_to": current_names.get(seg_to, seg_to),
+                    "seg_type": "purchase",
                 })
             elif strategy == "extra_rear":
                 max_extra = min(len(current_stops) - 1 - cur_to_idx, 3)
@@ -800,11 +841,16 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                     "to": current_names.get(extra_to_id, extra_to_id),
                     "from_station_id": seg_from,
                     "to_station_id": extra_to_id,
+                    "ride_from": current_names.get(seg_from, seg_from),
+                    "ride_to": current_names.get(seg_to, seg_to),
+                    "ride_from_station_id": seg_from,
+                    "ride_to_station_id": seg_to,
                     "tickets": tickets,
                     "seat_type": seat_type,
                     "strategy": strategy,
                     "actual_from": current_names.get(seg_from, seg_from),
                     "actual_to": current_names.get(seg_to, seg_to),
+                    "seg_type": "purchase",
                 })
 
     return {
@@ -852,7 +898,7 @@ def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
     for from_id, to_id in selected:
         seat = random.choice(TICKET_TABLES)
         if people_count is not None:
-            tickets = random.randint(1, max(1, people_count))  # 伪干扰：票数 ≤ 人数
+            tickets = random.randint(1, max(1, people_count - 1))  # 伪干扰：票数 < 人数（严格不足，保证唯一解）
         else:
             tickets = random.randint(1, 10)  # 真干扰：票数随机 1~10
         q_conn.execute(f"""
@@ -1082,6 +1128,8 @@ def api_auto_generate(req: AutoGenerateRequest):
                     "target_train_num": target_train_num,
                     "cur_from_id": cur_from_id,
                     "cur_to_id": cur_to_id,
+                    "start_station_id": from_id,
+                    "end_station_id": to_id,
                     "stops": stops,
                     "random_tickets": req.random_tickets,
                     "fake_interference": req.fake_interference,
@@ -1273,6 +1321,8 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
         ),
         "people_count": cached.get("people_count"),
         "seat_type": cached.get("seat_type"),
+        "start_station_id": cached.get("start_station_id"),
+        "end_station_id": cached.get("end_station_id"),
         "ground_truth": cached.get("segments"),   # BUG6: 结构化标答存进 metadata
     }
     # 仅选择性题（有干扰票）才记录干扰密度，存在性题不写入该字段

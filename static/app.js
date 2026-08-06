@@ -1914,89 +1914,117 @@ const App = {
         'db_not_found': { label: '❌ 题目数据库不存在', bg: '#fef2f2', color: '#dc2626' },
       };
       const vInfo = verdictMap[verify.verdict] || { label: verify.verdict || '未知', bg: '#f5f5f5', color: '#6b7280' };
+      const hasIssues = (verify.issues || []).length > 0;
+
+      // ---- 问题类型元数据（分类标签 + 颜色）----
+      const ISSUE_META = {
+        'hallucination': { label: '余票不符', color: '#dc2626' },
+        'price_wrong': { label: '票价不符', color: '#dc2626' },
+        'price_missing': { label: '票价缺失', color: '#f59e0b' },
+        'invalid_plan_item': { label: '无效条目', color: '#f59e0b' },
+        'invalid_seat': { label: '无效座位', color: '#f59e0b' },
+        'missing_ride': { label: '缺乘坐区间', color: '#f59e0b' },
+        'route_mismatch': { label: '路线不符标答', color: '#dc2626' },
+        'ticket_shortage': { label: '票数不足', color: '#f59e0b' },
+        'route_invalid': { label: '区间无效', color: '#dc2626' },
+        'route_discontinuity': { label: '乘坐不连续', color: '#dc2626' },
+        'transfer_time_conflict': { label: '换乘时间冲突', color: '#dc2626' },
+        'start_not_covered': { label: '未连接出发站', color: '#dc2626' },
+        'end_not_covered': { label: '未连接到达站', color: '#dc2626' },
+        'no_route': { label: '无可达路线', color: '#dc2626' },
+      };
+      const issueMeta = (type) => (ISSUE_META[type] || { label: type || '错误', color: '#dc2626' });
+
+      // ---- 头部：verdict + 摘要 ----
       html += `<div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <span style="font-weight:600">🔍 代码核查结果</span>
         <span style="display:inline-block;padding:3px 12px;border-radius:12px;font-size:13px;font-weight:600;background:${vInfo.bg};color:${vInfo.color}">${vInfo.label}</span>
       </div>`;
-
-      // 统计数字
-      const hasIssues = verify.issues?.length > 0;
-      html += `<div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
-        <span style="background:${hasIssues ? '#fef2f2' : '#f0fdf4'};padding:4px 12px;border-radius:8px;font-size:13px">
-          方案总数: <strong>${verify.total_items || 0}</strong>
-        </span>
-        <span style="background:#f0fdf4;padding:4px 12px;border-radius:8px;font-size:13px">
-          正确: <strong style="color:#16a34a">${verify.correct_items || 0}</strong>
-        </span>
-        <span style="background:#fef2f2;padding:4px 12px;border-radius:8px;font-size:13px">
-          错误: <strong style="color:#dc2626">${verify.hallucination_count || 0}</strong>
-        </span>
+      html += `<div style="margin-bottom:14px;padding:10px 14px;border-radius:6px;background:${hasIssues ? '#fef2f2' : '#f0fdf4'};color:${hasIssues ? 'var(--error-red)' : 'var(--success-green)'}">
+        ${verify.summary || (hasIssues ? '存在核查问题' : '✅ 未发现问题')}
       </div>`;
 
-      // 核查摘要
-      html += `<div style="margin-bottom:16px;padding:10px 14px;border-radius:6px;background:${hasIssues ? '#fef2f2' : '#f0fdf4'};color:${hasIssues ? 'var(--error-red)' : 'var(--success-green)'}">
-        ${verify.summary || '✅ 未发现问题'}
-      </div>`;
+      // ---- 维度统计卡（每个数据维度是否正确都体现）----
+      const dims = [
+        { label: '方案总数', value: verify.total_items || 0, color: '#374151', bg: '#f3f4f6' },
+        { label: '正确', value: verify.correct_items || 0, color: '#16a34a', bg: '#f0fdf4' },
+        { label: '余票不符', value: verify.hallucination_count || 0, color: '#dc2626', bg: '#fef2f2' },
+        { label: '票价问题', value: verify.price_issue_count || 0, color: '#dc2626', bg: '#fef2f2' },
+        { label: '无效条目', value: verify.invalid_plan_count || 0, color: '#f59e0b', bg: '#fffbeb' },
+        { label: '路线不符', value: verify.route_mismatch_count || 0, color: '#dc2626', bg: '#fef2f2' },
+        { label: '票数不足', value: verify.ticket_shortage_count || 0, color: '#f59e0b', bg: '#fffbeb' },
+        { label: '缺乘坐区间', value: verify.missing_ride_count || 0, color: '#f59e0b', bg: '#fffbeb' },
+      ];
+      html += `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">`;
+      dims.forEach(d => {
+        html += `<div style="background:${d.bg};padding:6px 12px;border-radius:8px;font-size:12px;text-align:center;min-width:72px">
+          <div style="font-weight:700;font-size:18px;color:${d.color}">${d.value}</div>
+          <div style="color:${d.color};opacity:.85;margin-top:2px">${d.label}</div>
+        </div>`;
+      });
+      html += `</div>`;
 
-      // 最终乘车方案表格
-      if (finalPlan.length > 0) {
-        html += `<details style="margin:8px 0" open><summary style="cursor:pointer;font-weight:600;margin-bottom:8px">🚄 最终乘车方案</summary>`;
-        html += `<table class="table" style="font-size:var(--font-size-small)">`;
-        html += `<thead><tr><th>#</th><th>车次</th><th>出发站</th><th>到达站</th><th>座位</th><th>票数</th><th>票价(元)</th><th>余票</th><th>票价</th></tr></thead><tbody>`;
+      // ---- 按 (车次|购买起|购买止|座位) 关联每条问题到明细行 ----
+      const keyOf = (o) => `${o.train_num || ''}|${o.from_station_id || o.from || ''}|${o.to_station_id || o.to || ''}|${o.seat_type || ''}`;
+      const rowIssueMap = {};
+      (verify.issues || []).forEach(iss => {
+        if (!iss.train_num) return;
+        const k = keyOf(iss);
+        (rowIssueMap[k] = rowIssueMap[k] || []).push(iss.type);
+      });
+
+      // ---- 乘车方案明细表（购买 vs 乘坐 对照，逐项核对）----
+      if ((verify.results || []).length > 0) {
+        html += `<details style="margin:8px 0" open><summary style="cursor:pointer;font-weight:600;margin-bottom:8px">🚄 乘车方案明细（${verify.results.length} 段）</summary>`;
+        html += `<table class="table" style="font-size:var(--font-size-small)">
+          <thead><tr>
+            <th>#</th><th>车次</th><th>购买区间</th><th>乘坐区间</th><th>座位</th>
+            <th>票数<br>声称/实际</th><th>票价(元)<br>声称/实际</th><th>核对</th>
+          </tr></thead><tbody>`;
         (verify.results || []).forEach((t, i) => {
-          const statusIcon = t.match ? '✅' : '❌';
-          let priceIcon = '';
-          if (t.price_match === true) {
-            priceIcon = '✅';
-          } else if (t.price_match === false) {
-            priceIcon = '❌';
-          } else if (t.price_claimed !== undefined) {
-            priceIcon = '❓'; // price_missing
-          } else {
-            priceIcon = '—'; // 未提供票价
-          }
-          const priceStr = t.price_claimed !== undefined ? t.price_claimed : '-';
-          html += `<tr>
+          const rowIssues = rowIssueMap[keyOf(t)] || [];
+          const ok = t.match === true && rowIssues.length === 0;
+          const rowBg = rowIssues.length > 0 ? '#fef2f2' : (t.match === true ? '#f0fdf4' : '#fef2f2');
+          const buySeg = `${t.from_name || t.from_station_id} → ${t.to_name || t.to_station_id}`;
+          const rideSeg = (t.ride_from_name || t.ride_from_station_id)
+            ? `${t.ride_from_name || t.ride_from_station_id} → ${t.ride_to_name || t.ride_to_station_id}` : '—';
+          const rideDiff = (t.ride_from_station_id && t.ride_to_station_id &&
+                            (t.ride_from_station_id !== t.from_station_id || t.ride_to_station_id !== t.to_station_id))
+            ? ' <span style="color:#7c3aed;font-weight:600">买≠坐</span>' : '';
+          let priceCell;
+          if (t.price_match === true) priceCell = `${t.price_actual} ✅`;
+          else if (t.price_match === false) priceCell = `${t.price_claimed}→${t.price_actual} ❌`;
+          else if (t.price_claimed !== undefined && t.price_claimed !== null) priceCell = `${t.price_claimed} ❓`;
+          else priceCell = '—';
+          let rowTags = '';
+          rowIssues.forEach(typ => {
+            const m = issueMeta(typ);
+            rowTags += `<span style="display:inline-block;margin:1px 3px 1px 0;padding:0 6px;border-radius:8px;font-size:11px;background:${m.color}18;color:${m.color};font-weight:600">${m.label}</span>`;
+          });
+          const actualTxt = (t.actual !== null && t.actual !== undefined) ? t.actual : 'N/A';
+          html += `<tr style="background:${rowBg}">
             <td>${i+1}</td>
             <td>${t.train_num}</td>
-            <td>${t.from_station_id}</td>
-            <td>${t.to_station_id}</td>
-            <td>${t.seat_type}</td>
-            <td>${t.claimed}</td>
-            <td>${priceStr}</td>
-            <td>${statusIcon} ${t.actual !== null && t.actual !== undefined ? t.actual : 'N/A'}</td>
-            <td>${priceIcon} ${t.price_actual !== null && t.price_actual !== undefined ? t.price_actual + '元' : (t.price_claimed !== undefined ? '无数据' : '—')}</td>
+            <td>${buySeg}${rideDiff}</td>
+            <td>${rideSeg}</td>
+            <td>${t.seat_type || '—'}</td>
+            <td>${t.claimed}<span style="color:${t.match ? '#16a34a' : '#dc2626'};font-weight:600">/${actualTxt}</span></td>
+            <td>${priceCell}</td>
+            <td>${rowTags || (t.match ? '<span style="color:#16a34a;font-weight:600">✅ 正确</span>' : '<span style="color:#dc2626;font-weight:600">❌ 有误</span>')}</td>
           </tr>`;
         });
         html += `</tbody></table></details>`;
       } else {
-        html += `<div style="color:var(--gray-4);margin:12px 0">⚠️ 测试记录中无最终乘车方案（模型可能未调用余票查询工具）</div>`;
+        html += `<div style="color:var(--gray-4);margin:12px 0">⚠️ 测试记录中无可核查的购票段（模型可能未输出 final_plan）</div>`;
       }
 
-      // 问题列表
+      // ---- 问题清单（分类标签 + 颜色）----
       if (verify.issues?.length > 0) {
-        html += `<div style="margin-top:12px"><strong>⚠️ 问题（${verify.issues.length} 项）：</strong></div>`;
+        html += `<div style="margin-top:14px"><strong>⚠️ 问题清单（${verify.issues.length} 项）：</strong></div>`;
         verify.issues.forEach((issue, i) => {
-          let label, borderColor;
-          switch (issue.type) {
-            case 'hallucination':
-              label = '余票不符';
-              borderColor = '#dc2626';
-              break;
-            case 'price_wrong':
-              label = '票价不符';
-              borderColor = '#dc2626';
-              break;
-            case 'price_missing':
-              label = '票价缺失';
-              borderColor = '#dc2626';
-              break;
-            default:
-              label = '错误';
-              borderColor = '#dc2626';
-          }
-          html += `<div style="padding:8px 10px;margin:4px 0;background:#fef2f2;border-radius:6px;font-size:var(--font-size-small);border-left:3px solid ${borderColor}">
-            <span style="color:${borderColor};font-weight:600">[${label}]</span> ${issue.detail}</div>`;
+          const m = issueMeta(issue.type);
+          html += `<div style="padding:8px 10px;margin:4px 0;background:#fef2f2;border-radius:6px;font-size:var(--font-size-small);border-left:3px solid ${m.color}">
+            <span style="color:${m.color};font-weight:600">[${m.label}]</span> ${issue.detail || ''}</div>`;
         });
       }
       html += `</div>`;
