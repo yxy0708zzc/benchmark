@@ -44,7 +44,8 @@ benchmark_travelplan/
 ├── static/                 # 前端 JS/CSS
 ├── templates/index.html    # 前端页面（SPA）
 ├── tools/                  # OpenAI Tools 定义
-└── statistics/             # 统计模块
+├── statistics/             # 统计模块
+└── docs/                   # 系统说明文档（generator/tester/verifier/stats）
 ```
 
 ---
@@ -394,6 +395,19 @@ python cleanup_overnight_trains.py --apply   # 显示 + 删除
 - **大模型接入**：OpenAI 兼容 API，通过工具调用交互
 
 ---
+## 文档（docs/）
+
+系统各环节的详细实现说明（面向评审）：
+
+| 文档 | 说明 |
+|------|------|
+| [`docs/generator.md`](docs/generator.md) | 出题逻辑：核心出题流程、012 题型变体、metadata 存储 |
+| [`docs/tester.md`](docs/tester.md) | 测试器与 AI 对话：工具调用循环、SSE 流式、final_plan 解析 |
+| [`docs/verifier.md`](docs/verifier.md) | 测评核查：存在性对标 / 选择性全程可达、问题分类与判定 |
+| [`docs/stats.md`](docs/stats.md) | 统计与对比：verdict 判定、评分、多维对比与报告 |
+
+---
+
 ## 备注
 - 题目前缀：`0_`=存在性无干扰（唯一解）、`1_`=存在性伪干扰（唯一解）、`2_`=选择性真干扰（多解）；前缀由系统自动添加，与输入无关
 - 题目分类按 metadata `type`（存在性/选择性），核查方式由此确定（存在性对标标答 / 选择性全程可达）
