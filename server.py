@@ -344,6 +344,7 @@ class AutoGenerateRequest(BaseModel):
     question_type: str  # direct/transfer/short_buy/extra_front/extra_rear/mixed
     from_station_id: str  # 可接受站名（如"北京南"）或站ID（如"VNP"），服务端自动解析
     to_station_id: str  # 同上
+    mode: str = ""  # "existence" 存在性(出两份 0_无伪干扰/1_有伪干扰)；"selective" 选择性(一份 2_)；空则旧逻辑推断
     random_tickets: bool = False  # 是否添加干扰票
     fake_interference: bool = False  # 伪干扰模式：干扰票数 ≤ people_count；False=真干扰(随机1~10)
     interference_density: float = 0.08
@@ -353,6 +354,13 @@ class AutoGenerateRequest(BaseModel):
     seed: Optional[int] = None
     people_count: int = 2  # 需求人数：答案票数 ≥ 此值
     seat_type: str = "class2"  # 答案票等级（class0/class1/class2）
+    # 选择性问题时间约束（HH:MM，仅选择性题生效）
+    depart_earliest: Optional[str] = None  # 最早出发时间
+    depart_latest: Optional[str] = None    # 最晚出发时间
+    arrive_earliest: Optional[str] = None  # 最早到达时间
+    arrive_latest: Optional[str] = None    # 最晚到达时间
+    min_transfer_minutes: int = 0          # 最短换乘时长（分钟）
+    max_transfer_minutes: Optional[int] = None  # 最长换乘时长（分钟，None=不限）
 
 
 # --- POST /api/update_ticket 实时更新余票 ---
@@ -469,11 +477,12 @@ def _find_transfer_trains(rw_conn: sqlite3.Connection,
                           target_train_num: str,
                           mid_station_id: str,
                           to_station_id: str,
-                          mid_stop_time: str) -> List[Dict]:
+                          mid_stop_time: str,
+                          min_gap: int = 20) -> List[Dict]:
     """
     查找从中间站 M 到 B 的其他车次 U，要求：
     - U 经过 M 且之后经过 B
-    - T 到达 M 的时间 + 20min <= U 从 M 出发的时间
+    - T 到达 M 的时间 + min_gap <= U 从 M 出发的时间
     """
     cursor = rw_conn.cursor()
     cursor.execute("""
@@ -493,7 +502,7 @@ def _find_transfer_trains(rw_conn: sqlite3.Connection,
         train_num, mid_depart, arrive_time = row
         if mid_stop_time and mid_depart:
             gap = _calc_time_diff_minutes(mid_stop_time, mid_depart)
-            if gap >= 20:
+            if gap >= min_gap:
                 candidates.append({
                     "train_num": train_num,
                     "mid_depart": mid_depart,
@@ -507,6 +516,71 @@ def _random_solution_tickets(people_count: int) -> int:
     return random.randint(people_count, max(people_count, 5))
 
 
+def _get_stop_time(rw_conn: sqlite3.Connection, train_num: str, station_id: str) -> Optional[str]:
+    """查询车次在某站的 stop_time（HH:MM），无则返回 None"""
+    cur = rw_conn.cursor()
+    cur.execute("SELECT stop_time FROM train_stops WHERE train_num = ? AND station_id = ?",
+                (train_num, station_id))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _validate_time_constraints(segments: List[Dict],
+                               depart_earliest: Optional[str],
+                               depart_latest: Optional[str],
+                               arrive_earliest: Optional[str],
+                               arrive_latest: Optional[str],
+                               min_transfer_minutes: int,
+                               max_transfer_minutes: Optional[int],
+                               rw_conn: sqlite3.Connection) -> None:
+    """校验合法解是否满足选择性问题的时间约束（仅选择性题）。
+
+    约束：首段出发 ∈ [depart_earliest, depart_latest]、
+          末段到达 ∈ [arrive_earliest, arrive_latest]、
+          跨车次换乘 ∈ [min_transfer_minutes, max_transfer_minutes]。
+    不满足抛 HTTPException(detail 含「时间约束不满足」)，由出题端重试下一车次。
+    """
+    if not segments:
+        return
+    seg_times = []
+    for seg in segments:
+        ft = _get_stop_time(rw_conn, seg["train_num"], seg["from_station_id"])
+        tt = _get_stop_time(rw_conn, seg["train_num"], seg["to_station_id"])
+        seg_times.append((ft, tt))
+
+    first_depart = seg_times[0][0]
+    last_arrive = seg_times[-1][1]
+
+    if depart_earliest and first_depart and first_depart < depart_earliest:
+        raise HTTPException(status_code=400,
+                            detail=f"时间约束不满足：首段出发 {first_depart} 早于最早出发 {depart_earliest}")
+    if depart_latest and first_depart and first_depart > depart_latest:
+        raise HTTPException(status_code=400,
+                            detail=f"时间约束不满足：首段出发 {first_depart} 晚于最晚出发 {depart_latest}")
+    if arrive_earliest and last_arrive and last_arrive < arrive_earliest:
+        raise HTTPException(status_code=400,
+                            detail=f"时间约束不满足：末段到达 {last_arrive} 早于最早到达 {arrive_earliest}")
+    if arrive_latest and last_arrive and last_arrive > arrive_latest:
+        raise HTTPException(status_code=400,
+                            detail=f"时间约束不满足：末段到达 {last_arrive} 晚于最晚到达 {arrive_latest}")
+
+    if (min_transfer_minutes and min_transfer_minutes > 0) or (max_transfer_minutes and max_transfer_minutes > 0):
+        for i in range(len(segments) - 1):
+            s1, s2 = segments[i], segments[i + 1]
+            if s1["train_num"] == s2["train_num"]:
+                continue  # 同车次段（买短补长）不视为换乘
+            arr1 = seg_times[i][1]
+            dep2 = seg_times[i + 1][0]
+            if arr1 and dep2:
+                gap = _calc_time_diff_minutes(arr1, dep2)
+                if min_transfer_minutes and min_transfer_minutes > 0 and gap < min_transfer_minutes:
+                    raise HTTPException(status_code=400,
+                                        detail=f"时间约束不满足：{s1['train_num']}→{s2['train_num']} 换乘仅 {gap} 分钟，少于最短换乘 {min_transfer_minutes} 分钟")
+                if max_transfer_minutes and max_transfer_minutes > 0 and gap > max_transfer_minutes:
+                    raise HTTPException(status_code=400,
+                                        detail=f"时间约束不满足：{s1['train_num']}→{s2['train_num']} 换乘 {gap} 分钟，超过最长换乘 {max_transfer_minutes} 分钟")
+
+
 def _write_legal_solution(q_conn: sqlite3.Connection,
                           rw_conn: sqlite3.Connection,
                           question_type: str,
@@ -517,7 +591,8 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
                           segment_plans: List[str] = None,
                           transfer_dest: str = None,
                           seat_type: str = "class2",
-                          people_count: int = 1) -> Dict:
+                          people_count: int = 1,
+                          min_gap: int = 20) -> Dict:
     """
     写入合法解（正数票）。
     返回包含 segments 和 target_mid_idx 的字典。
@@ -558,7 +633,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
             target_mid_idx = mid_idx
             mid_id = stops[mid_idx]["station_id"]
             mid_stop_time = stops[mid_idx]["stop_time"]
-            transfer_candidates = _find_transfer_trains(rw_conn, train_num, mid_id, actual_dest, mid_stop_time)
+            transfer_candidates = _find_transfer_trains(rw_conn, train_num, mid_id, actual_dest, mid_stop_time, min_gap)
             if transfer_candidates:
                 u_train = random.choice(transfer_candidates)
                 break
@@ -713,7 +788,7 @@ def _write_legal_solution(q_conn: sqlite3.Connection,
 
             # 段 > 0：需要找换乘车次，衔接基准 = 上一段车次到达本段起点的时间
             if seg_idx > 0:
-                candidates = _find_transfer_trains(rw_conn, train_num, seg_from, seg_to, arrival_at_seg_start)
+                candidates = _find_transfer_trains(rw_conn, train_num, seg_from, seg_to, arrival_at_seg_start, min_gap)
                 # 非最后一段的买短补长：排除经过最终站 B 的车次，避免模型跳过后续换乘直达终点
                 if strategy == "short_buy" and seg_idx < transfers:
                     candidates = [
@@ -932,9 +1007,17 @@ def _add_interference_all_trains(q_conn: sqlite3.Connection, rw_conn: sqlite3.Co
 
 
 # --- POST /api/auto_generate auto出题器生成题目 ---
-@app.post("/api/auto_generate")
-def api_auto_generate(req: AutoGenerateRequest):
-    """自动生成题目"""
+# 生成单份题的预览（内存 DB 验证，不写磁盘）。
+# 存在性出两份：0_无伪干扰 / 1_有伪干扰；选择性出一份：2_。前缀自动加在题名前，与输入无关。
+def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraints, base_seed=None):
+    """生成一份题的预览。
+    prefix: 题名前缀（存在性 "0_"/"1_"；选择性 "2_"）
+    fake: 伪干扰模式（干扰票数严格 < 人数，保证唯一解）
+    mode: 题目模式（"existence"/"selective"，用于 type 显示）
+    with_time_constraints: 是否校验并存储时间约束（仅选择性题）
+    base_seed: 共用随机种子（存在性两份共用 → 同一车次同一合法解）
+    返回 (question_id, preview_dict)；重试耗尽抛 HTTPException(400)
+    """
     valid_types = ["transfer", "short_buy", "extra_front", "extra_rear", "mixed"]
     if req.question_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"无效的题型: {req.question_type}")
@@ -951,238 +1034,294 @@ def api_auto_generate(req: AutoGenerateRequest):
         if len(req.segment_plans) != req.transfers + 1:
             raise HTTPException(status_code=400, detail=f"段策略数需等于换乘数+1（{req.transfers + 1}）")
 
+    # 选择性问题最短换乘（存在性问题固定 20 分钟）
+    min_gap = (req.min_transfer_minutes if req.min_transfer_minutes and req.min_transfer_minutes > 0 else 20) \
+        if not fake else 20
+
+    # Step 0: 固定随机种子
+    if base_seed is not None:
+        random.seed(base_seed)
+
+    # Step 1: 解析车站
+    from_id = resolve_station_name_or_id(rw_conn, req.from_station_id)
+    to_id = resolve_station_name_or_id(rw_conn, req.to_station_id)
+
+    if not validate_station_exists(rw_conn, from_id):
+        raise HTTPException(status_code=400, detail=f"出发站 {from_id} 不存在")
+    if not validate_station_exists(rw_conn, to_id):
+        raise HTTPException(status_code=400, detail=f"到达站 {to_id} 不存在")
+
+    # Step 2: 获取所有途经车次，随机打乱以便重试
+    # 换乘/混合题型：T 不能经过目标站 B（防止 T 直达 B 逃逸）
+    if req.question_type in ("transfer", "mixed"):
+        routes = _get_routes_for_transfer(rw_conn, from_id, to_id)
+    else:
+        routes = get_routes_between(rw_conn, from_id, to_id)
+    if not routes:
+        raise HTTPException(status_code=400, detail=f"未找到从 {from_id} 到 {to_id} 的车次")
+
+    random.shuffle(routes)
+    max_attempts = min(len(routes), 15)
+
+    last_error = None
+    for attempt in range(max_attempts):
+        target_train_num = routes[attempt]["train_num"]
+
+        stops = get_train_stops(rw_conn, target_train_num)
+        stop_ids_list = [s["station_id"] for s in stops]
+        from_idx = stop_ids_list.index(from_id)
+        if req.question_type == "transfer":
+            # 换乘：T 不经过 B，用最后一站作为 to_idx
+            to_idx = len(stops) - 1
+            cur_from_id, cur_to_id = from_id, stops[-1]["station_id"]
+            cur_from_idx, cur_to_idx = from_idx, to_idx
+        elif req.question_type == "mixed":
+            # 混合：T 不经过 B（防止 T 直达 B 逃逸），用最后一站作为 to_idx；
+            # 实际终点仍是用户输入的 B，由最后一段换乘车次到达
+            to_idx = len(stops) - 1
+            cur_from_id, cur_to_id = from_id, to_id
+            cur_from_idx, cur_to_idx = from_idx, to_idx
+        else:
+            to_idx = stop_ids_list.index(to_id)
+            if from_idx > to_idx:
+                cur_from_id, cur_to_id = to_id, from_id
+                cur_from_idx, cur_to_idx = to_idx, from_idx
+            else:
+                cur_from_id, cur_to_id = from_id, to_id
+                cur_from_idx, cur_to_idx = from_idx, to_idx
+
+        # 预检中间站数量
+        middle_count = cur_to_idx - cur_from_idx - 1
+        if req.question_type not in ("extra_front", "extra_rear") and middle_count < 1:
+            continue
+        if req.question_type == "mixed":
+            required_mid = req.transfers  # 需要的中间站数 = 换乘数
+            if middle_count < required_mid:
+                last_error = f"中间站不足：需要 {required_mid} 个，最多 {middle_count} 个"
+                continue
+
+        # extra 题型要求前后有足够站
+        if req.question_type == "extra_front" and cur_from_idx < 1:
+            last_error = "出发站前无足够车站做前额外"
+            continue
+        if req.question_type == "extra_rear" and cur_to_idx >= len(stops) - 1:
+            last_error = "到达站后无足够车站做后额外"
+            continue
+
+        # Step 3: 确定题名（前缀自动加，与输入无关；仅用于预览标识，不创建磁盘文件）
+        if req.custom_qid:
+            question_id = prefix + req.custom_qid
+            # 检查重复（包括已存在的数据库和缓存中的同名题）
+            existing_path = get_question_db_path(question_id)
+            if os.path.exists(existing_path) or question_id in _preview_cache:
+                last_error = f"题名 {question_id} 已存在"
+                continue
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            question_id = f"{prefix}{timestamp}_{attempt}"
+
+        # 使用内存数据库做验证，不写入磁盘
+        q_conn = _create_in_memory_question_db()
+
+        try:
+            # Step 4: 写入合法解（写入内存 DB，仅做验证）
+            transfer_dest = None
+            if req.question_type == "transfer":
+                transfer_dest = to_id  # 用户输入的真正目的地
+            solution_result = _write_legal_solution(
+                q_conn, rw_conn,
+                question_type=req.question_type,
+                train_num=target_train_num,
+                stops=stops,
+                from_id=cur_from_id, to_id=cur_to_id,
+                from_idx=cur_from_idx, to_idx=cur_to_idx,
+                segment_plans=req.segment_plans,
+                transfer_dest=transfer_dest,
+                seat_type=req.seat_type,
+                people_count=req.people_count,
+                min_gap=min_gap,
+            )
+            solution_segments = solution_result["segments"]
+
+            # 选择性问题：校验时间约束（出发/到达区间 + 换乘范围），不满足则重试下一车次
+            if with_time_constraints and (
+                    req.depart_earliest or req.depart_latest
+                    or req.arrive_earliest or req.arrive_latest
+                    or (req.min_transfer_minutes and req.min_transfer_minutes > 0)
+                    or (req.max_transfer_minutes and req.max_transfer_minutes > 0)):
+                _validate_time_constraints(
+                    solution_segments,
+                    req.depart_earliest, req.depart_latest,
+                    req.arrive_earliest, req.arrive_latest,
+                    req.min_transfer_minutes, req.max_transfer_minutes,
+                    rw_conn,
+                )
+
+            # 收集合法解占用的站对（使用站 ID）
+            solution_pairs = set()
+            for seg in solution_segments:
+                solution_pairs.add((seg["from_station_id"], seg["to_station_id"]))
+
+            # 验证干扰票写入（仍在内存 DB 中）：先加所有车次干扰，再清直达
+            if req.random_tickets:
+                _add_interference_all_trains(
+                    q_conn, rw_conn, target_train_num,
+                    solution_pairs, req.interference_density,
+                    block_pairs={(cur_from_id, cur_to_id)},
+                    people_count=req.people_count if fake else None,
+                )
+                _clear_direct_route(q_conn, target_train_num, cur_from_id, cur_to_id)
+
+            q_conn.commit()
+
+            # 构造预览
+            station_names = {s["station_id"]: s["station_name"] for s in stops}
+            from_name = station_names.get(from_id, from_id)
+            cursor = rw_conn.cursor()
+            cursor.execute("SELECT station_name FROM stations WHERE station_id = ?", (to_id,))
+            row = cursor.fetchone()
+            dest_name = row[0] if row else to_id
+            first_stop = stops[0]["station_name"] if stops else ""
+            last_stop = stops[-1]["station_name"] if stops else ""
+            # 题目描述：用户填写的初始站到终点站
+            question_str = f"{from_name}到{dest_name}"
+
+            if req.question_type == "transfer":
+                parts = [f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票）"]
+                parts.append(f"换乘 {solution_segments[1]['train_num']} 从 {solution_segments[1]['from']} 到 {dest_name}（有票）")
+                path_desc = "，".join(parts)
+            elif req.question_type == "short_buy":
+                path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票），补票段 {solution_segments[0]['to']}→{dest_name} 无余票需上车补票"
+            elif req.question_type == "extra_front":
+                path_desc = f"乘坐 {target_train_num} 从 {solution_segments[0]['from']} 到 {dest_name} 有票（前额外），可在 {from_name} 站上车，实际乘坐 {from_name}→{dest_name}"
+            elif req.question_type == "extra_rear":
+                path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']} 有票（后额外），在 {dest_name} 站提前下车，实际乘坐 {from_name}→{dest_name}"
+            elif req.question_type == "mixed":
+                # 各分段叙述叠加
+                parts = []
+                for seg in solution_segments:
+                    tn = seg["train_num"]
+                    frm = seg.get("from", "")
+                    to = seg.get("to", "")
+                    strat = seg.get("strategy", "direct")
+                    act_from = seg.get("actual_from", frm)
+                    act_to = seg.get("actual_to", to)
+                    if strat == "short_buy":
+                        parts.append(f"乘坐 {tn} 从 {frm} 到 {to}（有票），补票段 {to}→{act_to} 无余票需上车补票")
+                    elif strat == "extra_front":
+                        parts.append(f"乘坐 {tn} 从 {frm} 到 {to} 有票（前额外），可在 {act_from} 站上车，实际乘坐 {act_from}→{act_to}")
+                    elif strat == "extra_rear":
+                        parts.append(f"乘坐 {tn} 从 {frm} 到 {to} 有票（后额外），在 {act_to} 站提前下车，实际乘坐 {act_from}→{act_to}")
+                    else:
+                        parts.append(f"乘坐 {tn} 从 {frm} 到 {to}（有票）")
+                path_desc = "，然后 ".join(parts)
+            else:
+                path_desc = ""
+
+            # 缓存生成的完整数据（含站 ID，供确认时写入磁盘）
+            _preview_cache[question_id] = {
+                "question_type": req.question_type,
+                "segments": solution_segments,
+                "target_train_num": target_train_num,
+                "cur_from_id": cur_from_id,
+                "cur_to_id": cur_to_id,
+                "start_station_id": from_id,
+                "end_station_id": to_id,
+                "stops": stops,
+                "random_tickets": req.random_tickets,
+                "fake_interference": fake,
+                "question_mode": mode,
+                "interference_density": req.interference_density,
+                "segment_plans": req.segment_plans,
+                "interference": req.random_tickets,
+                "people_count": req.people_count,
+                "seat_type": req.seat_type,
+                "depart_earliest": req.depart_earliest if with_time_constraints else None,
+                "depart_latest": req.depart_latest if with_time_constraints else None,
+                "arrive_earliest": req.arrive_earliest if with_time_constraints else None,
+                "arrive_latest": req.arrive_latest if with_time_constraints else None,
+                "min_transfer_minutes": req.min_transfer_minutes if with_time_constraints else None,
+                "max_transfer_minutes": req.max_transfer_minutes if with_time_constraints else None,
+                "question": question_str,
+            }
+
+            q_conn.close()
+
+            return question_id, {
+                "question": question_str,
+                "question_type": req.question_type,
+                "target_train_num": target_train_num,
+                "target_train_route": f"{first_stop}→{last_stop}",
+                "target_section": f"{from_name}→{dest_name}",
+                "path_description": path_desc,
+                "solution_segments": solution_segments,
+            }
+
+        except HTTPException as e:
+            q_conn.close()
+            detail = e.detail if hasattr(e, 'detail') else str(e)
+            if any(keyword in str(detail) for keyword in [
+                "目标车次无合适的中间站",
+                "未找到合适的换乘车次",
+                "混合策略换乘",
+                "出发站前无足够车站",
+                "到达站后无足够车站",
+                "时间约束不满足",
+            ]):
+                last_error = str(detail)
+                continue  # 重试下一个车次
+            raise  # 非重试性错误，直接抛出
+
+        except Exception as e:
+            q_conn.close()
+            last_error = f"出题过程异常: {str(e)}"
+            continue
+
+    # 所有重试都失败
+    raise HTTPException(
+        status_code=400,
+        detail=f"所有车次重试后仍无法生成题目: {last_error or '未知错误'}"
+    )
+
+
+@app.post("/api/auto_generate")
+def api_auto_generate(req: AutoGenerateRequest):
+    """自动生成题目。
+    - 存在性（mode=existence 或旧逻辑 fake_interference=true）：同时生成两份——
+        0_无伪干扰（真干扰，数量随机不限制）/ 1_有伪干扰（干扰票数严格 < 人数，唯一解）
+    - 选择性（mode=selective）：生成一份 2_（真干扰 + 时间约束）
+    - 前缀自动加在题名前，与用户输入无关
+    """
     # 生成新题前，清除所有未确认的旧预览缓存（未保存的题自动作废）
     _preview_cache.clear()
 
+    # 决定生成哪些变体：(前缀, 伪干扰, 是否时间约束)
+    if req.mode == "existence" or (req.mode == "" and req.fake_interference):
+        variants = [("0_", False, False), ("1_", True, False)]
+    else:
+        variants = [("2_", False, True)]
+
+    # 存在性两份共用同一种子 → 同一车次同一合法解，仅干扰不同；选择性单份用 req.seed
+    if len(variants) > 1:
+        base_seed = req.seed if req.seed is not None else random.randint(0, 2 ** 31)
+    else:
+        base_seed = req.seed
+
     rw_conn = get_railway_conn()
     try:
-        # Step 0: 固定随机种子
-        if req.seed is not None:
-            random.seed(req.seed)
+        questions = []
+        for prefix, fake, with_tc in variants:
+            mode = "existence" if prefix != "2_" else "selective"
+            question_id, preview = _generate_one_variant(
+                req, prefix, fake, mode, rw_conn, with_tc, base_seed=base_seed,
+            )
+            questions.append({"question_id": question_id, "preview": preview})
 
-        # Step 1: 解析车站
-        from_id = resolve_station_name_or_id(rw_conn, req.from_station_id)
-        to_id = resolve_station_name_or_id(rw_conn, req.to_station_id)
-
-        if not validate_station_exists(rw_conn, from_id):
-            raise HTTPException(status_code=400, detail=f"出发站 {from_id} 不存在")
-        if not validate_station_exists(rw_conn, to_id):
-            raise HTTPException(status_code=400, detail=f"到达站 {to_id} 不存在")
-
-        # Step 2: 获取所有途经车次，随机打乱以便重试
-        # 换乘/混合题型：T 不能经过目标站 B（防止 T 直达 B 逃逸）
-        if req.question_type in ("transfer", "mixed"):
-            routes = _get_routes_for_transfer(rw_conn, from_id, to_id)
-        else:
-            routes = get_routes_between(rw_conn, from_id, to_id)
-        if not routes:
-            raise HTTPException(status_code=400, detail=f"未找到从 {from_id} 到 {to_id} 的车次")
-
-        random.shuffle(routes)
-        max_attempts = min(len(routes), 15)
-
-        last_error = None
-        for attempt in range(max_attempts):
-            target_train_num = routes[attempt]["train_num"]
-
-            stops = get_train_stops(rw_conn, target_train_num)
-            stop_ids_list = [s["station_id"] for s in stops]
-            from_idx = stop_ids_list.index(from_id)
-            if req.question_type == "transfer":
-                # 换乘：T 不经过 B，用最后一站作为 to_idx
-                to_idx = len(stops) - 1
-                cur_from_id, cur_to_id = from_id, stops[-1]["station_id"]
-                cur_from_idx, cur_to_idx = from_idx, to_idx
-            elif req.question_type == "mixed":
-                # 混合：T 不经过 B（防止 T 直达 B 逃逸），用最后一站作为 to_idx；
-                # 实际终点仍是用户输入的 B，由最后一段换乘车次到达
-                to_idx = len(stops) - 1
-                cur_from_id, cur_to_id = from_id, to_id
-                cur_from_idx, cur_to_idx = from_idx, to_idx
-            else:
-                to_idx = stop_ids_list.index(to_id)
-                if from_idx > to_idx:
-                    cur_from_id, cur_to_id = to_id, from_id
-                    cur_from_idx, cur_to_idx = to_idx, from_idx
-                else:
-                    cur_from_id, cur_to_id = from_id, to_id
-                    cur_from_idx, cur_to_idx = from_idx, to_idx
-
-            # 预检中间站数量
-            middle_count = cur_to_idx - cur_from_idx - 1
-            if req.question_type not in ("extra_front", "extra_rear") and middle_count < 1:
-                continue
-            if req.question_type == "mixed":
-                required_mid = req.transfers  # 需要的中间站数 = 换乘数
-                if middle_count < required_mid:
-                    last_error = f"中间站不足：需要 {required_mid} 个，最多 {middle_count} 个"
-                    continue
-
-            # extra 题型要求前后有足够站
-            if req.question_type == "extra_front" and cur_from_idx < 1:
-                last_error = "出发站前无足够车站做前额外"
-                continue
-            if req.question_type == "extra_rear" and cur_to_idx >= len(stops) - 1:
-                last_error = "到达站后无足够车站做后额外"
-                continue
-
-            # Step 3: 确定题名（仅用于预览标识，不创建磁盘文件）
-            if req.custom_qid:
-                question_id = req.custom_qid
-                # 检查重复（包括已存在的数据库和缓存中的同名题）
-                existing_path = get_question_db_path(question_id)
-                if os.path.exists(existing_path) or question_id in _preview_cache:
-                    last_error = f"题名 {question_id} 已存在"
-                    continue
-            else:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                question_id = f"{timestamp}_{attempt}"
-
-            # 使用内存数据库做验证，不写入磁盘
-            q_conn = _create_in_memory_question_db()
-
-            try:
-                # Step 4: 写入合法解（写入内存 DB，仅做验证）
-                transfer_dest = None
-                if req.question_type == "transfer":
-                    transfer_dest = to_id  # 用户输入的真正目的地
-                solution_result = _write_legal_solution(
-                    q_conn, rw_conn,
-                    question_type=req.question_type,
-                    train_num=target_train_num,
-                    stops=stops,
-                    from_id=cur_from_id, to_id=cur_to_id,
-                    from_idx=cur_from_idx, to_idx=cur_to_idx,
-                    segment_plans=req.segment_plans,
-                    transfer_dest=transfer_dest,
-                    seat_type=req.seat_type,
-                    people_count=req.people_count,
-                )
-                solution_segments = solution_result["segments"]
-
-                # 收集合法解占用的站对（使用站 ID）
-                solution_pairs = set()
-                for seg in solution_segments:
-                    solution_pairs.add((seg["from_station_id"], seg["to_station_id"]))
-
-                # 验证干扰票写入（仍在内存 DB 中）：先加所有车次干扰，再清直达
-                if req.random_tickets:
-                    _add_interference_all_trains(
-                        q_conn, rw_conn, target_train_num,
-                        solution_pairs, req.interference_density,
-                        block_pairs={(cur_from_id, cur_to_id)},
-                        people_count=req.people_count if req.fake_interference else None,
-                    )
-                    _clear_direct_route(q_conn, target_train_num, cur_from_id, cur_to_id)
-
-                q_conn.commit()
-
-                # 构造预览
-                station_names = {s["station_id"]: s["station_name"] for s in stops}
-                from_name = station_names.get(from_id, from_id)
-                cursor = rw_conn.cursor()
-                cursor.execute("SELECT station_name FROM stations WHERE station_id = ?", (to_id,))
-                row = cursor.fetchone()
-                dest_name = row[0] if row else to_id
-                first_stop = stops[0]["station_name"] if stops else ""
-                last_stop = stops[-1]["station_name"] if stops else ""
-                # 题目描述：用户填写的初始站到终点站
-                question_str = f"{from_name}到{dest_name}"
-
-                if req.question_type == "transfer":
-                    parts = [f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票）"]
-                    parts.append(f"换乘 {solution_segments[1]['train_num']} 从 {solution_segments[1]['from']} 到 {dest_name}（有票）")
-                    path_desc = "，".join(parts)
-                elif req.question_type == "short_buy":
-                    path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票），补票段 {solution_segments[0]['to']}→{dest_name} 无余票需上车补票"
-                elif req.question_type == "extra_front":
-                    path_desc = f"乘坐 {target_train_num} 从 {solution_segments[0]['from']} 到 {dest_name} 有票（前额外），可在 {from_name} 站上车，实际乘坐 {from_name}→{dest_name}"
-                elif req.question_type == "extra_rear":
-                    path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']} 有票（后额外），在 {dest_name} 站提前下车，实际乘坐 {from_name}→{dest_name}"
-                elif req.question_type == "mixed":
-                    # 各分段叙述叠加
-                    parts = []
-                    for seg in solution_segments:
-                        tn = seg["train_num"]
-                        frm = seg.get("from", "")
-                        to = seg.get("to", "")
-                        strat = seg.get("strategy", "direct")
-                        act_from = seg.get("actual_from", frm)
-                        act_to = seg.get("actual_to", to)
-                        if strat == "short_buy":
-                            parts.append(f"乘坐 {tn} 从 {frm} 到 {to}（有票），补票段 {to}→{act_to} 无余票需上车补票")
-                        elif strat == "extra_front":
-                            parts.append(f"乘坐 {tn} 从 {frm} 到 {to} 有票（前额外），可在 {act_from} 站上车，实际乘坐 {act_from}→{act_to}")
-                        elif strat == "extra_rear":
-                            parts.append(f"乘坐 {tn} 从 {frm} 到 {to} 有票（后额外），在 {act_to} 站提前下车，实际乘坐 {act_from}→{act_to}")
-                        else:
-                            parts.append(f"乘坐 {tn} 从 {frm} 到 {to}（有票）")
-                    path_desc = "，然后 ".join(parts)
-                else:
-                    path_desc = ""
-
-                # 缓存生成的完整数据（含站 ID，供确认时写入磁盘）
-                _preview_cache[question_id] = {
-                    "question_type": req.question_type,
-                    "segments": solution_segments,
-                    "target_train_num": target_train_num,
-                    "cur_from_id": cur_from_id,
-                    "cur_to_id": cur_to_id,
-                    "start_station_id": from_id,
-                    "end_station_id": to_id,
-                    "stops": stops,
-                    "random_tickets": req.random_tickets,
-                    "fake_interference": req.fake_interference,
-                    "interference_density": req.interference_density,
-                    "segment_plans": req.segment_plans,
-                    "interference": req.random_tickets,
-                    "people_count": req.people_count,
-                    "seat_type": req.seat_type,
-                    "question": question_str,
-                }
-
-                q_conn.close()
-
-                return {
-                    "success": True,
-                    "question_id": question_id,
-                    "message": f"题目 {question_id} 生成成功（预览，尚未保存）",
-                    "preview": {
-                        "question": question_str,
-                        "question_type": req.question_type,
-                        "target_train_num": target_train_num,
-                        "target_train_route": f"{first_stop}→{last_stop}",
-                        "target_section": f"{from_name}→{dest_name}",
-                        "path_description": path_desc,
-                        "solution_segments": solution_segments,
-                    }
-                }
-
-            except HTTPException as e:
-                q_conn.close()
-                detail = e.detail if hasattr(e, 'detail') else str(e)
-                if any(keyword in str(detail) for keyword in [
-                    "目标车次无合适的中间站",
-                    "未找到合适的换乘车次",
-                    "混合策略换乘",
-                    "出发站前无足够车站",
-                    "到达站后无足够车站",
-                ]):
-                    last_error = str(detail)
-                    continue  # 重试下一个车次
-                raise  # 非重试性错误，直接抛出
-
-            except Exception as e:
-                q_conn.close()
-                last_error = f"出题过程异常: {str(e)}"
-                continue
-
-        # 所有重试都失败
-        raise HTTPException(
-            status_code=400,
-            detail=f"所有车次重试后仍无法生成题目: {last_error or '未知错误'}"
-        )
-
+        return {
+            "success": True,
+            "questions": questions,
+            "message": f"生成 {len(questions)} 道题（预览，尚未保存）",
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -1319,10 +1458,17 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
             "fake" if cached.get("fake_interference")
             else ("real" if cached.get("interference") else None)
         ),
+        "question_mode": cached.get("question_mode"),
         "people_count": cached.get("people_count"),
         "seat_type": cached.get("seat_type"),
         "start_station_id": cached.get("start_station_id"),
         "end_station_id": cached.get("end_station_id"),
+        "depart_earliest": cached.get("depart_earliest"),
+        "depart_latest": cached.get("depart_latest"),
+        "arrive_earliest": cached.get("arrive_earliest"),
+        "arrive_latest": cached.get("arrive_latest"),
+        "min_transfer_minutes": cached.get("min_transfer_minutes"),
+        "max_transfer_minutes": cached.get("max_transfer_minutes"),
         "ground_truth": cached.get("segments"),   # BUG6: 结构化标答存进 metadata
     }
     # 仅选择性题（有干扰票）才记录干扰密度，存在性题不写入该字段
@@ -1377,6 +1523,7 @@ def api_question_list(
             "status": meta.get("status", "unknown"),
             "source": meta.get("source", ""),
             "type": meta.get("type", ""),
+            "question_type": meta.get("question_type", ""),
             "train_count": meta.get("train_count", 0),
             "answer": meta.get("answer", ""),
             "question": meta.get("question", ""),

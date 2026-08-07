@@ -6,7 +6,7 @@
 
 import os
 import sqlite3
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from config import get_question_db_path
 from database import (
     TICKET_TABLES, get_price, get_prices_conn,
@@ -322,7 +322,20 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
                 })
         # 选择性题层2：全程可达校验（拼接所有段乘坐区间：地点连续+时间顺序+连接出发/到达地）
         if selective and (start_id or end_id):
-            issues.extend(_check_reachability(final_plan, start_id, end_id))
+            # 选择性题时间约束（出发/到达区间 + 最短换乘），存在才传
+            time_constraints = None
+            if (meta.get("depart_earliest") or meta.get("depart_latest")
+                    or meta.get("arrive_earliest") or meta.get("arrive_latest")
+                    or meta.get("min_transfer_minutes") or meta.get("max_transfer_minutes")):
+                time_constraints = {
+                    "depart_earliest": meta.get("depart_earliest"),
+                    "depart_latest": meta.get("depart_latest"),
+                    "arrive_earliest": meta.get("arrive_earliest"),
+                    "arrive_latest": meta.get("arrive_latest"),
+                    "min_transfer_minutes": meta.get("min_transfer_minutes"),
+                    "max_transfer_minutes": meta.get("max_transfer_minutes"),
+                }
+            issues.extend(_check_reachability(final_plan, start_id, end_id, time_constraints))
     finally:
         conn.close()
         p_conn.close()
@@ -349,6 +362,7 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
         "route_mismatch_count": len([i for i in issues if i.get("type") == "route_mismatch"]),
         "ticket_shortage_count": len([i for i in issues if i.get("type") == "ticket_shortage"]),
         "missing_ride_count": len(missing_ride_issues),
+        "question_mode": meta.get("interference_mode"),
         "verdict": verdict,
         "results": results,
         "issues": issues,
@@ -370,6 +384,15 @@ def _generate_summary(total: int, correct: int, issue_count: int,
     return f"{label}：共 {total} 条方案，{correct} 条正确，{issue_count} 条有问题"
 
 
+def _minutes(t) -> Optional[int]:
+    """HH:MM → 当天分钟数，非法返回 None"""
+    try:
+        h, m = map(int, str(t).split(":"))
+        return h * 60 + m
+    except (ValueError, AttributeError):
+        return None
+
+
 def _covers(item: Dict, station_id: str, rw_conn: sqlite3.Connection) -> bool:
     """station_id 是否在 item 实际乘坐区间 [ride_from, ride_to] 内（含端点，兼容买长坐短）"""
     tn = str(item.get("train_num", ""))
@@ -384,13 +407,18 @@ def _covers(item: Dict, station_id: str, rw_conn: sqlite3.Connection) -> bool:
     return ids.index(f) <= ids.index(station_id) <= ids.index(t)
 
 
-def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str) -> List[Dict]:
+def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str,
+                        time_constraints: Dict = None) -> List[Dict]:
     """选择性问题层2：全程可达校验。
 
     拼接所有段的实际乘坐区间（ride_from/ride_to，兜底=购买区间），检查：
       1. 地点连续：后段乘坐起点 == 前段乘坐终点
       2. 时间顺序：跨车次换乘时，前段到达时间 ≤ 后段发车时间
       3. 连接出发/到达地：出发站 start_id 在首段乘坐区间内、到达站 end_id 在末段乘坐区间内
+    若给定 time_constraints（选择性题），额外校验：
+      - 首段出发 ∈ [depart_earliest, depart_latest] → 否则 depart_time_violation
+      - 末段到达 ∈ [arrive_earliest, arrive_latest] → 否则 arrive_time_violation
+      - 跨车次换乘 ≥ min_transfer_minutes → 否则 transfer_too_short
     返回问题列表（空=可达）。
     """
     issues: List[Dict] = []
@@ -439,6 +467,58 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str) -> L
         if end_id:
             if not _covers(plan_items[-1], end_id, rw_conn):
                 issues.append({"type": "end_not_covered", "detail": f"方案未连接到达站 {end_id}"})
+
+        # 4. 选择性题时间约束（出发/到达区间 + 最短换乘）
+        if time_constraints:
+            def _stop_time(tn: str, sid: str) -> Optional[str]:
+                for s in get_train_stops(rw_conn, tn):
+                    if s["station_id"] == sid:
+                        return s.get("stop_time")
+                return None
+
+            first = plan_items[0]
+            last = plan_items[-1]
+            first_depart = _stop_time(first["train_num"],
+                                      first.get("ride_from_station_id") or first.get("from_station_id", ""))
+            last_arrive = _stop_time(last["train_num"],
+                                     last.get("ride_to_station_id") or last.get("to_station_id", ""))
+            de = time_constraints.get("depart_earliest")
+            dl = time_constraints.get("depart_latest")
+            ae = time_constraints.get("arrive_earliest")
+            al = time_constraints.get("arrive_latest")
+            if de and first_depart and first_depart < de:
+                issues.append({"type": "depart_time_violation",
+                               "detail": f"首段出发 {first_depart} 早于最早出发 {de}"})
+            if dl and first_depart and first_depart > dl:
+                issues.append({"type": "depart_time_violation",
+                               "detail": f"首段出发 {first_depart} 晚于最晚出发 {dl}"})
+            if ae and last_arrive and last_arrive < ae:
+                issues.append({"type": "arrive_time_violation",
+                               "detail": f"末段到达 {last_arrive} 早于最早到达 {ae}"})
+            if al and last_arrive and last_arrive > al:
+                issues.append({"type": "arrive_time_violation",
+                               "detail": f"末段到达 {last_arrive} 晚于最晚到达 {al}"})
+
+            mtr_min = time_constraints.get("min_transfer_minutes") or 0
+            mtr_max = time_constraints.get("max_transfer_minutes") or 0
+            if mtr_min > 0 or mtr_max > 0:
+                for i in range(len(plan_items) - 1):
+                    s1, s2 = plan_items[i], plan_items[i + 1]
+                    if s1.get("train_num") == s2.get("train_num"):
+                        continue  # 同车次段（买短补长）不视为换乘
+                    arr1 = _stop_time(s1["train_num"],
+                                      s1.get("ride_to_station_id") or s1.get("to_station_id", ""))
+                    dep2 = _stop_time(s2["train_num"],
+                                      s2.get("ride_from_station_id") or s2.get("from_station_id", ""))
+                    m1, m2 = _minutes(arr1), _minutes(dep2)
+                    if m1 is not None and m2 is not None:
+                        gap = m2 - m1
+                        if mtr_min > 0 and gap < mtr_min:
+                            issues.append({"type": "transfer_too_short",
+                                           "detail": f"{s1['train_num']}→{s2['train_num']} 换乘 {gap} 分钟，少于最短换乘 {mtr_min} 分钟"})
+                        elif mtr_max > 0 and gap > mtr_max:
+                            issues.append({"type": "transfer_too_long",
+                                           "detail": f"{s1['train_num']}→{s2['train_num']} 换乘 {gap} 分钟，超过最长换乘 {mtr_max} 分钟"})
     finally:
         rw_conn.close()
     return issues

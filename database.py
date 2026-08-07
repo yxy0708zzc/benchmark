@@ -468,9 +468,16 @@ def update_question_metadata(question_id: str, status: str,
                              people_count: int = None,
                              seat_type: str = None,
                              interference_mode: str = None,
+                             question_mode: str = None,
                              ground_truth: list = None,
                              start_station_id: str = None,
-                             end_station_id: str = None):
+                             end_station_id: str = None,
+                             depart_earliest: str = None,
+                             depart_latest: str = None,
+                             arrive_earliest: str = None,
+                             arrive_latest: str = None,
+                             min_transfer_minutes: int = None,
+                             max_transfer_minutes: int = None):
     """更新单条题目的元数据"""
     metadata = load_metadata()
     if question_id in metadata:
@@ -481,7 +488,12 @@ def update_question_metadata(question_id: str, status: str,
         if source is not None:
             entry["source"] = source
         if question_type is not None:
-            entry["type"] = question_type
+            entry["question_type"] = question_type
+        if question_mode is not None:
+            entry["type"] = "存在性" if question_mode == "existence" else "选择性"
+            entry["question_mode"] = question_mode
+        elif interference_mode is not None:
+            entry["type"] = "存在性" if interference_mode == "fake" else "选择性"
         if answer is not None:
             entry["answer"] = answer
         if question is not None:
@@ -504,6 +516,18 @@ def update_question_metadata(question_id: str, status: str,
             entry["start_station_id"] = start_station_id
         if end_station_id is not None:
             entry["end_station_id"] = end_station_id
+        if depart_earliest is not None:
+            entry["depart_earliest"] = depart_earliest
+        if depart_latest is not None:
+            entry["depart_latest"] = depart_latest
+        if arrive_earliest is not None:
+            entry["arrive_earliest"] = arrive_earliest
+        if arrive_latest is not None:
+            entry["arrive_latest"] = arrive_latest
+        if min_transfer_minutes is not None:
+            entry["min_transfer_minutes"] = min_transfer_minutes
+        if max_transfer_minutes is not None:
+            entry["max_transfer_minutes"] = max_transfer_minutes
         if trains is not None:
             existing = set(entry.get("trains", []))
             existing.update(trains)
@@ -517,7 +541,12 @@ def update_question_metadata(question_id: str, status: str,
         if source is not None:
             entry["source"] = source
         if question_type is not None:
-            entry["type"] = question_type
+            entry["question_type"] = question_type
+        if question_mode is not None:
+            entry["type"] = "存在性" if question_mode == "existence" else "选择性"
+            entry["question_mode"] = question_mode
+        elif interference_mode is not None:
+            entry["type"] = "存在性" if interference_mode == "fake" else "选择性"
         if answer is not None:
             entry["answer"] = answer
         if question is not None:
@@ -540,6 +569,18 @@ def update_question_metadata(question_id: str, status: str,
             entry["start_station_id"] = start_station_id
         if end_station_id is not None:
             entry["end_station_id"] = end_station_id
+        if depart_earliest is not None:
+            entry["depart_earliest"] = depart_earliest
+        if depart_latest is not None:
+            entry["depart_latest"] = depart_latest
+        if arrive_earliest is not None:
+            entry["arrive_earliest"] = arrive_earliest
+        if arrive_latest is not None:
+            entry["arrive_latest"] = arrive_latest
+        if min_transfer_minutes is not None:
+            entry["min_transfer_minutes"] = min_transfer_minutes
+        if max_transfer_minutes is not None:
+            entry["max_transfer_minutes"] = max_transfer_minutes
         if trains is not None:
             entry["trains"] = sorted(set(trains))
         metadata[question_id] = entry

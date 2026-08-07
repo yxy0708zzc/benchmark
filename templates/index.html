@@ -8,9 +8,9 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/static/api.js?v=40"></script>
-    <script src="/static/components.js?v=40"></script>
-    <script src="/static/app.js?v=40"></script>
+    <script src="/static/api.js?v=46"></script>
+    <script src="/static/components.js?v=46"></script>
+    <script src="/static/app.js?v=46"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -32,7 +32,6 @@
   <!-- 导航栏 -->
   <nav class="navbar">
     <a href="javascript:void(0)" class="nav-item active" data-page="test" onclick="App._switchToPage('test')">测试</a>
-    <a href="javascript:void(0)" class="nav-item" data-page="manual-question" onclick="App._switchToPage('manual-question')">出题</a>
     <a href="javascript:void(0)" class="nav-item" data-page="edit-question" onclick="App._switchToPage('edit-question')">改题</a>
     <a href="javascript:void(0)" class="nav-item" data-page="auto-question" onclick="App._switchToPage('auto-question')">存在性问题出题</a>
     <a href="javascript:void(0)" class="nav-item" data-page="selective-question" onclick="App._switchToPage('selective-question')">选择性问题出题</a>
@@ -48,23 +47,15 @@
       <div class="card" style="display:flex;flex-direction:column;min-height:0;flex:1;margin-bottom:16px">
         <div class="card-header">📋 题目列表</div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+          <select class="select" id="q-filter-type" style="font-size:12px">
+            <option value="">全部类型</option>
+            <option value="存在性">存在性</option>
+            <option value="选择性">选择性</option>
+          </select>
           <div style="display:flex;gap:6px">
-            <select class="select" id="q-filter-source" style="flex:1;font-size:12px">
-              <option value="">全部来源</option>
-              <option value="auto">auto</option>
-              <option value="manual">manual</option>
-            </select>
-            <select class="select" id="q-filter-type" style="flex:1;font-size:12px">
-              <option value="">全部题型</option>
-              <option value="direct">直达</option>
-              <option value="transfer">换乘</option>
-              <option value="short_buy">买短补长</option>
-              <option value="extra_front">额外(前)</option>
-              <option value="extra_rear">额外(后)</option>
-              <option value="mixed">混合</option>
-            </select>
+            <input class="input" id="q-filter-keyword" placeholder="搜索题名..." style="flex:1;font-size:12px">
+            <button class="btn btn-secondary btn-sm" onclick="App._loadQuestionList()">🔄 刷新</button>
           </div>
-          <input class="input" id="q-filter-keyword" placeholder="搜索题名..." style="font-size:12px">
         </div>
         <div id="question-list" style="flex:1;min-height:0;max-height:40vh;overflow-y:auto"></div>
         <div style="margin-top:12px;flex-shrink:0">
@@ -100,68 +91,6 @@
     </div>
   </div>
 
-  <!-- 手动出题页 -->
-  <div id="page-manual-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
-    <!-- 左栏：控制面板 -->
-    <div class="sidebar">
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">📝 题目信息</div>
-        <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
-          <div>当前题目: <strong id="current-question">-</strong></div>
-          <div>当前车次: <strong id="current-train">-</strong></div>
-          <div>
-            <label>题目编号:</label>
-            <input class="input" id="question-id-input" placeholder="请输入题号" style="margin-top:4px">
-          </div>
-          <div>
-            <label>座位类型:</label>
-            <select class="select" id="seat-type-select" style="margin-top:4px">
-              <option value="class2">二等座 (class2)</option>
-              <option value="class1">一等座 (class1)</option>
-              <option value="class0">特等座 (class0)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">🚄 车次选择</div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <input class="input" id="train-input" placeholder="输入车次号，如 G1">
-          <button class="btn btn-primary btn-sm" id="btn-load-train">加载车次</button>
-        </div>
-      </div>
-
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">已填车次</div>
-        <div id="filled-trains" style="max-height:200px;overflow-y:auto;font-size:var(--font-size-small)">
-          <div style="color:var(--gray-4)">请先加载车次</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">操作</div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <button class="btn btn-secondary btn-sm" id="btn-random-fill">🎲 随机填充当前车次</button>
-          <button class="btn btn-success btn-sm" id="btn-save">💾 保存</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 右栏：矩阵编辑区域 -->
-    <div class="flex-1">
-      <div class="card">
-        <div class="card-header">半矩阵编辑（右上三角可编辑，数字 0-30）</div>
-        <div id="matrix-container" style="overflow-x:auto;padding:12px 0">
-          <div style="text-align:center;color:var(--gray-4);padding:40px">请先输入车次号并点击"加载车次"</div>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:12px;font-size:var(--font-size-small);color:var(--gray-4)">
-          <span>💡 修改格子后立即保存到数据库</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- 改题页 -->
   <div id="page-edit-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
     <!-- 左栏 -->
@@ -173,6 +102,7 @@
             <option value="">-- 选择题目 --</option>
           </select>
           <button class="btn btn-primary btn-sm" id="edit-btn-load-question">加载题目</button>
+          <button class="btn btn-secondary btn-sm" onclick="App._loadEditQuestionOptions()">🔄 刷新列表</button>
         </div>
         <div style="margin-top:12px;font-size:var(--font-size-small)">
           <div>当前题目: <strong id="edit-current-question">-</strong></div>
@@ -232,6 +162,11 @@
         <div class="card-header">⚙️ 自动化出题参数</div>
         <div style="display:flex;flex-direction:column;gap:12px;font-size:var(--font-size-small)">
           <div>
+            <label style="font-weight:600">题目名：</label>
+            <input class="input" id="output-qid" placeholder="请输入题目名" style="margin-top:4px">
+          </div>
+
+          <div>
             <label style="font-weight:600">题型:</label>
             <select class="select" id="question-type" style="margin-top:4px">
               <option value="transfer">换乘</option>
@@ -240,6 +175,12 @@
               <option value="extra_rear">额外购买（后）</option>
               <option value="mixed">混合</option>
             </select>
+          </div>
+
+          <div id="mixed-config" style="display:none">
+            <label style="font-weight:600">换乘次数:</label>
+            <input type="number" class="input" id="auto-mixed-transfers" value="1" min="1" max="3" style="margin-top:4px;width:80px">
+            <div id="auto-mixed-segment-plans" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
           </div>
 
           <div>
@@ -256,12 +197,6 @@
               <input class="input" id="auto-to-station" placeholder="如 上海虹桥 或 AOH" style="margin-top:4px;flex:1">
               <button class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="App._randomStation('auto-to-station')" title="随机选站">🎲</button>
             </div>
-          </div>
-
-          <div id="mixed-config" style="display:none">
-            <label style="font-weight:600">换乘次数:</label>
-            <input type="number" class="input" id="auto-mixed-transfers" value="1" min="1" max="3" style="margin-top:4px;width:80px">
-            <div id="auto-mixed-segment-plans" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
           </div>
 
           <div>
@@ -286,11 +221,6 @@
               <input type="range" id="auto-interference-density" min="0" max="0.01" step="0.0001" value="0.001" style="flex:1">
               <span id="auto-interference-density-label" style="width:56px;text-align:right">0.1%</span>
             </div>
-          </div>
-
-          <div>
-            <label style="font-weight:600">自定义题名（可选）:</label>
-            <input class="input" id="output-qid" placeholder="留空自动生成" style="margin-top:4px">
           </div>
 
           <button class="btn btn-primary" id="btn-generate" style="margin-top:8px">🎯 生成并预览</button>
@@ -323,6 +253,11 @@
         <div class="card-header">⚙️ 选择性出题参数</div>
         <div style="display:flex;flex-direction:column;gap:12px;font-size:var(--font-size-small)">
           <div>
+            <label style="font-weight:600">题目名：</label>
+            <input class="input" id="sel-output-qid" placeholder="请输入题目名" style="margin-top:4px">
+          </div>
+
+          <div>
             <label style="font-weight:600">题型:</label>
             <select class="select" id="sel-question-type" style="margin-top:4px">
               <option value="transfer">换乘</option>
@@ -331,6 +266,12 @@
               <option value="extra_rear">额外购买（后）</option>
               <option value="mixed">混合</option>
             </select>
+          </div>
+
+          <div id="sel-mixed-config" style="display:none">
+            <label style="font-weight:600">换乘次数:</label>
+            <input type="number" class="input" id="sel-mixed-transfers" value="1" min="1" max="3" style="margin-top:4px;width:80px">
+            <div id="sel-mixed-segment-plans" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
           </div>
 
           <div>
@@ -350,14 +291,6 @@
           </div>
 
           <div>
-            <label style="font-weight:600">干扰密度:</label>
-            <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
-              <input type="range" id="sel-density" min="0" max="0.05" step="0.0001" value="0.02" style="flex:1">
-              <span id="sel-density-label" style="width:56px;text-align:right">2%</span>
-            </div>
-          </div>
-
-          <div>
             <label style="font-weight:600">需求人数:</label>
             <input type="number" class="input" id="sel-people-count" value="2" min="1" max="30" style="margin-top:4px;width:80px">
           </div>
@@ -371,15 +304,34 @@
             </select>
           </div>
 
-          <div id="sel-mixed-config" style="display:none">
-            <label style="font-weight:600">换乘次数:</label>
-            <input type="number" class="input" id="sel-mixed-transfers" value="1" min="1" max="3" style="margin-top:4px;width:80px">
-            <div id="sel-mixed-segment-plans" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+          <div style="border:1px solid var(--gray-2);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:8px;background:#fafafa">
+            <label style="font-weight:600">⏰ 时间约束（仅选择性题）</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="width:32px;font-weight:600">发:</span>
+              <input type="time" class="input" id="sel-depart-earliest" style="flex:1">
+              <span style="color:var(--gray-4)">-</span>
+              <input type="time" class="input" id="sel-depart-latest" style="flex:1">
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="width:32px;font-weight:600">到:</span>
+              <input type="time" class="input" id="sel-arrive-earliest" style="flex:1">
+              <span style="color:var(--gray-4)">-</span>
+              <input type="time" class="input" id="sel-arrive-latest" style="flex:1">
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="width:32px;font-weight:600">换:</span>
+              <input type="number" class="input" id="sel-min-transfer" value="" min="0" max="180" style="flex:1" placeholder="最短(分钟)">
+              <span style="color:var(--gray-4)">-</span>
+              <input type="number" class="input" id="sel-max-transfer" value="" min="0" max="600" style="flex:1" placeholder="最长(分钟,留空不限)">
+            </div>
           </div>
 
           <div>
-            <label style="font-weight:600">自定义题名（可选）:</label>
-            <input class="input" id="sel-output-qid" placeholder="留空自动生成" style="margin-top:4px">
+            <label style="font-weight:600">干扰密度:</label>
+            <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
+              <input type="range" id="sel-density" min="0" max="0.05" step="0.0001" value="0.02" style="flex:1">
+              <span id="sel-density-label" style="width:56px;text-align:right">2%</span>
+            </div>
           </div>
 
           <button class="btn btn-primary" id="btn-sel-generate" style="margin-top:8px">🎯 生成并预览</button>
@@ -464,22 +416,11 @@
             </select>
           </div>
           <div>
-            <label style="font-weight:600">来源:</label>
-            <select class="select" id="qm-source" style="margin-top:4px">
-              <option value="">全部</option>
-              <option value="manual">手动</option>
-              <option value="auto">自动</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-weight:600">题型:</label>
+            <label style="font-weight:600">类型:</label>
             <select class="select" id="qm-type" style="margin-top:4px">
               <option value="">全部</option>
-              <option value="transfer">换乘</option>
-              <option value="short_buy">买短补长</option>
-              <option value="extra_front">额外购买（前）</option>
-              <option value="extra_rear">额外购买（后）</option>
-              <option value="mixed">混合</option>
+              <option value="存在性">存在性</option>
+              <option value="选择性">选择性</option>
             </select>
           </div>
           <div>
@@ -494,10 +435,11 @@
     <div class="flex-1">
       <div class="card">
         <div class="card-header">📄 题目列表 <span id="qm-count" style="font-weight:400;font-size:var(--font-size-small);color:var(--gray-4)"></span></div>
+        <div style="padding:6px 0 8px"><button class="btn btn-secondary btn-sm" onclick="App._refreshQuestionList()">🔄 刷新列表</button></div>
         <div id="qm-table-wrapper" style="overflow-x:auto">
           <table class="table" style="font-size:var(--font-size-small);width:100%">
             <thead><tr>
-              <th>题号</th><th>来源</th><th>题型</th><th>车次数</th><th>状态</th><th>标准答案</th><th>操作</th>
+              <th>题号</th><th>题型</th><th>车次数</th><th>状态</th><th>标准答案</th><th>操作</th>
             </tr></thead>
             <tbody id="qm-tbody"></tbody>
           </table>
@@ -515,6 +457,7 @@
         <div id="eval-record-list" style="max-height:300px;overflow-y:auto"></div>
         <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
           <button class="btn btn-primary btn-sm" id="btn-eval-load">加载选中记录</button>
+          <button class="btn btn-secondary btn-sm" onclick="App._loadEvalRecords()">🔄 刷新列表</button>
         </div>
       </div>
       <div class="card">

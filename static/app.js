@@ -41,7 +41,6 @@ const App = {
     const pageMap = {
       '/': 'test',
       '/index.html': 'test',
-      '/manual_question': 'manual-question',
       '/auto_question': 'auto-question',
       '/selective_question': 'selective-question',
       '/edit_question': 'edit-question',
@@ -81,7 +80,6 @@ const App = {
     if (updateUrl) {
       const urlMap = {
         'test': '/',
-        'manual-question': '/manual_question',
         'edit-question': '/edit_question',
         'auto-question': '/auto_question',
         'selective-question': '/selective_question',
@@ -99,9 +97,6 @@ const App = {
       switch (pageName) {
         case 'test':
           this.initTester();
-          break;
-        case 'manual-question':
-          this.initManualQuestion();
           break;
         case 'edit-question':
           this.initEditQuestion();
@@ -203,7 +198,7 @@ const App = {
     this._loadQuestionList();
 
     // 题目列表筛选事件
-    ['q-filter-source', 'q-filter-type'].forEach(id => {
+    ['q-filter-type'].forEach(id => {
       document.getElementById(id)?.addEventListener('change', () => this._loadQuestionList());
     });
     document.getElementById('q-filter-keyword')?.addEventListener('input', () => this._loadQuestionList());
@@ -263,12 +258,11 @@ const App = {
     if (!container) return;
 
     // 读取筛选条件
-    const source = document.getElementById('q-filter-source')?.value || '';
     const type = document.getElementById('q-filter-type')?.value || '';
     const keyword = document.getElementById('q-filter-keyword')?.value.trim() || '';
 
     try {
-      const data = await API.getQuestionList({ status: 'completed', source, type, keyword });
+      const data = await API.getQuestionList({ status: 'completed', type, keyword });
       const sorted = this._sortQuestionsByQid(data.questions);
       // 保留列表滚动位置（避免刷新/筛选后跳到顶部或底部）
       const prevScroll = container.scrollTop;
@@ -277,11 +271,12 @@ const App = {
       sorted.forEach(q => { this._questionNlMap[q.question_id] = q.nl_question || q.question || ''; });
       let html = '';
       sorted.forEach(q => {
-        const sourceTag = q.source === 'auto' ? 'auto' : (q.source || 'manual');
         const typeTag = q.type || '';
+        const qtypeTag = q.question_type ? this._questionTypeLabel(q.question_type) : '';
+        const modeTag = typeTag ? `<span class="tag" style="background:${typeTag === '选择性' ? '#f5f3ff' : '#eff6ff'};color:${typeTag === '选择性' ? '#7c3aed' : '#2563eb'};border-radius:8px">${typeTag}</span>` : '';
         html += `<div class="question-item" data-qid="${q.question_id}" onclick="App._selectQuestion(this)">
           <input type="radio" name="question" value="${q.question_id}" id="q_${q.question_id}">
-          <label for="q_${q.question_id}">${q.question_id} <span class="tag tag-info">${sourceTag}</span>${typeTag ? `<span class="tag tag-secondary">${typeTag}</span>` : ''}
+          <label for="q_${q.question_id}">${q.question_id} ${qtypeTag ? `<span class="tag tag-secondary">${qtypeTag}</span>` : ''}${modeTag}
             <span style="font-size:var(--font-size-small);color:var(--gray-4)">${q.train_count}列车次</span>
           </label>
         </div>`;
@@ -730,66 +725,6 @@ const App = {
   },
 
   // ============================================================
-  // 手动出题器初始化
-  // ============================================================
-  initManualQuestion: function() {
-    // 确保前缀正确（可能被其他页面覆盖）
-    this._editorPrefix = '';
-    // 防重复初始化（SPA 页面切换会重复调用）
-    const page = document.getElementById('page-manual-question');
-    if (page?.dataset.initialized) return;
-    if (page) page.dataset.initialized = '1';
-
-    this._initQuestionEditor('manual');
-
-    // 题号输入框 blur 时检测重复，初始化新题
-    const qidInput = document.getElementById('question-id-input');
-    if (qidInput) {
-      const doCheckQuestionId = async () => {
-        const val = qidInput.value.trim();
-        if (!val) return;
-
-        // 如果值没变，不重复检查
-        if (qidInput.dataset.lastChecked === val) return;
-        qidInput.dataset.lastChecked = val;
-
-        try {
-          const exists = await API.questionExists(val);
-          if (exists.exists) {
-            alert(`题号 "${val}" 已存在，如需修改请换一个新题号`);
-            this.currentQuestionId = null;
-            document.getElementById('current-question').textContent = '-';
-            return;
-          }
-        } catch (e) {
-          // 网络错误忽略
-        }
-
-        // 新题号：清除之前的车次缓存，设置为当前题目
-        this.loadedTrains = [];
-        this.currentQuestionId = val;
-        document.getElementById('current-question').textContent = val;
-        document.getElementById('filled-trains').innerHTML = '<div style="color:var(--gray-4)">新题目，暂无已填车次</div>';
-      };
-      qidInput.addEventListener('blur', doCheckQuestionId);
-      qidInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); doCheckQuestionId(); }
-      });
-    }
-
-    // 车次输入框回车触发加载
-    const trainInput = document.getElementById('train-input');
-    if (trainInput) {
-      trainInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          document.getElementById('btn-load-train')?.click();
-        }
-      });
-    }
-  },
-
-  // ============================================================
   // 改题器初始化
   // ============================================================
   initEditQuestion: function() {
@@ -797,23 +732,7 @@ const App = {
     this._editorPrefix = 'edit-';
     this._initQuestionEditor('edit');
     // 每次进入改题页都刷新下拉列表（确保新创建的题目可见）
-    const select = document.getElementById('edit-question-select');
-    if (select) {
-      select.innerHTML = '<option value="">-- 选择题目 --</option>';
-      API.getQuestionList().then(data => {
-        const sorted = this._sortQuestionsByQid(data.questions);
-        sorted.forEach(q => {
-          const opt = document.createElement('option');
-          opt.value = q.question_id;
-          opt.textContent = `${q.question_id} (${q.status})`;
-          // 如果之前已选中某个题目且该题仍存在，恢复选中
-          if (this.currentQuestionId && q.question_id === this.currentQuestionId) {
-            opt.selected = true;
-          }
-          select.appendChild(opt);
-        });
-      });
-    }
+    this._loadEditQuestionOptions();
 
     // 车次输入框回车触发加载
     const trainInput = document.getElementById('edit-train-input');
@@ -825,6 +744,26 @@ const App = {
         }
       });
     }
+  },
+
+  /** 刷新改题页题目下拉（只刷新列表，不影响其他） */
+  _loadEditQuestionOptions: function() {
+    const select = document.getElementById('edit-question-select');
+    if (!select) return;
+    select.innerHTML = '<option value="">-- 选择题目 --</option>';
+    API.getQuestionList().then(data => {
+      const sorted = this._sortQuestionsByQid(data.questions);
+      sorted.forEach(q => {
+        const opt = document.createElement('option');
+        opt.value = q.question_id;
+        opt.textContent = `${q.question_id} (${q.status})`;
+        // 如果之前已选中某个题目且该题仍存在，恢复选中
+        if (this.currentQuestionId && q.question_id === this.currentQuestionId) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      });
+    }).catch(() => {});
   },
 
   /** 通用出题/改题编辑器初始化 */
@@ -1000,8 +939,8 @@ const App = {
         }
       }
 
-      // 刷新矩阵
-      await this._loadTrainForEditor('manual');
+      // 刷新矩阵（改题模式）
+      await this._loadTrainForEditor('edit');
     } catch (e) {
       alert(`随机填充失败: ${e.message}`);
     }
@@ -1029,7 +968,7 @@ const App = {
       // API 查询失败时忽略
     }
 
-    // 2) 合并本地 loadedTrains（手动模式可能尚未持久化）
+    // 2) 合并本地已加载车次
     if (this.loadedTrains && this.loadedTrains.length > 0) {
       this.loadedTrains.forEach(tn => {
         if (!allTrains.includes(tn)) {
@@ -1064,7 +1003,7 @@ const App = {
         if (e.target.closest('.delete-train-btn')) return; // 点击删除按钮时不跳转
         const tn = el.dataset.train;
         document.getElementById(P + 'train-input').value = tn;
-        this._loadTrainForEditor(P ? 'edit' : 'manual');
+        this._loadTrainForEditor('edit');
       });
       // 悬浮显示删除按钮
       el.addEventListener('mouseenter', () => {
@@ -1263,6 +1202,7 @@ const App = {
   _onAutoGenerate: async function() {
     const form = {
       question_type: document.getElementById('question-type')?.value || 'direct',
+      mode: 'existence',
       from_station_id: document.getElementById('auto-from-station')?.value.trim(),
       to_station_id: document.getElementById('auto-to-station')?.value.trim(),
       people_count: parseInt(document.getElementById('auto-people-count')?.value || '2', 10),
@@ -1272,6 +1212,12 @@ const App = {
       interference_density: parseFloat(document.getElementById('auto-interference-density')?.value || '0.001'),
       custom_qid: document.getElementById('output-qid')?.value.trim() || '',
     };
+
+    // 题目名必填
+    if (!form.custom_qid) {
+      alert('请填写题目名');
+      return;
+    }
 
     // 混合题型
     if (form.question_type === 'mixed') {
@@ -1311,29 +1257,34 @@ const App = {
     }
   },
 
-  /** 显示 auto 出题预览 */
+  /** 显示 auto 出题预览（存在性自动出两份：0_无伪干扰 / 1_有伪干扰） */
   _showAutoPreview: function(data) {
     const container = document.getElementById('preview-container');
     if (!container) return;
 
-    const preview = data.preview;
+    const questions = data.questions || [];
+    if (questions.length === 0) return;
 
-    // 合法路径渲染
-    let pathsHtml = '';
-    if (preview.solution_segments && preview.solution_segments.length > 0) {
-      preview.solution_segments.forEach(seg => {
-        pathsHtml += `<div>✅ ${seg.train_num}: ${seg.from}→${seg.to} (${seg.tickets}张 ${seg.seat_type})</div>`;
-      });
-    }
+    // 每份题渲染一张卡片
+    const cardsHtml = questions.map(q => {
+      const preview = q.preview || {};
+      const qid = q.question_id || '';
+      const isFake = qid.startsWith('1_');
+      const modeLabel = isFake ? '有伪干扰' : '无伪干扰';
+      const modeColor = isFake ? '#7c3aed' : '#2563eb';
 
-    // 路径描述
-    const pathDesc = preview.path_description || '';
+      let pathsHtml = '';
+      if (preview.solution_segments && preview.solution_segments.length > 0) {
+        preview.solution_segments.forEach(seg => {
+          pathsHtml += `<div>✅ ${seg.train_num}: ${seg.from}→${seg.to} (${seg.tickets}张 ${seg.seat_type})</div>`;
+        });
+      }
+      const pathDesc = preview.path_description || '';
 
-    container.innerHTML = `
+      return `
       <div class="card">
-        <div class="card-header">预览：即将生成题目</div>
+        <div class="card-header">${qid} <span class="tag" style="background:#f5f3ff;color:${modeColor};border-radius:8px">${modeLabel}</span></div>
         <div style="display:flex;flex-direction:column;gap:12px">
-          <div><strong>题目名：</strong>${data.question_id}</div>
           <div><strong>题型：</strong>${preview.question_type}</div>
           <div><strong>需求人数：</strong>${document.getElementById('auto-people-count')?.value || '2'} 人</div>
           <div><strong>答案票等级：</strong>${document.getElementById('auto-seat-type')?.value || 'class2'}</div>
@@ -1343,57 +1294,63 @@ const App = {
           <div style="padding-left:20px">${pathsHtml || '<div style="color:var(--gray-4)">无</div>'}</div>
           <div style="color:var(--success-green);font-weight:600">✅ 有合法解</div>
         </div>
-      </div>
-    `;
+      </div>`;
+    }).join('<div style="height:12px"></div>');
 
-    // 显示确认按钮和重新出题按钮
+    container.innerHTML = cardsHtml;
+
+    // 显示确认按钮和重新出题按钮（存所有题名，确认时循环保存）
     const confirmBtn = document.getElementById('btn-confirm-generate');
     if (confirmBtn) {
       confirmBtn.style.display = 'inline-flex';
-      confirmBtn.dataset.questionId = data.question_id;
-      confirmBtn.dataset.questionType = preview.question_type || '';
-      confirmBtn.dataset.answer = preview.path_description || '';
+      confirmBtn.dataset.questionIds = questions.map(q => q.question_id).join(',');
+      confirmBtn.dataset.questionType = (questions[0].preview || {}).question_type || '';
+      confirmBtn.dataset.answer = (questions[0].preview || {}).path_description || '';
     }
     const reBtn = document.getElementById('btn-regenerate');
     if (reBtn) {
       reBtn.style.display = 'inline-flex';
-      reBtn.dataset.questionId = data.question_id;
+      reBtn.dataset.questionIds = questions.map(q => q.question_id).join(',');
     }
   },
 
   /** 确认生成 */
   _confirmAutoGenerate: async function() {
     const confirmBtn = document.getElementById('btn-confirm-generate');
-    if (!confirmBtn || !confirmBtn.dataset.questionId) return;
+    if (!confirmBtn || !confirmBtn.dataset.questionIds) return;
 
-    const questionId = confirmBtn.dataset.questionId;
-    try {
-      const result = await API.confirmAutoGenerate({
-        question_id: questionId,
-        question_type: confirmBtn.dataset.questionType || '',
-        answer: confirmBtn.dataset.answer || '',
-      });
-      if (result.success) {
-        // 清空预览，回到输入状态
-        confirmBtn.style.display = 'none';
-        const reBtn = document.getElementById('btn-regenerate');
-        if (reBtn) reBtn.style.display = 'none';
-        const container = document.getElementById('preview-container');
-        if (container) container.innerHTML = '';
-      } else {
-        alert(`确认失败: ${result.detail || '未知错误'}`);
+    // 存在性一次出两份（0_无伪干扰 / 1_有伪干扰），循环确认保存
+    const questionIds = (confirmBtn.dataset.questionIds || '').split(',').filter(Boolean);
+    for (const questionId of questionIds) {
+      try {
+        const result = await API.confirmAutoGenerate({
+          question_id: questionId,
+          question_type: confirmBtn.dataset.questionType || '',
+          answer: confirmBtn.dataset.answer || '',
+        });
+        if (!result.success) {
+          alert(`确认失败: ${result.detail || '未知错误'}`);
+          return;
+        }
+      } catch (e) {
+        alert(`确认失败: ${e.message}`);
+        return;
       }
-    } catch (e) {
-      alert(`确认失败: ${e.message}`);
     }
+    // 全部保存成功，清空预览，回到输入状态
+    confirmBtn.style.display = 'none';
+    const reBtn = document.getElementById('btn-regenerate');
+    if (reBtn) reBtn.style.display = 'none';
+    const container = document.getElementById('preview-container');
+    if (container) container.innerHTML = '';
   },
 
   /** 重新出题：保留表单输入，清除上次预览缓存并重新生成 */
   _reAutoGenerate: async function() {
     const reBtn = document.getElementById('btn-regenerate');
-    const questionId = reBtn?.dataset.questionId || '';
-    // 清除后端预览缓存
-    if (questionId) {
+    const questionIds = (reBtn?.dataset.questionIds || reBtn?.dataset.questionId || '').split(',').filter(Boolean);
+    // 清除后端预览缓存（存在性一次可能有多份）
+    for (const questionId of questionIds) {
       try {
         await API.clearAutoGenerate(questionId);
       } catch (e) {
@@ -1478,6 +1435,7 @@ const App = {
   _onSelectiveGenerate: async function() {
     const form = {
       question_type: document.getElementById('sel-question-type')?.value || 'direct',
+      mode: 'selective',
       from_station_id: document.getElementById('sel-from-station')?.value.trim(),
       to_station_id: document.getElementById('sel-to-station')?.value.trim(),
       random_tickets: true,
@@ -1485,8 +1443,20 @@ const App = {
       interference_density: parseFloat(document.getElementById('sel-density')?.value || '0.02'),
       people_count: parseInt(document.getElementById('sel-people-count')?.value || '2', 10),
       seat_type: document.getElementById('sel-seat-type')?.value || 'class2',
+      depart_earliest: document.getElementById('sel-depart-earliest')?.value || null,
+      depart_latest: document.getElementById('sel-depart-latest')?.value || null,
+      arrive_earliest: document.getElementById('sel-arrive-earliest')?.value || null,
+      arrive_latest: document.getElementById('sel-arrive-latest')?.value || null,
+      min_transfer_minutes: parseInt(document.getElementById('sel-min-transfer')?.value || '0', 10) || 0,
+      max_transfer_minutes: parseInt(document.getElementById('sel-max-transfer')?.value || '', 10) || null,
       custom_qid: document.getElementById('sel-output-qid')?.value.trim() || '',
     };
+
+    // 题目名必填
+    if (!form.custom_qid) {
+      alert('请填写题目名');
+      return;
+    }
 
     // 混合题型
     if (form.question_type === 'mixed') {
@@ -1526,12 +1496,15 @@ const App = {
     }
   },
 
-  /** 显示选择性问题预览 */
+  /** 显示选择性问题预览（选择性出一份，前缀 2_） */
   _showSelectivePreview: function(data) {
     const container = document.getElementById('sel-preview-container');
     if (!container) return;
 
-    const preview = data.preview;
+    const questions = data.questions || [];
+    const first = questions[0] || {};
+    const preview = first.preview || {};
+    const qid = first.question_id || '';
     const density = document.getElementById('sel-density')?.value || '0.15';
 
     let pathsHtml = '';
@@ -1547,7 +1520,7 @@ const App = {
       <div class="card">
         <div class="card-header">预览：即将生成题目</div>
         <div style="display:flex;flex-direction:column;gap:12px">
-          <div><strong>题目名：</strong>${data.question_id}</div>
+          <div><strong>题目名：</strong>${qid}</div>
           <div><strong>题型：</strong>${preview.question_type}</div>
           <div><strong>需求人数：</strong>${document.getElementById('sel-people-count')?.value || '2'} 人</div>
           <div><strong>答案票等级：</strong>${document.getElementById('sel-seat-type')?.value || 'class2'}</div>
@@ -1564,7 +1537,7 @@ const App = {
     const confirmBtn = document.getElementById('btn-sel-confirm');
     if (confirmBtn) {
       confirmBtn.style.display = 'inline-flex';
-      confirmBtn.dataset.questionId = data.question_id;
+      confirmBtn.dataset.questionId = qid;
       confirmBtn.dataset.questionType = preview.question_type || '';
       confirmBtn.dataset.answer = preview.path_description || '';
       confirmBtn.dataset.interference = 'true';
@@ -1573,7 +1546,7 @@ const App = {
     const reBtn = document.getElementById('btn-sel-regenerate');
     if (reBtn) {
       reBtn.style.display = 'inline-flex';
-      reBtn.dataset.questionId = data.question_id;
+      reBtn.dataset.questionId = qid;
     }
   },
 
@@ -1609,9 +1582,9 @@ const App = {
   /** 重新出题（选择性）：保留表单输入，清除上次预览缓存并重新生成 */
   _reSelectiveGenerate: async function() {
     const reBtn = document.getElementById('btn-sel-regenerate');
-    const questionId = reBtn?.dataset.questionId || '';
+    const questionIds = (reBtn?.dataset.questionIds || reBtn?.dataset.questionId || '').split(',').filter(Boolean);
     // 清除后端预览缓存
-    if (questionId) {
+    for (const questionId of questionIds) {
       try {
         await API.clearAutoGenerate(questionId);
       } catch (e) {
@@ -1638,7 +1611,7 @@ const App = {
     document.querySelector('#page-question-manager').dataset.initialized = '1';
 
     // 筛选变化自动刷新
-    ['qm-status', 'qm-source', 'qm-type'].forEach(id => {
+    ['qm-status', 'qm-type'].forEach(id => {
       document.getElementById(id)?.addEventListener('change', () => this._refreshQuestionList());
     });
     document.getElementById('qm-keyword')?.addEventListener('input', () => this._refreshQuestionList());
@@ -1649,11 +1622,9 @@ const App = {
   _refreshQuestionList: async function() {
     const params = new URLSearchParams();
     const status = document.getElementById('qm-status')?.value;
-    const source = document.getElementById('qm-source')?.value;
     const type = document.getElementById('qm-type')?.value;
     const keyword = document.getElementById('qm-keyword')?.value.trim();
     if (status) params.set('status_filter', status);
-    if (source) params.set('source', source);
     if (type) params.set('type', type);
     if (keyword) params.set('keyword', keyword);
 
@@ -1666,19 +1637,19 @@ const App = {
       if (countEl) countEl.textContent = `（共 ${data.total || 0} 题）`;
 
       if (!data.questions || data.questions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-4);padding:30px">暂无符合条件的题目</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray-4);padding:30px">暂无符合条件的题目</td></tr>';
         return;
       }
 
       const sorted = this._sortQuestionsByQid(data.questions);
       let html = '';
       sorted.forEach(q => {
-        const typeLabel = this._questionTypeLabel(q.type);
+        const qtypeLabel = q.question_type ? this._questionTypeLabel(q.question_type) : (q.type || '-');
+        const modeTag = (q.type && q.type !== q.question_type) ? ` <span style="color:${q.type === '选择性' ? '#7c3aed' : '#2563eb'};font-size:11px">(${q.type})</span>` : '';
         const ansPreview = q.answer ? q.answer.substring(0, 30) + (q.answer.length > 30 ? '...' : '') : '-';
         html += `<tr>
           <td><strong>${q.question_id}</strong></td>
-          <td><span class="tag tag-info">${q.source || 'manual'}</span></td>
-          <td>${typeLabel}</td>
+          <td>${qtypeLabel}${modeTag}</td>
           <td>${q.train_count}</td>
           <td><span class="tag ${q.status === 'completed' ? 'tag-success' : 'tag-warning'}">${q.status}</span></td>
           <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${q.answer || ''}">${ansPreview}</td>
@@ -1916,52 +1887,62 @@ const App = {
       const vInfo = verdictMap[verify.verdict] || { label: verify.verdict || '未知', bg: '#f5f5f5', color: '#6b7280' };
       const hasIssues = (verify.issues || []).length > 0;
 
-      // ---- 问题类型元数据（分类标签 + 颜色）----
-      const ISSUE_META = {
-        'hallucination': { label: '余票不符', color: '#dc2626' },
-        'price_wrong': { label: '票价不符', color: '#dc2626' },
-        'price_missing': { label: '票价缺失', color: '#f59e0b' },
-        'invalid_plan_item': { label: '无效条目', color: '#f59e0b' },
-        'invalid_seat': { label: '无效座位', color: '#f59e0b' },
-        'missing_ride': { label: '缺乘坐区间', color: '#f59e0b' },
-        'route_mismatch': { label: '路线不符标答', color: '#dc2626' },
-        'ticket_shortage': { label: '票数不足', color: '#f59e0b' },
-        'route_invalid': { label: '区间无效', color: '#dc2626' },
-        'route_discontinuity': { label: '乘坐不连续', color: '#dc2626' },
-        'transfer_time_conflict': { label: '换乘时间冲突', color: '#dc2626' },
-        'start_not_covered': { label: '未连接出发站', color: '#dc2626' },
-        'end_not_covered': { label: '未连接到达站', color: '#dc2626' },
-        'no_route': { label: '无可达路线', color: '#dc2626' },
+      // 题型模式（存在性/选择性检测不同）
+      const modeMap = {
+        'fake': { label: '存在性问题 · 答案唯一（对标标答）', color: '#2563eb', bg: '#eff6ff' },
+        'real': { label: '选择性问题 · 答案多个（全程可达+时间约束）', color: '#7c3aed', bg: '#f5f3ff' },
       };
-      const issueMeta = (type) => (ISSUE_META[type] || { label: type || '错误', color: '#dc2626' });
+      const modeInfo = modeMap[verify.question_mode] || { label: '题目类型未知（按存在性核查）', color: '#6b7280', bg: '#f3f4f6' };
 
-      // ---- 头部：verdict + 摘要 ----
+      // ---- 问题类型元数据：标签 + 颜色 + 分组 ----
+      const ISSUE_META = {
+        'hallucination': { label: '余票不符', color: '#dc2626', group: '硬错误' },
+        'price_wrong': { label: '票价不符', color: '#dc2626', group: '硬错误' },
+        'route_mismatch': { label: '路线不符标答', color: '#dc2626', group: '硬错误' },
+        'route_invalid': { label: '区间无效', color: '#dc2626', group: '硬错误' },
+        'route_discontinuity': { label: '乘坐不连续', color: '#dc2626', group: '硬错误' },
+        'transfer_time_conflict': { label: '换乘时间冲突', color: '#dc2626', group: '硬错误' },
+        'start_not_covered': { label: '未连接出发站', color: '#dc2626', group: '硬错误' },
+        'end_not_covered': { label: '未连接到达站', color: '#dc2626', group: '硬错误' },
+        'no_route': { label: '无可达路线', color: '#dc2626', group: '硬错误' },
+        'transfer_too_short': { label: '换乘时间不足', color: '#f59e0b', group: '约束' },
+        'transfer_too_long': { label: '换乘时间过长', color: '#f59e0b', group: '约束' },
+        'depart_time_violation': { label: '出发时间不符', color: '#f59e0b', group: '约束' },
+        'arrive_time_violation': { label: '到达时间不符', color: '#f59e0b', group: '约束' },
+        'ticket_shortage': { label: '票数不足', color: '#f59e0b', group: '约束' },
+        'price_missing': { label: '票价缺失', color: '#f59e0b', group: '约束' },
+        'invalid_seat': { label: '无效座位', color: '#f59e0b', group: '格式' },
+        'invalid_plan_item': { label: '无效条目', color: '#f59e0b', group: '格式' },
+        'missing_ride': { label: '缺乘坐区间', color: '#f59e0b', group: '格式' },
+      };
+      const issueMeta = (t) => (ISSUE_META[t] || { label: t || '错误', color: '#dc2626', group: '硬错误' });
+
+      // ---- 头部：verdict + 题型 ----
       html += `<div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <span style="font-weight:600">🔍 代码核查结果</span>
         <span style="display:inline-block;padding:3px 12px;border-radius:12px;font-size:13px;font-weight:600;background:${vInfo.bg};color:${vInfo.color}">${vInfo.label}</span>
+        <span style="display:inline-block;padding:3px 12px;border-radius:12px;font-size:12px;font-weight:600;background:${modeInfo.bg};color:${modeInfo.color}">${modeInfo.label}</span>
       </div>`;
       html += `<div style="margin-bottom:14px;padding:10px 14px;border-radius:6px;background:${hasIssues ? '#fef2f2' : '#f0fdf4'};color:${hasIssues ? 'var(--error-red)' : 'var(--success-green)'}">
         ${verify.summary || (hasIssues ? '存在核查问题' : '✅ 未发现问题')}
       </div>`;
 
-      // ---- 维度统计卡（每个数据维度是否正确都体现）----
-      const dims = [
-        { label: '方案总数', value: verify.total_items || 0, color: '#374151', bg: '#f3f4f6' },
-        { label: '正确', value: verify.correct_items || 0, color: '#16a34a', bg: '#f0fdf4' },
-        { label: '余票不符', value: verify.hallucination_count || 0, color: '#dc2626', bg: '#fef2f2' },
-        { label: '票价问题', value: verify.price_issue_count || 0, color: '#dc2626', bg: '#fef2f2' },
-        { label: '无效条目', value: verify.invalid_plan_count || 0, color: '#f59e0b', bg: '#fffbeb' },
-        { label: '路线不符', value: verify.route_mismatch_count || 0, color: '#dc2626', bg: '#fef2f2' },
-        { label: '票数不足', value: verify.ticket_shortage_count || 0, color: '#f59e0b', bg: '#fffbeb' },
-        { label: '缺乘坐区间', value: verify.missing_ride_count || 0, color: '#f59e0b', bg: '#fffbeb' },
-      ];
+      // ---- 统计卡：正确 + 各错误类型聚合（动态，不杂乱）----
+      const countMap = {};
+      (verify.issues || []).forEach(iss => { countMap[iss.type] = (countMap[iss.type] || 0) + 1; });
+      const card = (val, label, color, bg) =>
+        `<div style="background:${bg};padding:6px 12px;border-radius:8px;font-size:12px;text-align:center;min-width:64px">
+           <div style="font-weight:700;font-size:17px;color:${color}">${val}</div>
+           <div style="color:${color};opacity:.85;margin-top:2px">${label}</div>
+         </div>`;
       html += `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">`;
-      dims.forEach(d => {
-        html += `<div style="background:${d.bg};padding:6px 12px;border-radius:8px;font-size:12px;text-align:center;min-width:72px">
-          <div style="font-weight:700;font-size:18px;color:${d.color}">${d.value}</div>
-          <div style="color:${d.color};opacity:.85;margin-top:2px">${d.label}</div>
-        </div>`;
+      html += card(verify.total_items || 0, '方案总数', '#374151', '#f3f4f6');
+      html += card(verify.correct_items || 0, '正确', '#16a34a', '#f0fdf4');
+      Object.entries(countMap).forEach(([typ, cnt]) => {
+        const m = issueMeta(typ);
+        html += card(cnt, m.label, m.color, `${m.color}14`);
       });
+      if (!hasIssues && (verify.total_items || 0) > 0) html += card(0, '无问题', '#16a34a', '#f0fdf4');
       html += `</div>`;
 
       // ---- 按 (车次|购买起|购买止|座位) 关联每条问题到明细行 ----
@@ -2018,13 +1999,18 @@ const App = {
         html += `<div style="color:var(--gray-4);margin:12px 0">⚠️ 测试记录中无可核查的购票段（模型可能未输出 final_plan）</div>`;
       }
 
-      // ---- 问题清单（分类标签 + 颜色）----
-      if (verify.issues?.length > 0) {
-        html += `<div style="margin-top:14px"><strong>⚠️ 问题清单（${verify.issues.length} 项）：</strong></div>`;
-        verify.issues.forEach((issue, i) => {
-          const m = issueMeta(issue.type);
-          html += `<div style="padding:8px 10px;margin:4px 0;background:#fef2f2;border-radius:6px;font-size:var(--font-size-small);border-left:3px solid ${m.color}">
-            <span style="color:${m.color};font-weight:600">[${m.label}]</span> ${issue.detail || ''}</div>`;
+      // ---- 问题清单：按严重度分组（硬错误 / 约束 / 格式）----
+      if (hasIssues) {
+        const groupTitles = { '硬错误': '🚫 硬错误（方案不可行）', '约束': '⚠️ 约束不满足', '格式': '📝 格式 / 缺失' };
+        Object.entries(groupTitles).forEach(([g, title]) => {
+          const items = (verify.issues || []).filter(i => issueMeta(i.type).group === g);
+          if (!items.length) return;
+          html += `<div style="margin-top:14px"><strong>${title}（${items.length} 项）</strong></div>`;
+          items.forEach((issue) => {
+            const m = issueMeta(issue.type);
+            html += `<div style="padding:8px 10px;margin:4px 0;background:#fef2f2;border-radius:6px;font-size:var(--font-size-small);border-left:3px solid ${m.color}">
+              <span style="color:${m.color};font-weight:600">[${m.label}]</span> ${issue.detail || ''}</div>`;
+          });
         });
       }
       html += `</div>`;
