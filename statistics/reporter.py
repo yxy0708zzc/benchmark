@@ -44,8 +44,8 @@ def generate_report() -> Dict:
     # 错误率警告
     warnings = []
     for r in ranking:
-        if r["hallucination_rate"] > 10:
-            warnings.append(f"{r['model']} 错误率 {r['hallucination_rate']}%，超过 10% 阈值")
+        if r["error_rate"] > 10:
+            warnings.append(f"{r['model']} 错误率 {r['error_rate']}%，超过 10% 阈值")
 
     # 自动洞察
     insights = []
@@ -58,15 +58,23 @@ def generate_report() -> Dict:
         worst_score = ranking[-1]["avg_score"]
         insights.append(f"{worst_model} 在所有模型中表现最弱，平均分 {worst_score}")
 
-    # 题型洞察
-    if question_type_data:
-        sorted_types = sorted(question_type_data.items(), key=lambda x: x[1]["avg_score"], reverse=True)
+    # 题型洞察（按题型）
+    qtype_data = question_type_data.get("by_question_type", {})
+    if qtype_data:
+        sorted_types = sorted(qtype_data.items(), key=lambda x: x[1]["avg_score"], reverse=True)
         if sorted_types:
             insights.append(f"题型从易到难排序：{' > '.join([t[0] for t in sorted_types])}")
             easiest = sorted_types[0]
             hardest = sorted_types[-1]
             insights.append(f"所有模型在 {easiest[0]} 题型上表现最好（平均分 {easiest[1]['avg_score']}）")
             insights.append(f"所有模型在 {hardest[0]} 题型上最具挑战（平均分 {hardest[1]['avg_score']}）")
+
+    # 题目类型洞察（存在性 / 选择性）
+    type_data = question_type_data.get("by_type", {})
+    if type_data:
+        sorted_types = sorted(type_data.items(), key=lambda x: x[1]["avg_score"], reverse=True)
+        if sorted_types:
+            insights.append(f"题目类型从易到难排序：{' > '.join([t[0] for t in sorted_types])}")
 
     # 各模型优缺点
     for r in ranking:
@@ -107,17 +115,26 @@ def export_markdown() -> str:
 
     # 模型排名
     lines.append("## 模型综合排名\n")
-    lines.append("| 排名 | 模型 | 平均分 | 完成率 | 错误率 |")
-    lines.append("|------|------|--------|--------|--------|")
+    lines.append("| 排名 | 模型 | 平均分 | 完成率 | 通过率 | 错误率 |")
+    lines.append("|------|------|--------|--------|--------|--------|")
     for i, r in enumerate(report["model_ranking"], 1):
-        lines.append(f"| {i} | {r['model']} | {r['avg_score']} | {r['completion_rate']}% | {r['hallucination_rate']}% |")
+        lines.append(f"| {i} | {r['model']} | {r['avg_score']} | {r['completion_rate']}% | {r['pass_rate']}% | {r['error_rate']}% |")
 
     # 题型分析
+    qtype_data = report["by_question_type"].get("by_question_type", {})
     lines.append("\n## 题型难度分析\n")
-    lines.append("| 题型 | 测试数 | 平均分 | 完成率 |")
-    lines.append("|------|--------|--------|--------|")
-    for qtype, data in sorted(report["by_question_type"].items(), key=lambda x: x[1]["avg_score"], reverse=True):
-        lines.append(f"| {qtype} | {data['count']} | {data['avg_score']} | {data['completion_rate']}% |")
+    lines.append("| 题型 | 测试数 | 平均分 | 通过率 | 错误率 |")
+    lines.append("|------|--------|--------|--------|--------|")
+    for qtype, data in sorted(qtype_data.items(), key=lambda x: x[1]["avg_score"], reverse=True):
+        lines.append(f"| {qtype} | {data['count']} | {data['avg_score']} | {data['pass_rate']}% | {data['error_rate']}% |")
+
+    # 题目类型分析（存在性 / 选择性）
+    type_data = report["by_question_type"].get("by_type", {})
+    lines.append("\n## 题目类型分析\n")
+    lines.append("| 类型 | 测试数 | 平均分 | 通过率 | 错误率 |")
+    lines.append("|------|--------|--------|--------|--------|")
+    for t, data in sorted(type_data.items(), key=lambda x: x[1]["avg_score"], reverse=True):
+        lines.append(f"| {t} | {data['count']} | {data['avg_score']} | {data['pass_rate']}% | {data['error_rate']}% |")
 
     # 警告
     if report["hallucination_warning"]:

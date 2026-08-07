@@ -9,9 +9,9 @@
 | 模块 | 说明 |
 |------|------|
 | **数据爬取** | 基于 12306 真实车次、经停站、票价数据 |
-| **出题器** | 手动 / 存在性自动 / 选择性自动三种出题模式 |
+| **出题器** | 存在性自动（一次出 `0_` 无干扰 + `1_` 伪干扰两份）/ 选择性自动（`2_` 真干扰，可配时间约束） |
 | **测试器** | 对话式测试，调用大模型并处理工具调用循环 |
-| **测评器** | 核查 final_plan：购买/乘坐双区间；存在性对标标答、选择性校全程可达 |
+| **测评器** | 核查 final_plan：购买/乘坐双区间；分类按 `type`——存在性对标标答、选择性校全程可达+时间约束；verdict 分 `pass`/`hallucination`/`no_plan`/`empty_plan`/`db_not_found` |
 | **统计** | 完成率、幻觉率、平均分、Token 效率等指标与报告 |
 
 ---
@@ -20,8 +20,10 @@
 
 ```
 benchmark_travelplan/
-├── collector.py            # 基础数据爬虫（车次/经停站）
-├── price_collector.py      # 票价爬虫（支持并发、断点续爬）
+├── collector.py            # 基础数据爬虫（车次/经停站，含完整性/跨天验证）
+├── price_collector.py      # 票价爬虫（支持并发、断点续爬、补充）
+├── cleanup_incomplete_trains.py  # 清理票价不全车次（--fix 离线补算 / --apply 自动删除）
+├── cleanup_overnight_trains.py   # 清理跨天车次（当日完成约束）
 ├── server.py               # FastAPI 服务（API + 前端）
 ├── database.py             # SQLite 数据库操作
 ├── verifier.py             # 代码核查（验证模型方案）
@@ -91,30 +93,28 @@ python server.py
 
 ### 第二步：出题
 
-打开页面顶部的**出题**相关标签页，有三种模式：
+打开页面顶部的**出题**相关标签页，有两种模式（题名前缀由系统自动添加，与输入无关）：
 
-**① 手动出题（「出题」标签）**
-1. 输入题目编号 → 输入车次号 → 点击加载
-2. 在弹出的半矩阵中逐格填写余票数量（0 表示无票）
-3. 填写完成后「标记题目完成」
-
-**② 存在性自动出题（「存在性问题出题」标签）**
+**① 存在性自动出题（「存在性问题出题」标签）—— 一次生成两份**
 1. 选择题型（换乘/买短补长/额外前/额外后/混合）
 2. 填写出发站和到达站（支持中文站名或电报码，可点 🎲 随机选站）
 3. 混合题需设置换乘次数和各段策略（直达/买短补长/额外前/额外后）
-4. 点击「生成并预览」→ 查看预览结果
-5. 满意则点「✅ 确认生成」落盘；不满意点「🔄 重新出题」（保留输入、清除缓存重新生成）
+4. 点击「生成并预览」→ 系统自动出**两份**（共用同一车次与合法解，仅干扰不同）：
+   - `0_`：**无干扰**（只有答案路径有票，唯一解）
+   - `1_`：**伪干扰**（干扰票数严格 < 人数，唯一解）
+5. 满意则点「✅ 确认生成」**循环保存两份**；不满意点「🔄 重新出题」（保留输入、清除缓存重新生成）
 
-**③ 选择性自动出题（「选择性问题出题」标签）**
-- 与存在性出题类似，但会添加随机干扰票（可调干扰密度）
-- 生成的题目模型需要**筛选最优方案**
+**② 选择性自动出题（「选择性问题出题」标签）—— 生成一份**
+- 前缀 `2_`，答案**多个**，添加真干扰（票数随机 1~10，可调干扰密度）
+- 可配置**时间约束**（最早/最晚出发、最早/最晚到达、最短/最长换乘）
+- 生成的题目模型需**筛选可行且满足约束的最优方案**（核查只校验全程可达 + 时间约束，不做标答对标）
 
 > 生成的题目保存在 `question/*.db`，元数据在 `question/metadata.json`。
 
 ### 第三步：测试
 
 打开**测试**标签页：
-1. 在左侧题目列表中选择题目（支持按来源/题型筛选、关键词搜索）→ 点击「加载选中题目」
+1. 在左侧题目列表中选择题目（支持按类型/题型筛选、关键词搜索）→ 点击「加载选中题目」
 2. 首次使用需点击右上角设置按钮填写 **API Key**（支持填写过的切换）
 3. 在对话输入框输入购票需求，例如：
    > 从北京南到上海虹桥，二等座，2 张，下午出发
@@ -126,7 +126,7 @@ python server.py
 打开**测评**标签页：
 1. 从测试记录列表加载一条记录
 2. 点击「代码核查」→ 系统自动核查模型 `final_plan`（详见下方「final_plan 格式与核查规则」）
-3. 查看体系化的核查结果：8 维统计 + 购买/乘坐明细表 + 问题清单，人工确认后「保存测评结果」
+3. 查看体系化的核查结果：模式/verdict 徽章 + 动态统计卡 + 购买/乘坐明细表 + 三组问题清单，人工确认后「保存测评结果」
 4. 结果保存到 `logs/result/`
 
 ### 第五步：统计
@@ -153,11 +153,11 @@ python server.py
 ### 出题器
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/api/auto_generate` | POST | 自动出题（生成预览） |
-| `/api/auto_generate/confirm` | POST | 确认生成题目 |
+| `/api/auto_generate` | POST | 自动出题生成预览；`mode`=`existence` 一次出 `0_`（无干扰）+`1_`（伪干扰）两份，`selective` 出 `2_` 一份 |
+| `/api/auto_generate/confirm` | POST | 确认生成题目（存在性需分别确认两份） |
 | `/api/auto_generate/clear` | POST | 清除预览缓存 |
 | `/api/auto_generate/previews` | GET | 查看预览缓存 |
-| `/api/question/list` | GET | 题目列表（支持 `source`/`type`/`keyword` 筛选） |
+| `/api/question/list` | GET | 题目列表（支持 `type`/`keyword` 筛选） |
 | `/api/question/init` | POST | 初始化题目车次 |
 | `/api/update_ticket` | POST | 实时更新余票 |
 
@@ -176,28 +176,37 @@ python server.py
 
 ## 出题模式
 
-### 1. 手动出题
-人工逐格设置余票数量，适合精细控制。
+### 1. 存在性自动出题（前缀 `0_` / `1_`，答案唯一）
+- 一次点击「生成并预览」自动出**两份**（同一车次、同一合法解，仅干扰不同；两份共用同一随机种子保证一致）：
+  - **`0_` 无干扰**：完全不加干扰票，只有答案路径有票 → **唯一解**，核查用**对标标答**（完全一致）
+  - **`1_` 伪干扰**：干扰票数**严格 < 人数**（制造"看起来像但票不够"的干扰项），仍保证唯一解，核查用对标标答
+- 可设置**需求人数**（答案票数 ≥ 人数）和**答案票等级**（class0/1/2）；干扰密度滑条 **0~1%**（默认 0.1%，步长 0.01%，仅对 `1_` 生效，`0_` 无干扰）
 
-### 2. 存在性自动出题
-- 答案**唯一**，模型只需找到**一条**可行路径
-- 可设置**需求人数**（答案票数 ≥ 人数）和**答案票等级**（class0/1/2）
-- 默认加入**伪干扰**（干扰票数**严格 < 人数**，制造"看起来像但票不够"的干扰项，保证只有唯一合法解），密度滑条 **0~1%**（默认 0.1%，步长 0.01%）
-- 模型需通过"票数是否够 + 等级是否匹配"筛选出**唯一**正确答案
+### 2. 选择性自动出题（前缀 `2_`，答案多个）
+- 只生成**一份**，前缀 `2_`
+- 添加**真干扰**（票数随机 1~10、等级随机），密度滑条 **0~5%**（默认 2%，步长 0.01%）
+- 可设置需求人数、答案票等级，以及**时间约束**（仅选择性生效）：
+  - 最早/最晚出发（`depart_earliest/latest`，HH:MM）
+  - 最早/最晚到达（`arrive_earliest/latest`，HH:MM）
+  - 最短/最长换乘（`min_transfer_minutes` / `max_transfer_minutes`，分钟；留空 = 不限）
+- 核查只校验**全程可达 + 时间约束**，不与标答完全一致（答案多个）
 
-### 3. 选择性自动出题
-- 答案**多个**，模型需**筛选最优**方案
-- 可设置需求人数（答案票数 ≥ 人数）和答案票等级
-- 在合法解基础上添加**真干扰**（票数随机 1~10、等级随机），密度滑条 **0~5%**（默认 2%，步长 0.01%）
-
-> 生成后 metadata 中 `interference_mode` 字段区分干扰类型：`fake`=存在性伪干扰、`real`=选择性真干扰。
+### 元数据字段（`question/metadata.json`）
+生成确认后写入：
+- `question_type`：题型（transfer/short_buy/extra_front/extra_rear/mixed）
+- `question_mode`：`existence` / `selective`（出题时确定的题目模式）
+- `type`：**分类依据**（存在性 / 选择性），由 `question_mode` 推导；旧题按 `interference_mode` 推导（fake→存在性 / real→选择性）
+- `interference_mode`：真实干扰类型（`fake`=伪干扰、`real`=真干扰；无干扰题不存）
+- `ground_truth`：结构化标准答案（含购买+乘坐区间 id），供存在性对标
+- `start_station_id` / `end_station_id`：真实 A/B 站，供可达性校验
+- 时间约束 5 字段：仅选择性题存储
 
 ### 支持题型
 `transfer`（换乘）/ `short_buy`（买短补长）/ `extra_front`（额外前）/ `extra_rear`（额外后）/ `mixed`（混合，每段可独立选策略）
 
 > 买短补长与额外购买在模型输出中统一用「购买区间 + 乘坐区间（ride）」表达（无独立补票段）。
 
-> 换乘出题保证：**当天换乘**、后一趟发车时间 ≥ 前一趟到达时间 + 20 分钟、时间顺序正确。
+> 换乘出题保证：**当天换乘**、后一趟发车时间 ≥ 前一趟到达时间 + 20 分钟（选择性可配最短/最长换乘）、时间顺序正确。
 
 ---
 
@@ -223,22 +232,35 @@ python server.py
 
 ### 核查规则（verifier.py）
 
-按题目的 `interference_mode` 区分存在性（fake）/选择性（real），三层判定：
+**分类依据**：题目的 `type` 字段（存在性 / 选择性；无旧题，不做 `interference_mode` 兜底）。分层判定：
 
-| 层 | 存在性（fake，答案唯一） | 选择性（real，答案多个） |
+| 层 | 存在性（`0_`/`1_`，答案唯一） | 选择性（`2_`，答案多个） |
 |----|------------------------|------------------------|
-| 层1 余票/票价 | 购买区间查 DB 有票 + 票价 + 张数 ≥ 人数 | 同左 |
-| 层2 | 与 `ground_truth` **完全一致**（车次+购买+座位+乘坐） | **全程可达**：拼接各段乘坐区间（地点连续 + 时间衔接 + 覆盖出发/到达站） |
-| 缺字段 | 购买段缺 `ride` → `missing_ride`（答不全即错） | 同左 |
+| 层0 归一化 | `normalize_final_plan` 统一字段契约：兼容 `from/to` 与 `from_station_id/to_station_id`；分购票段/补票段；购买段缺 `ride` → `missing_ride`（**一律按不全处理，不兜底**）；缺关键字段/非对象 → `invalid_plan_item` | 同左 |
+| 层1 余票/票价 | 购买区间查 DB 余票 ≥ 声称张数（否则 `hallucination`）+ 票价核验（`price_wrong`/`price_missing`）+ 张数 ≥ 人数（否则 `ticket_shortage`） | 同左 |
+| 层2 | 与 `ground_truth` **完全一致**（车次+购买+座位+乘坐区间），否则 `route_mismatch` | **全程可达**（`_check_reachability`）：地点连续 + 时间衔接 + 覆盖出发/到达站 + **时间约束**（出发/到达区间、换乘 min/max） |
+| 判定 | 无任何 issue → `pass`；否则 `hallucination` | 同左 |
 
-> 出题端保存 `ground_truth`（含购买+乘坐的 id 与汉字）至 `metadata` 供存在性对标；`metadata` 同时存 `start_station_id`/`end_station_id` 供可达性校验。
+**verdict 取值**：`pass`（全部通过）/ `hallucination`（任一 issue 即判错）/ `no_plan`（无任何可核查购票段）/ `empty_plan`（final_plan 为空数组，server 层判定）/ `db_not_found`（题目库不存在）。
+
+> 出题端保存 `ground_truth`（含购买+乘坐的 id）至 `metadata` 供存在性对标；`metadata` 同时存 `start_station_id`/`end_station_id` 供可达性校验。
+
+### 问题分类（前端按三组展示）
+
+| 分组 | 类型 |
+|------|------|
+| 🚫 硬错误（方案不可行/编造） | `hallucination`、`price_wrong`、`route_mismatch`、`route_invalid`、`route_discontinuity`、`transfer_time_conflict`、`start_not_covered`、`end_not_covered`、`no_route` |
+| ⚠️ 约束（硬性约束不满足） | `depart_time_violation`、`arrive_time_violation`、`transfer_too_short`、`transfer_too_long`、`ticket_shortage`、`price_missing` |
+| 📝 格式/缺失 | `invalid_seat`、`invalid_plan_item`、`missing_ride` |
 
 ### 前端核查展示
 
 测评页「代码核查」结果体系化展示：
-- **8 维统计卡**：方案总数 / 正确 / 余票不符 / 票价问题 / 无效条目 / 路线不符 / 票数不足 / 缺乘坐区间
+- **模式徽章**：按 `type` 显示「存在性问题·答案唯一（对标标答）」/「选择性问题·答案多个（全程可达+时间约束）」
+- **verdict 徽章**：✅全部通过 / ❌存在错误 / ⚠️最终方案为空 / ⚠️无可核查方案 / ❌数据库不存在
+- **动态统计卡**：方案总数 + 余票通过（段级）+ 各问题类型动态聚合
 - **明细表**：每段显示 车次 / 购买区间 / 乘坐区间（汉字）/ 座位 / 票数(声称/实际) / 票价(声称/实际) / 核对；购买≠乘坐时标注「买≠坐」
-- **问题清单**：按类型中文标签 + 颜色分类（红=硬错、橙=格式或不足）
+- **问题清单**：按 🚫硬错误 / ⚠️约束 / 📝格式 三组分组展示
 
 ---
 
@@ -272,6 +294,7 @@ python collector.py
   采集车站列表 → 初始化 HTTP 会话 → 枚举 G 车次 → 采集经停站 → 物化 station_trains 表 → 构建同车多号映射 → 数据完整性验证
 - 需联网访问 12306，数据写入 `data/railway.db`（stations / trains / train_stops / station_trains）和 `data/same_trains.json`
 - 若 12306 数据有更新，重新运行即可
+- **完整性验证**（`verify_data`）：检查缺经停时间 `missing_stop_time`、缺电报码 `missing_station_id`、**跨天车次** `overnight_train_count`（相邻站 `stop_time` 时间倒退，违反当日完成约束；跨天车次用 `cleanup_overnight_trains.py` 清理）
 
 ### ② 票价爬虫 `price_collector.py`
 
@@ -340,11 +363,26 @@ python nl_question.py --question a1 --question a2
 ### ④ 清理数据不全车次 `cleanup_incomplete_trains.py`
 
 ```bash
-python cleanup_incomplete_trains.py
+python cleanup_incomplete_trains.py                  # 交互：逐个确认删除
+python cleanup_incomplete_trains.py --fix           # 离线补算缺失的非相邻段票价，再报告
+python cleanup_incomplete_trains.py --apply         # 非交互：自动删除仍不全的车次
+python cleanup_incomplete_trains.py --fix --apply   # 先补算，补算后仍不全的自动删除
 ```
 
-- 逐个检查车次的票价数据完整性，发现数据不全的车次**逐个确认**：`y`=删除 / `n`=跳过（`Enter` 默认删除）
-- 删除的车次会同步从 `trains` 表移除，避免出题/测评引用到"幽灵车次"
+- 逐个检查车次的票价数据完整性（应有站对 = C(站数,2)，覆盖所有非相邻段）
+- `--fix`：对相邻段齐全的车次**离线累加补算**缺失的非相邻段票价（无需联网）；相邻段也缺的需联网补爬或删除
+- `--apply`：非交互自动删除仍不全的车次，同步从 `trains`/`train_stops`/`same_trains.json` 移除，避免出题/测评引用“幽灵车次”
+- **数据完整性要求**：保证 `prices.db` 覆盖所有车次的所有区间票价——主核查代码（verifier）**不做数据防御**，`price_missing` 不应出现（出现即出题人数据没准备好，先跑本脚本清理）
+
+### ⑤ 清理跨天车次 `cleanup_overnight_trains.py`
+
+```bash
+python cleanup_overnight_trains.py           # 只显示跨天车次
+python cleanup_overnight_trains.py --apply   # 显示 + 删除
+```
+
+- 判定：车次内相邻经停站 `stop_time` 时间倒退（如 `23:20 → 00:07`）即跨到次日，违反**当日完成约束**
+- `collector.py` 的 `verify_data` 会报告 `overnight_train_count`（跨天车次数），发现问题后用本脚本清理（删除跨天车次会同步从 prices.db / railway.db / same_trains.json 移除）
 
 ---
 
@@ -357,4 +395,5 @@ python cleanup_incomplete_trains.py
 
 ---
 ## 备注
-- 题目中a*为自动出体，纯数字为手动
+- 题目前缀：`0_`=存在性无干扰（唯一解）、`1_`=存在性伪干扰（唯一解）、`2_`=选择性真干扰（多解）；前缀由系统自动添加，与输入无关
+- 题目分类按 metadata `type`（存在性/选择性），核查方式由此确定（存在性对标标答 / 选择性全程可达）

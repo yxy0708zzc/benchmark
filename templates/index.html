@@ -8,9 +8,9 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/static/api.js?v=46"></script>
-    <script src="/static/components.js?v=46"></script>
-    <script src="/static/app.js?v=46"></script>
+    <script src="/static/api.js?v=49"></script>
+    <script src="/static/components.js?v=49"></script>
+    <script src="/static/app.js?v=49"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -359,11 +359,12 @@
   <!-- 统计页 -->
   <div id="page-stats" class="page-section" style="display:none;flex-direction:column;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
     <!-- 顶部：统计卡片 -->
-    <div id="stat-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px">
+    <div id="stat-cards" style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px">
       <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">总测试数</div></div>
       <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">平均分</div></div>
-      <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">完成率</div></div>
+      <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">通过率</div></div>
       <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">错误率</div></div>
+      <div class="stat-card"><div class="stat-card-value">-</div><div class="stat-card-label">完成率</div></div>
     </div>
 
     <!-- 中部：图表区域 -->
@@ -392,6 +393,7 @@
           <button class="btn btn-secondary btn-sm" id="btn-export-md">📥 导出 Markdown</button>
         </div>
       </div>
+      <div id="issue-distribution" style="margin:12px 0;display:flex;flex-wrap:wrap;gap:4px"></div>
       <div id="model-comparison-table" style="overflow-x:auto">
         <div style="text-align:center;color:var(--gray-4);padding:20px">加载中...</div>
       </div>

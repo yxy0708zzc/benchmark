@@ -3,7 +3,11 @@
 - 扫描所有车次，逐辆展示数据完整性详情
 - 每辆车逐个确认：y 删除 / n 跳过
 
-执行方式：python cleanup_incomplete_trains.py
+执行方式：
+    python cleanup_incomplete_trains.py            # 交互：逐个确认删除
+    python cleanup_incomplete_trains.py --fix      # 离线补算缺失的非相邻段票价（相邻段齐全的可算），再报告
+    python cleanup_incomplete_trains.py --apply    # 非交互：自动删除仍不全的车次
+    python cleanup_incomplete_trains.py --fix --apply   # 先补算，补算后仍不全的自动删除
 """
 
 import sqlite3
@@ -161,6 +165,60 @@ def delete_train_completely(train_num: str) -> dict:
     return {"success": all("✗" not in d for d in details), "details": details}
 
 
+def compute_missing_pairs(train_num: str) -> int:
+    """离线补算该车次缺失的非相邻段票价（相邻段齐全时累加计算）。
+    相邻段不全 → 返回 0（该车需联网补爬或删除）。返回补算条数。"""
+    rw = sqlite3.connect(RAILWAY_DB)
+    try:
+        stops = [{"station_id": r[0]} for r in rw.execute(
+            "SELECT station_id FROM train_stops WHERE train_num = ? ORDER BY stop_no",
+            (train_num,))]
+    finally:
+        rw.close()
+    if len(stops) < 2:
+        return 0
+
+    pr = sqlite3.connect(PRICES_DB)
+    try:
+        rows = pr.execute(
+            "SELECT from_station_id, to_station_id, seat, price FROM prices WHERE train_num = ?",
+            (train_num,)).fetchall()
+        adj = {(r[0], r[1], r[2]): r[3] for r in rows}
+        seats = sorted({r[2] for r in rows})
+        if not seats:
+            return 0
+
+        all_adj = {(stops[i]["station_id"], stops[i + 1]["station_id"]) for i in range(len(stops) - 1)}
+        existing_adj = {(f, t) for (f, t, _s) in adj}
+        if all_adj - existing_adj:
+            return 0  # 相邻段不全，无法离线补算（需联网补爬）
+
+        n = len(stops)
+        computed = 0
+        for i in range(n):
+            for j in range(i + 2, n):
+                f_id, t_id = stops[i]["station_id"], stops[j]["station_id"]
+                for seat in seats:
+                    total = 0.0
+                    valid = True
+                    for k in range(i, j):
+                        key = (stops[k]["station_id"], stops[k + 1]["station_id"], seat)
+                        if key not in adj:
+                            valid = False
+                            break
+                        total += adj[key]
+                    if valid:
+                        pr.execute(
+                            "INSERT OR REPLACE INTO prices (train_num, from_station_id, to_station_id, seat, price) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (train_num, f_id, t_id, seat, round(total, 2)))
+                        computed += 1
+        pr.commit()
+    finally:
+        pr.close()
+    return computed
+
+
 def rebuild_station_trains():
     """重建 station_trains 物化视图"""
     from database import refresh_station_trains
@@ -170,9 +228,20 @@ def rebuild_station_trains():
 
 
 def main():
+    fix = "--fix" in sys.argv
+    apply = "--apply" in sys.argv
+    if fix and apply:
+        mode_desc = "离线补算 + 自动删除（非交互）"
+    elif fix:
+        mode_desc = "离线补算缺失的非相邻段票价"
+    elif apply:
+        mode_desc = "自动删除数据不全车次（非交互）"
+    else:
+        mode_desc = "逐个展示，逐个确认（y=删除 / n=跳过）"
+
     print("=" * 60)
     print("  清理票价数据不全的车次")
-    print("  逐个展示，逐个确认（y=删除 / n=跳过）")
+    print(f"  模式：{mode_desc}")
     print("=" * 60)
 
     # 获取所有车次
@@ -182,20 +251,54 @@ def main():
     all_trains = [row[0] for row in cursor.fetchall()]
     rw.close()
 
-    # 逐个检查
-    incomplete_trains = []
-    for tn in all_trains:
-        info = inspect_train(tn)
-        if not info["complete"]:
-            incomplete_trains.append(info)
+    def collect_incomplete():
+        inc = []
+        for tn in all_trains:
+            info = inspect_train(tn)
+            if not info["complete"]:
+                inc.append(info)
+        return inc
 
+    incomplete_trains = collect_incomplete()
     if not incomplete_trains:
         print("\n✅ 所有车次数据完整，无需清理。")
         return
 
+    # --fix：先离线补算缺失的非相邻段（相邻段齐全的可算）
+    if fix:
+        print(f"\n发现 {len(incomplete_trains)} 个数据不全的车次，开始离线补算缺失的非相邻段票价...")
+        fixed_count = 0
+        for info in incomplete_trains:
+            added = compute_missing_pairs(info["train_num"])
+            if added:
+                fixed_count += 1
+                print(f"  ✓ {info['train_num']}: 补算 {added} 条非相邻段票价")
+        if fixed_count:
+            print(f"\n共补算 {fixed_count} 趟车，重新检查...")
+            incomplete_trains = collect_incomplete()
+            if not incomplete_trains:
+                print("✅ 补算后所有车次数据完整，无需清理。")
+                return
+        else:
+            print("\n无可离线补算的车次（缺失的均为相邻段，需联网补爬）。")
+
+    # --apply：自动删除仍不全的车次（非交互）
+    if apply:
+        print(f"\n自动删除 {len(incomplete_trains)} 个仍不全的车次...")
+        deleted = []
+        need_rebuild = False
+        for info in incomplete_trains:
+            result = delete_train_completely(info["train_num"])
+            deleted.append(info["train_num"])
+            if result["success"]:
+                need_rebuild = True
+        print(f"  已删除 ({len(deleted)}): {', '.join(deleted)}")
+        _rebuild_and_report(deleted, [], need_rebuild)
+        return
+
     print(f"\n发现 {len(incomplete_trains)} 个数据不全的车次。")
 
-    # 逐个展示 + 确认
+    # 逐个展示 + 确认（默认交互模式）
     deleted = []
     skipped = []
     need_rebuild = False

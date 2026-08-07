@@ -61,18 +61,20 @@ def normalize_final_plan(raw_plan: List[Dict]) -> List[Dict]:
             if not seat_type:
                 out.append({"__invalid__": True, "error": "购票段缺 seat_type", "raw": item})
                 continue
+            # 缺实际乘坐区间 → 一律按不全处理（不兜底）：ride 留空，层2 不计入可达拼接
+            missing_ride_flag = not (ride_from and ride_to)
             entry = {
                 "train_num": str(train_num),
                 "from_station_id": str(from_id),
                 "to_station_id": str(to_id),
-                "ride_from_station_id": str(ride_from or from_id),
-                "ride_to_station_id": str(ride_to or to_id),
+                "ride_from_station_id": str(ride_from) if not missing_ride_flag else "",
+                "ride_to_station_id": str(ride_to) if not missing_ride_flag else "",
                 "seat_type": str(seat_type),
                 "tickets": int(item.get("tickets", 0) or 0),
                 "seg_type": "purchase",
             }
-            if not (ride_from and ride_to):
-                # 购买段必须标注实际乘坐区间，缺=答不全（仍用 from/to 兜底继续核查）
+            if missing_ride_flag:
+                # 购买段必须标注实际乘坐区间，缺=答不全（不兜底，直接按不全处理）
                 entry["__missing_ride__"] = True
             price = item.get("price")
             if price is not None:
@@ -134,8 +136,8 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
     meta = get_question_metadata(question_id)
     gt = meta.get("ground_truth") or []
     people_count = meta.get("people_count", 1)
-    # 选择性题（interference_mode=real）：层2 只做全程可达校验，不与标答完全一致对比
-    selective = meta.get("interference_mode") == "real"
+    # 分类按 type（存在性/选择性）确定；无旧题，不做 interference_mode 兜底
+    selective = meta.get("type") == "选择性"
     start_id = meta.get("start_station_id") or (gt[0]["from_station_id"] if gt else None)
     end_id = meta.get("end_station_id") or (gt[-1]["to_station_id"] if gt else None)
     gt_purchase = [g for g in gt if g.get("seg_type") != "onboard"]
@@ -156,6 +158,25 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
                 "detail": f"题目 {question_id} 的数据库不存在",
             }] + invalid_issues,
             "summary": "❌ 题目数据库不存在",
+        }
+
+    # 无任何可核查购票段（final_plan 缺失 / 全为无效条目 / 仅 onboard）→ 单独判定 no_plan
+    if not purchase_items:
+        return {
+            "total_items": 0,
+            "correct_items": 0,
+            "issue_count": len(invalid_issues),
+            "hallucination_count": 0,
+            "price_issue_count": 0,
+            "invalid_plan_count": len(invalid_items),
+            "route_mismatch_count": 0,
+            "ticket_shortage_count": 0,
+            "missing_ride_count": len(missing_ride_issues),
+            "question_mode": meta.get("type"),
+            "verdict": "no_plan",
+            "results": [],
+            "issues": list(invalid_issues) + list(missing_ride_issues),
+            "summary": "⚠️ 未检测到可核查的购票段（final_plan 缺失或全为无效条目）",
         }
 
     # 加载站名映射（id→汉字），供验证明细展示
@@ -312,14 +333,40 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
             if selective:
                 continue
             if gt_purchase_keys and _seg_key(item) not in gt_purchase_keys:
-                issues.append({
-                    "type": "route_mismatch",
-                    "train_num": item.get("train_num"),
-                    "from_station_id": item.get("from_station_id"),
-                    "to_station_id": item.get("to_station_id"),
-                    "seat_type": item.get("seat_type"),
-                    "detail": f"购票段 {item.get('train_num')} {item.get('from_station_id')}→{item.get('to_station_id')} {item.get('seat_type')} 与标准答案不一致（答案唯一）",
-                })
+                # 细分“与标准答案不一致”的具体维度：车次 / 购买区间 / 座位 / 乘坐区间
+                gt_train_set = {str(g.get("train_num", "")) for g in gt_purchase}
+                gt_route_set = {(str(g.get("from_station_id", "")), str(g.get("to_station_id", ""))) for g in gt_purchase}
+                gt_seat_set = {str(g.get("seat_type", "")) for g in gt_purchase}
+                gt_ride_set = {(str(g.get("ride_from_station_id") or g.get("from_station_id", "")),
+                                str(g.get("ride_to_station_id") or g.get("to_station_id", ""))) for g in gt_purchase}
+                tn = str(item.get("train_num", ""))
+                f_id = str(item.get("from_station_id", ""))
+                t_id = str(item.get("to_station_id", ""))
+                seat = str(item.get("seat_type", ""))
+                r_f = str(item.get("ride_from_station_id") or f_id)
+                r_t = str(item.get("ride_to_station_id") or t_id)
+                mism = []
+                if tn not in gt_train_set:
+                    mism.append(("route_mismatch_train", "车次", tn))
+                if (f_id, t_id) not in gt_route_set:
+                    mism.append(("route_mismatch_route", "购买区间", f"{f_id}→{t_id}"))
+                if seat not in gt_seat_set:
+                    mism.append(("route_mismatch_seat", "座位", seat))
+                if (r_f, r_t) not in gt_ride_set:
+                    mism.append(("route_mismatch_ride", "乘坐区间", f"{r_f}→{r_t}"))
+                if not mism:
+                    mism.append(("route_mismatch", "整体方案", ""))
+                for typ, label, val in mism:
+                    detail = (f"购票段 {tn} {f_id}→{t_id} {seat} 与标准答案不一致：{label}不符（{val}）"
+                              if val else f"购票段 {tn} {f_id}→{t_id} {seat} 与标准答案不一致（答案唯一）")
+                    issues.append({
+                        "type": typ,
+                        "train_num": item.get("train_num"),
+                        "from_station_id": item.get("from_station_id"),
+                        "to_station_id": item.get("to_station_id"),
+                        "seat_type": item.get("seat_type"),
+                        "detail": detail,
+                    })
         # 选择性题层2：全程可达校验（拼接所有段乘坐区间：地点连续+时间顺序+连接出发/到达地）
         if selective and (start_id or end_id):
             # 选择性题时间约束（出发/到达区间 + 最短换乘），存在才传
@@ -359,10 +406,10 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
         "hallucination_count": hallucination_count,
         "price_issue_count": price_issue_count,
         "invalid_plan_count": len(invalid_items),
-        "route_mismatch_count": len([i for i in issues if i.get("type") == "route_mismatch"]),
+        "route_mismatch_count": len([i for i in issues if i.get("type", "").startswith("route_mismatch")]),
         "ticket_shortage_count": len([i for i in issues if i.get("type") == "ticket_shortage"]),
         "missing_ride_count": len(missing_ride_issues),
-        "question_mode": meta.get("interference_mode"),
+        "question_mode": meta.get("type"),
         "verdict": verdict,
         "results": results,
         "issues": issues,
@@ -430,6 +477,11 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str,
         prev_train = None
         prev_arr = None
         for i, item in enumerate(plan_items):
+            # 缺实际乘坐区间 → 一律按不全处理，不参与可达拼接
+            if item.get("__missing_ride__"):
+                issues.append({"type": "route_invalid", "train_num": item.get("train_num", ""),
+                               "detail": f"第{i + 1}段缺少实际乘坐区间 ride_from/ride_to（按不全处理）"})
+                continue
             tn = str(item.get("train_num", ""))
             f = str(item.get("ride_from_station_id") or item.get("from_station_id", ""))
             t = str(item.get("ride_to_station_id") or item.get("to_station_id", ""))

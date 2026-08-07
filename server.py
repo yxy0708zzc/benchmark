@@ -958,6 +958,9 @@ def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
     """
     if block_pairs is None:
         block_pairs = set()
+    # 伪干扰边界（方案A）：1 人时伪干扰票数需 <1 只能 0 张（=无票），退化为无干扰，保证唯一解
+    if people_count is not None and people_count <= 1:
+        return
     n = len(stops)
     candidates = []
     for i in range(n):
@@ -1009,12 +1012,14 @@ def _add_interference_all_trains(q_conn: sqlite3.Connection, rw_conn: sqlite3.Co
 # --- POST /api/auto_generate auto出题器生成题目 ---
 # 生成单份题的预览（内存 DB 验证，不写磁盘）。
 # 存在性出两份：0_无伪干扰 / 1_有伪干扰；选择性出一份：2_。前缀自动加在题名前，与输入无关。
-def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraints, base_seed=None):
+def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraints,
+                          with_interference, base_seed=None):
     """生成一份题的预览。
     prefix: 题名前缀（存在性 "0_"/"1_"；选择性 "2_"）
     fake: 伪干扰模式（干扰票数严格 < 人数，保证唯一解）
     mode: 题目模式（"existence"/"selective"，用于 type 显示）
     with_time_constraints: 是否校验并存储时间约束（仅选择性题）
+    with_interference: 是否添加干扰票（0_=False 完全无干扰，唯一解）
     base_seed: 共用随机种子（存在性两份共用 → 同一车次同一合法解）
     返回 (question_id, preview_dict)；重试耗尽抛 HTTPException(400)
     """
@@ -1163,7 +1168,8 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
                 solution_pairs.add((seg["from_station_id"], seg["to_station_id"]))
 
             # 验证干扰票写入（仍在内存 DB 中）：先加所有车次干扰，再清直达
-            if req.random_tickets:
+            # 0_ 完全无干扰（唯一解，对标标答）；1_/2_ 按 with_interference 添加
+            if with_interference:
                 _add_interference_all_trains(
                     q_conn, rw_conn, target_train_num,
                     solution_pairs, req.interference_density,
@@ -1228,12 +1234,12 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
                 "start_station_id": from_id,
                 "end_station_id": to_id,
                 "stops": stops,
-                "random_tickets": req.random_tickets,
+                "random_tickets": with_interference,
                 "fake_interference": fake,
                 "question_mode": mode,
                 "interference_density": req.interference_density,
                 "segment_plans": req.segment_plans,
-                "interference": req.random_tickets,
+                "interference": with_interference,
                 "people_count": req.people_count,
                 "seat_type": req.seat_type,
                 "depart_earliest": req.depart_earliest if with_time_constraints else None,
@@ -1295,11 +1301,12 @@ def api_auto_generate(req: AutoGenerateRequest):
     # 生成新题前，清除所有未确认的旧预览缓存（未保存的题自动作废）
     _preview_cache.clear()
 
-    # 决定生成哪些变体：(前缀, 伪干扰, 是否时间约束)
+    # 决定生成哪些变体：(前缀, 伪干扰, 是否时间约束, 是否加干扰票)
+    # 0_=完全无干扰（唯一解，对标标答）；1_=伪干扰（票数<人数，唯一解）；2_=真干扰 + 时间约束
     if req.mode == "existence" or (req.mode == "" and req.fake_interference):
-        variants = [("0_", False, False), ("1_", True, False)]
+        variants = [("0_", False, False, False), ("1_", True, False, True)]
     else:
-        variants = [("2_", False, True)]
+        variants = [("2_", False, True, True)]
 
     # 存在性两份共用同一种子 → 同一车次同一合法解，仅干扰不同；选择性单份用 req.seed
     if len(variants) > 1:
@@ -1310,10 +1317,10 @@ def api_auto_generate(req: AutoGenerateRequest):
     rw_conn = get_railway_conn()
     try:
         questions = []
-        for prefix, fake, with_tc in variants:
+        for prefix, fake, with_tc, with_if in variants:
             mode = "existence" if prefix != "2_" else "selective"
             question_id, preview = _generate_one_variant(
-                req, prefix, fake, mode, rw_conn, with_tc, base_seed=base_seed,
+                req, prefix, fake, mode, rw_conn, with_tc, with_if, base_seed=base_seed,
             )
             questions.append({"question_id": question_id, "preview": preview})
 

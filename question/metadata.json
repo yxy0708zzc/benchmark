@@ -1,43 +1,95 @@
 {
-  "t1": {
+  "0_test": {
     "status": "completed",
     "train_count": 2,
     "source": "auto",
-    "type": "transfer",
-    "answer": "乘坐 G1085 从 北京南 到 沧州西（有票），换乘 G1231 从 沧州西 到 上海虹桥（有票）",
+    "question_type": "transfer",
+    "type": "存在性",
+    "question_mode": "existence",
+    "answer": "乘坐 G69 从 北京南 到 天津南（有票），换乘 G735 从 天津南 到 上海虹桥（有票）",
+    "question": "北京南到上海虹桥",
+    "interference": false,
+    "segment_plans": [],
+    "people_count": 2,
+    "seat_type": "class2",
+    "ground_truth": [
+      {
+        "train_num": "G69",
+        "from": "北京南",
+        "to": "天津南",
+        "from_station_id": "VNP",
+        "to_station_id": "TIP",
+        "ride_from": "北京南",
+        "ride_to": "天津南",
+        "ride_from_station_id": "VNP",
+        "ride_to_station_id": "TIP",
+        "tickets": 4,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      },
+      {
+        "train_num": "G735",
+        "from": "天津南",
+        "to": "上海虹桥",
+        "from_station_id": "TIP",
+        "to_station_id": "AOH",
+        "ride_from": "天津南",
+        "ride_to": "上海虹桥",
+        "ride_from_station_id": "TIP",
+        "ride_to_station_id": "AOH",
+        "tickets": 4,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "VNP",
+    "end_station_id": "AOH",
+    "trains": [
+      "G69",
+      "G735"
+    ]
+  },
+  "1_test": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "question_type": "transfer",
+    "type": "存在性",
+    "question_mode": "existence",
+    "answer": "乘坐 G69 从 北京南 到 天津南（有票），换乘 G735 从 天津南 到 上海虹桥（有票）",
     "question": "北京南到上海虹桥",
     "interference": true,
-    "interference_density": 0.0047,
+    "interference_density": 0.001,
     "segment_plans": [],
-    "people_count": 6,
+    "people_count": 2,
     "seat_type": "class2",
     "interference_mode": "fake",
     "ground_truth": [
       {
-        "train_num": "G1085",
+        "train_num": "G69",
         "from": "北京南",
-        "to": "沧州西",
+        "to": "天津南",
         "from_station_id": "VNP",
-        "to_station_id": "CBP",
+        "to_station_id": "TIP",
         "ride_from": "北京南",
-        "ride_to": "沧州西",
+        "ride_to": "天津南",
         "ride_from_station_id": "VNP",
-        "ride_to_station_id": "CBP",
-        "tickets": 6,
+        "ride_to_station_id": "TIP",
+        "tickets": 4,
         "seat_type": "class2",
         "seg_type": "purchase"
       },
       {
-        "train_num": "G1231",
-        "from": "沧州西",
+        "train_num": "G735",
+        "from": "天津南",
         "to": "上海虹桥",
-        "from_station_id": "CBP",
+        "from_station_id": "TIP",
         "to_station_id": "AOH",
-        "ride_from": "沧州西",
+        "ride_from": "天津南",
         "ride_to": "上海虹桥",
-        "ride_from_station_id": "CBP",
+        "ride_from_station_id": "TIP",
         "ride_to_station_id": "AOH",
-        "tickets": 6,
+        "tickets": 4,
         "seat_type": "class2",
         "seg_type": "purchase"
       }
@@ -45,61 +97,8 @@
     "start_station_id": "VNP",
     "end_station_id": "AOH",
     "trains": [
-      "G1085",
-      "G1231"
-    ],
-    "nl_question": "我们六个人从北京南去上海虹桥，路上不用多舒服，能歇口气就行，关键是想省点钱。"
-  },
-  "test2": {
-    "status": "completed",
-    "train_count": 2,
-    "source": "auto",
-    "type": "transfer",
-    "answer": "乘坐 G879 从 北京南 到 德州东（有票），换乘 G737 从 德州东 到 上海虹桥（有票）",
-    "question": "北京南到上海虹桥",
-    "interference": true,
-    "interference_density": 0.0392,
-    "segment_plans": [],
-    "people_count": 2,
-    "seat_type": "class2",
-    "interference_mode": "real",
-    "ground_truth": [
-      {
-        "train_num": "G879",
-        "from": "北京南",
-        "to": "德州东",
-        "from_station_id": "VNP",
-        "to_station_id": "DIP",
-        "ride_from": "北京南",
-        "ride_to": "德州东",
-        "ride_from_station_id": "VNP",
-        "ride_to_station_id": "DIP",
-        "tickets": 2,
-        "seat_type": "class2",
-        "seg_type": "purchase"
-      },
-      {
-        "train_num": "G737",
-        "from": "德州东",
-        "to": "上海虹桥",
-        "from_station_id": "DIP",
-        "to_station_id": "AOH",
-        "ride_from": "德州东",
-        "ride_to": "上海虹桥",
-        "ride_from_station_id": "DIP",
-        "ride_to_station_id": "AOH",
-        "tickets": 5,
-        "seat_type": "class2",
-        "seg_type": "purchase"
-      }
-    ],
-    "start_station_id": "VNP",
-    "end_station_id": "AOH",
-    "min_transfer_minutes": 5,
-    "trains": [
-      "G737",
-      "G879"
-    ],
-    "nl_question": "麻烦帮我看看北京南到上海虹桥的高铁，我们两个人出行，不求多舒服，经济实用点儿就行。"
+      "G69",
+      "G735"
+    ]
   }
 }

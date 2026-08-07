@@ -616,6 +616,15 @@ class TicketCrawler:
         cursor.execute("SELECT COUNT(*) FROM train_stops WHERE stop_time IS NULL OR stop_time = ''")
         missing_stop_time = cursor.fetchone()[0]
 
+        # 跨天车次（相邻经停站 stop_time 时间倒退，如 23:20→00:07，违反当日完成约束）
+        cursor.execute("""
+            SELECT COUNT(DISTINCT a.train_num)
+            FROM train_stops a JOIN train_stops b
+              ON a.train_num = b.train_num AND a.stop_no = b.stop_no - 1
+            WHERE a.stop_time > b.stop_time
+        """)
+        overnight_count = cursor.fetchone()[0]
+
         report = {
             "station_count": station_count,
             "train_count": train_count,
@@ -624,6 +633,7 @@ class TicketCrawler:
             "station_trains_count": st_count,
             "missing_station_id": missing_station_id,
             "missing_stop_time": missing_stop_time,
+            "overnight_train_count": overnight_count,
             "detail_failures": len(self.failed_train_details),
         }
 
@@ -644,6 +654,8 @@ class TicketCrawler:
             print(f"  ⚠ 缺电报码:         {report['missing_station_id']}")
         if report['missing_stop_time'] > 0:
             print(f"  ⚠ 缺经停时间:       {report['missing_stop_time']}")
+        if report['overnight_train_count'] > 0:
+            print(f"  ⚠ 跨天车次:         {report['overnight_train_count']}（违反当日完成约束，见 cleanup_overnight_trains.py）")
         if report['detail_failures'] > 0:
             print(f"  ⚠ 详情接口失败:     {report['detail_failures']} 个车次")
         print(f"{'=' * 60}\n")

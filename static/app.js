@@ -1882,29 +1882,34 @@ const App = {
         'pass': { label: '✅ 全部通过', bg: '#f0fdf4', color: '#16a34a' },
         'hallucination': { label: '❌ 存在错误', bg: '#fef2f2', color: '#dc2626' },
         'empty_plan': { label: '⚠️ 最终方案为空', bg: '#f5f5f5', color: '#6b7280' },
+        'no_plan': { label: '⚠️ 无可核查方案', bg: '#f5f5f5', color: '#6b7280' },
         'db_not_found': { label: '❌ 题目数据库不存在', bg: '#fef2f2', color: '#dc2626' },
       };
       const vInfo = verdictMap[verify.verdict] || { label: verify.verdict || '未知', bg: '#f5f5f5', color: '#6b7280' };
       const hasIssues = (verify.issues || []).length > 0;
 
-      // 题型模式（存在性/选择性检测不同）
+      // 题型模式（分类按 type：存在性=对标标答 / 选择性=全程可达+时间约束）
       const modeMap = {
-        'fake': { label: '存在性问题 · 答案唯一（对标标答）', color: '#2563eb', bg: '#eff6ff' },
-        'real': { label: '选择性问题 · 答案多个（全程可达+时间约束）', color: '#7c3aed', bg: '#f5f3ff' },
+        '存在性': { label: '存在性问题 · 答案唯一（对标标答）', color: '#2563eb', bg: '#eff6ff' },
+        '选择性': { label: '选择性问题 · 答案多个（全程可达+时间约束）', color: '#7c3aed', bg: '#f5f3ff' },
       };
-      const modeInfo = modeMap[verify.question_mode] || { label: '题目类型未知（按存在性核查）', color: '#6b7280', bg: '#f3f4f6' };
+      const modeInfo = modeMap[verify.question_mode] || { label: '题目类型未知', color: '#6b7280', bg: '#f3f4f6' };
 
       // ---- 问题类型元数据：标签 + 颜色 + 分组 ----
       const ISSUE_META = {
         'hallucination': { label: '余票不符', color: '#dc2626', group: '硬错误' },
         'price_wrong': { label: '票价不符', color: '#dc2626', group: '硬错误' },
         'route_mismatch': { label: '路线不符标答', color: '#dc2626', group: '硬错误' },
+        'route_mismatch_train': { label: '车次不符', color: '#dc2626', group: '硬错误' },
+        'route_mismatch_route': { label: '购买区间不符', color: '#dc2626', group: '硬错误' },
+        'route_mismatch_seat': { label: '座位不符', color: '#dc2626', group: '硬错误' },
+        'route_mismatch_ride': { label: '乘坐区间不符', color: '#dc2626', group: '硬错误' },
         'route_invalid': { label: '区间无效', color: '#dc2626', group: '硬错误' },
         'route_discontinuity': { label: '乘坐不连续', color: '#dc2626', group: '硬错误' },
         'transfer_time_conflict': { label: '换乘时间冲突', color: '#dc2626', group: '硬错误' },
         'start_not_covered': { label: '未连接出发站', color: '#dc2626', group: '硬错误' },
         'end_not_covered': { label: '未连接到达站', color: '#dc2626', group: '硬错误' },
-        'no_route': { label: '无可达路线', color: '#dc2626', group: '硬错误' },
+        'no_route': { label: '无法构成全程', color: '#dc2626', group: '硬错误' },
         'transfer_too_short': { label: '换乘时间不足', color: '#f59e0b', group: '约束' },
         'transfer_too_long': { label: '换乘时间过长', color: '#f59e0b', group: '约束' },
         'depart_time_violation': { label: '出发时间不符', color: '#f59e0b', group: '约束' },
@@ -1937,7 +1942,7 @@ const App = {
          </div>`;
       html += `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">`;
       html += card(verify.total_items || 0, '方案总数', '#374151', '#f3f4f6');
-      html += card(verify.correct_items || 0, '正确', '#16a34a', '#f0fdf4');
+      html += card(verify.correct_items || 0, '余票通过', '#16a34a', '#f0fdf4');
       Object.entries(countMap).forEach(([typ, cnt]) => {
         const m = issueMeta(typ);
         html += card(cnt, m.label, m.color, `${m.color}14`);
@@ -2107,21 +2112,23 @@ const App = {
         statContainer.innerHTML = `
           <div class="stat-card"><div class="stat-card-value">${data.total_tests || 0}</div><div class="stat-card-label">总测试数</div></div>
           <div class="stat-card"><div class="stat-card-value">${summary.avg_score || 0}</div><div class="stat-card-label">平均分</div></div>
+          <div class="stat-card"><div class="stat-card-value">${summary.pass_rate || 0}%</div><div class="stat-card-label">通过率</div></div>
+          <div class="stat-card"><div class="stat-card-value">${summary.error_rate || 0}%</div><div class="stat-card-label">错误率</div></div>
           <div class="stat-card"><div class="stat-card-value">${summary.completion_rate || 0}%</div><div class="stat-card-label">完成率</div></div>
-          <div class="stat-card"><div class="stat-card-value">${summary.hallucination_rate || 0}%</div><div class="stat-card-label">错误率</div></div>
         `;
       }
 
       // 渲染模型对比表格
       const tableContainer = document.getElementById('model-comparison-table');
       if (tableContainer && data.models) {
-        let html = '<table class="table"><thead><tr><th>模型</th><th>测试数</th><th>完成率</th><th>错误率</th><th>平均分</th><th>平均Token</th><th>平均耗时</th></tr></thead><tbody>';
+        let html = '<table class="table"><thead><tr><th>模型</th><th>测试数</th><th>通过率</th><th>错误率</th><th>未规划/空</th><th>平均分</th><th>平均Token</th><th>平均耗时</th></tr></thead><tbody>';
         for (const [name, stats] of Object.entries(data.models)) {
           html += `<tr>
             <td><strong>${name}</strong></td>
             <td>${stats.total_tests}</td>
-            <td>${stats.completion_rate}%</td>
-            <td>${stats.hallucination_rate}%</td>
+            <td>${stats.pass_rate}%</td>
+            <td>${stats.error_rate}%</td>
+            <td>${(stats.no_plan_count || 0) + (stats.empty_count || 0)}</td>
             <td>${stats.avg_score}</td>
             <td>${stats.avg_tokens}</td>
             <td>${stats.avg_duration}s</td>
@@ -2129,6 +2136,31 @@ const App = {
         }
         html += '</tbody></table>';
         tableContainer.innerHTML = html;
+      }
+
+      // 问题类型分布（全局 top10）
+      const issueCounts = summary.issue_type_counts || {};
+      const issueLabels = {
+        'hallucination': '余票不符', 'price_wrong': '票价不符', 'route_mismatch': '路线不符标答',
+        'route_mismatch_train': '车次不符', 'route_mismatch_route': '购买区间不符',
+        'route_mismatch_seat': '座位不符', 'route_mismatch_ride': '乘坐区间不符',
+        'route_invalid': '区间无效', 'route_discontinuity': '乘坐不连续',
+        'transfer_time_conflict': '换乘时间冲突', 'start_not_covered': '未连接出发站',
+        'end_not_covered': '未连接到达站', 'no_route': '无法构成全程',
+        'depart_time_violation': '出发时间不符', 'arrive_time_violation': '到达时间不符',
+        'transfer_too_short': '换乘时间不足', 'transfer_too_long': '换乘时间过长',
+        'ticket_shortage': '票数不足', 'price_missing': '票价缺失',
+        'missing_ride': '缺乘坐区间', 'invalid_seat': '无效座位', 'invalid_plan_item': '无效条目',
+      };
+      const issueEntries = Object.entries(issueCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+      const issueContainer = document.getElementById('issue-distribution');
+      if (issueContainer) {
+        issueContainer.innerHTML = issueEntries.length
+          ? issueEntries.map(([t, c]) => {
+              const label = issueLabels[t] || t;
+              return `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border-radius:10px;background:#f3f4f6;font-size:12px">${label} ×${c}</span>`;
+            }).join('')
+          : '<span style="color:var(--gray-4);font-size:12px">暂无问题数据</span>';
       }
 
       // 渲染结论
