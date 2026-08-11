@@ -1,13 +1,13 @@
 """
 FastAPI 服务主程序
-依据 02_API与工具定义.md 定义的 6 个 API 端点
 
 包含：
-- 6 个基础数据查询端点
-- 出题器相关端点（update_ticket, auto_generate, question/list）
-- 测试器端点（chat, complete）
-- 测评器端点（eval/load, eval/requirements, eval/complete）
-- 统计端点（stats/summary, stats/export）
+- 7 个基础数据查询端点（/api/train、/api/station、/api/station/random、
+  /api/train/{num}、/api/station/{id}、/api/train/{num}/ticket、/api/routes）
+- 出题器端点（update_ticket, auto_generate/previews/clear/confirm, question/*）
+- 测试器端点（chat/stream, complete, reset, records）
+- 测评器端点（eval/load, eval/verify, eval/results, eval/complete）
+- 统计端点（stats/summary, stats/export/json, stats/export/markdown）
 - 静态文件服务（前端页面）
 """
 
@@ -34,7 +34,7 @@ from config import (
     get_question_db_path, TEMPLATES_DIR
 )
 from database import (
-    get_railway_conn, get_all_train_nums,
+    get_railway_conn,
     get_train_stops, get_routes_between, get_station_trains,
     get_train_tickets, get_train_tickets_filtered,
     create_question_db, reset_question_tables, update_ticket as db_update_ticket,
@@ -341,18 +341,18 @@ class UpdateTicketRequest(BaseModel):
 
 
 class AutoGenerateRequest(BaseModel):
-    question_type: str  # direct/transfer/short_buy/extra_front/extra_rear/mixed
+    question_type: str  # transfer/short_buy/extra_front/extra_rear/mixed（direct 仅作 mixed 段内策略，非独立题型）
     from_station_id: str  # 可接受站名（如"北京南"）或站ID（如"VNP"），服务端自动解析
     to_station_id: str  # 同上
-    mode: str = ""  # "existence" 存在性(出两份 0_无伪干扰/1_有伪干扰)；"selective" 选择性(一份 2_)；空则旧逻辑推断
-    random_tickets: bool = False  # 是否添加干扰票
-    fake_interference: bool = False  # 伪干扰模式：干扰票数 ≤ people_count；False=真干扰(随机1~10)
-    interference_density: float = 0.08
+    mode: str = ""  # "existence" 存在性(0_ 必出 + fake_interference 时另出 1_)；"selective" 选择性(一份 2_)；空则旧逻辑推断
+    random_tickets: bool = False  # 是否添加干扰票（保留字段，实际以 mode/fake_interference 为准）
+    fake_interference: bool = False  # 存在性是否额外生成 1_ 伪干扰（票数 < 人数，仍唯一解）；False=仅出 0_
+    interference_density: float = 0.02  # 干扰密度（全局池比例，默认 2%，上限 5%，步长 0.1%）
     transfers: int = 0  # 换乘次数（仅 mixed 题型）
     segment_plans: List[str] = []  # 每段策略，长度 = transfers + 1
     custom_qid: str = ""  # 自定义题名，为空则自动生成
     seed: Optional[int] = None
-    people_count: int = 2  # 需求人数：答案票数 ≥ 此值
+    people_count: int = 2  # 需求人数：答案票数 ≥ 此值（上限 20）
     seat_type: str = "class2"  # 答案票等级（class0/class1/class2）
     # 选择性问题时间约束（HH:MM，仅选择性题生效）
     depart_earliest: Optional[str] = None  # 最早出发时间
@@ -945,68 +945,105 @@ def _clear_direct_route(q_conn: sqlite3.Connection, train_num: str,
     q_conn.commit()
 
 
-def _add_random_tickets(q_conn: sqlite3.Connection, stops: List[Dict],
-                         train_num: str, solution_pairs: set,
-                         density: float = 0.15,
-                         block_pairs: set = None,
-                         people_count: int = None):
+# 经停站全量缓存（一次性加载，供出题/干扰注入复用，避免逐车次查询）
+_STOPS_CACHE: Optional[Dict[str, List[Dict]]] = None
+
+
+def _get_all_stops_cached(rw_conn: sqlite3.Connection) -> Dict[str, List[Dict]]:
+    """一次性加载全部车次的经停站（按 stop_no 排序），之后复用。
+
+    全库约 6 万条经停记录，首次加载约 0.8s，此后每次出题直接在内存构建候选池（毫秒级），
+    替代原先逐车次查询（每次出题遍历 6000+ 车次各查一次 DB）。
     """
-    在指定车次的所有站对上随机放置干扰票（跳过合法解占用的站对）。
-    solution_pairs: {(from_id, to_id)} 合法解的站对
-    block_pairs: 额外禁止生成的站对（如全局直达 A→B），所有车次一律跳过
-    people_count: 非空=伪干扰模式（干扰票数 ≤ people_count）；空=真干扰（票数随机 1~10）
+    global _STOPS_CACHE
+    if _STOPS_CACHE is None:
+        _STOPS_CACHE = {}
+        cur = rw_conn.cursor()
+        cur.execute(
+            "SELECT train_num, stop_no, station_id, station_name, stop_time "
+            "FROM train_stops ORDER BY train_num, stop_no"
+        )
+        for row in cur.fetchall():
+            _STOPS_CACHE.setdefault(row[0], []).append({
+                "stop_no": row[1],
+                "station_id": row[2],
+                "station_name": row[3],
+                "stop_time": row[4],
+            })
+    return _STOPS_CACHE
+
+
+def _add_interference_all_trains(q_conn: sqlite3.Connection,
+                                 rw_conn: sqlite3.Connection,
+                                 target_train_num: str,
+                                 target_solution_pairs: set,
+                                 density: float = 0.02,
+                                 block_pairs: set = None,
+                                 fake: bool = True,
+                                 people_count: int = 2,
+                                 shortbuy_guard_from: str = None,
+                                 shortbuy_guard_to: str = None):
+    """全局池注入干扰（统一密度语义）。
+
+    候选池 = 全部车次的全部 i<j 站对（跳过合法解站对 / block_pairs / 买短补长逃逸对），
+    一次 shuffle 后按密度取前 int(池大小 × density) 个 —— 分母固定为全局池大小（约 46 万），
+    不再逐车取整导致低密度归零，且跨题可比。
+
+    - block_pairs: 全局禁止站对（如真干扰的直达 (A,B)），所有车次一律跳过；
+      伪干扰（fake=True）票数严格 < 人数、无逃逸可能，传空集即可。
+    - fake=True : 伪干扰票数 randint(1, 人数-1)，严格不足 → 唯一解（人数=1 时退化为无干扰）
+    - fake=False: 真干扰票数 randint(0.5×人数, 1.5×人数)，部分够票（真替代）、部分差一点（陷阱）
+    - shortbuy_guard_from/to: 非空时（真干扰的 transfer/mixed），对所有“先经过 A 再经过 B”的车次，
+      跳过 (A, X)（X 在 B 之前）站对 —— 防止“买短补长直达 B”的逃逸。
     """
     if block_pairs is None:
         block_pairs = set()
-    # 伪干扰边界（方案A）：1 人时伪干扰票数需 <1 只能 0 张（=无票），退化为无干扰，保证唯一解
-    if people_count is not None and people_count <= 1:
+    # 伪干扰边界：1 人时伪干扰票数需 <1（=0 张即无票），退化为无干扰，保证唯一解
+    if fake and people_count <= 1:
         return
-    n = len(stops)
-    candidates = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            pair = (stops[i]["station_id"], stops[j]["station_id"])
-            if pair not in solution_pairs and pair not in block_pairs:
-                candidates.append(pair)
 
-    random.shuffle(candidates)
-    n = int(len(candidates) * density)
-    selected = candidates[:n] if n > 0 else []
+    stops_cache = _get_all_stops_cached(rw_conn)
+    pool: List[tuple] = []
+    for train_num, stops in stops_cache.items():
+        if len(stops) < 2:
+            continue
+        ids = [s["station_id"] for s in stops]
+        n = len(ids)
+        # 买短补长逃逸防护：该车是否“先经过 A 再经过 B”
+        guard = None
+        if shortbuy_guard_from and shortbuy_guard_to \
+                and shortbuy_guard_from in ids and shortbuy_guard_to in ids:
+            i_a, i_b = ids.index(shortbuy_guard_from), ids.index(shortbuy_guard_to)
+            if i_a < i_b:
+                guard = (i_a, i_b)
+        for i in range(n):
+            for j in range(i + 1, n):
+                f, t = ids[i], ids[j]
+                if train_num == target_train_num and (f, t) in target_solution_pairs:
+                    continue
+                if (f, t) in block_pairs:
+                    continue
+                if guard is not None and i == guard[0] and j < guard[1]:
+                    continue
+                pool.append((train_num, f, t))
 
-    for from_id, to_id in selected:
+    random.shuffle(pool)
+    selected = pool[:int(len(pool) * density)]
+
+    for train_num, f, t in selected:
         seat = random.choice(TICKET_TABLES)
-        if people_count is not None:
-            tickets = random.randint(1, max(1, people_count - 1))  # 伪干扰：票数 < 人数（严格不足，保证唯一解）
+        if fake:
+            tickets = random.randint(1, max(1, people_count - 1))  # 伪干扰：票数 < 人数（严格不足，唯一解）
         else:
-            tickets = random.randint(1, 10)  # 真干扰：票数随机 1~10
+            lo = max(1, int(people_count * 0.5))
+            hi = max(lo, int(people_count * 1.5))
+            tickets = random.randint(lo, hi)  # 真干扰：0.5×人数 ~ 1.5×人数
         q_conn.execute(f"""
             INSERT OR REPLACE INTO {seat}
             (train_num, from_station_id, to_station_id, tickets)
             VALUES (?, ?, ?, ?)
-        """, (train_num, from_id, to_id, tickets))
+        """, (train_num, f, t, tickets))
     q_conn.commit()
-
-
-def _add_interference_all_trains(q_conn: sqlite3.Connection, rw_conn: sqlite3.Connection,
-                                  target_train_num: str, target_solution_pairs: set,
-                                  density: float = 0.15,
-                                  block_pairs: set = None,
-                                  people_count: int = None):
-    """
-    在所有车次上添加随机干扰票。
-    - target_train_num 的经停站对上跳过合法解占用的站对
-    - 其他车次在所有经停站对随机添加
-    - block_pairs 在所有车次上一律跳过（防止生成直达 A→B 逃逸）
-    - people_count 非空=伪干扰模式（票数 ≤ 人数），空=真干扰（随机 1~10）
-    """
-    all_trains = get_all_train_nums(rw_conn)
-    for train_num in all_trains:
-        stops = get_train_stops(rw_conn, train_num)
-        if len(stops) < 2:
-            continue
-        # 目标车次跳过合法解站对，其他车次不跳过
-        local_pairs = target_solution_pairs if train_num == target_train_num else set()
-        _add_random_tickets(q_conn, stops, train_num, local_pairs, density, block_pairs, people_count)
 
 
 # --- POST /api/auto_generate auto出题器生成题目 ---
@@ -1028,7 +1065,7 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
         raise HTTPException(status_code=400, detail=f"无效的题型: {req.question_type}")
 
     # 校验需求人数与答案票等级
-    if not (1 <= req.people_count <= QUESTION_CONFIG["ticket_max_value"]):
+    if not (1 <= req.people_count <= QUESTION_CONFIG["max_people_count"]):
         raise HTTPException(status_code=400, detail=f"人数超出范围: {req.people_count}")
     if req.seat_type not in TICKET_TABLES:
         raise HTTPException(status_code=400, detail=f"无效的座位类型: {req.seat_type}")
@@ -1167,16 +1204,27 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
             for seg in solution_segments:
                 solution_pairs.add((seg["from_station_id"], seg["to_station_id"]))
 
-            # 验证干扰票写入（仍在内存 DB 中）：先加所有车次干扰，再清直达
-            # 0_ 完全无干扰（唯一解，对标标答）；1_/2_ 按 with_interference 添加
+            # 验证干扰票写入（仍在内存 DB 中）：0_ 完全无干扰；1_/2_ 按 with_interference 添加
             if with_interference:
+                # 1_ 伪干扰：票数严格 < 人数，无逃逸可能，不设 block、不清直达
+                if fake:
+                    block_pairs: set = set()
+                    guard_from = guard_to = None
+                else:
+                    # 2_ 真干扰：全局禁直达 (A,B)；transfer/mixed 额外防“买短补长到 B”
+                    block_pairs = {(from_id, to_id)}
+                    guard_from, guard_to = (
+                        (from_id, to_id) if req.question_type in ("transfer", "mixed")
+                        else (None, None)
+                    )
                 _add_interference_all_trains(
                     q_conn, rw_conn, target_train_num,
                     solution_pairs, req.interference_density,
-                    block_pairs={(cur_from_id, cur_to_id)},
-                    people_count=req.people_count if fake else None,
+                    block_pairs=block_pairs, fake=fake, people_count=req.people_count,
+                    shortbuy_guard_from=guard_from, shortbuy_guard_to=guard_to,
                 )
-                _clear_direct_route(q_conn, target_train_num, cur_from_id, cur_to_id)
+                if not fake:
+                    _clear_direct_route(q_conn, target_train_num, from_id, to_id)
 
             q_conn.commit()
 
@@ -1293,9 +1341,9 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
 @app.post("/api/auto_generate")
 def api_auto_generate(req: AutoGenerateRequest):
     """自动生成题目。
-    - 存在性（mode=existence 或旧逻辑 fake_interference=true）：同时生成两份——
-        0_无伪干扰（真干扰，数量随机不限制）/ 1_有伪干扰（干扰票数严格 < 人数，唯一解）
-    - 选择性（mode=selective）：生成一份 2_（真干扰 + 时间约束）
+    - 存在性（mode=existence）：必出 0_（无干扰，唯一解，对标标答）；
+      若 fake_interference=true 额外出 1_（伪干扰，票数严格 < 人数，仍唯一解）
+    - 选择性（mode=selective）：出一份 2_（真干扰 0.5~1.5×人数 + 时间约束）
     - 前缀自动加在题名前，与用户输入无关
     """
     # 生成新题前，清除所有未确认的旧预览缓存（未保存的题自动作废）
@@ -1303,8 +1351,10 @@ def api_auto_generate(req: AutoGenerateRequest):
 
     # 决定生成哪些变体：(前缀, 伪干扰, 是否时间约束, 是否加干扰票)
     # 0_=完全无干扰（唯一解，对标标答）；1_=伪干扰（票数<人数，唯一解）；2_=真干扰 + 时间约束
-    if req.mode == "existence" or (req.mode == "" and req.fake_interference):
-        variants = [("0_", False, False, False), ("1_", True, False, True)]
+    if req.mode == "existence":
+        variants = [("0_", False, False, False)]
+        if req.fake_interference:
+            variants.append(("1_", True, False, True))
     else:
         variants = [("2_", False, True, True)]
 
@@ -1414,25 +1464,37 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
                 seg["tickets"]
             )
 
-        # 干扰票处理：先加所有车次干扰，再清直达
+        # 干扰票处理：与预览（_generate_one_variant）保持同一套全局池逻辑
         if cached.get("random_tickets"):
-            stops = cached["stops"]
             solution_pairs = set()
             for seg in cached["segments"]:
                 solution_pairs.add((seg["from_station_id"], seg["to_station_id"]))
-            # 需要 rw_conn 读取所有车次信息
+            fake_mode = bool(cached.get("fake_interference"))
+            from_id = cached.get("start_station_id")
+            to_id = cached.get("end_station_id")
+            if fake_mode:
+                block_pairs = set()
+                guard_from = guard_to = None
+            else:
+                block_pairs = {(from_id, to_id)}
+                guard_from, guard_to = (
+                    (from_id, to_id) if cached.get("question_type") in ("transfer", "mixed")
+                    else (None, None)
+                )
+            # 需要 rw_conn 读取全部车次信息（内部一次性缓存经停站）
             rw_conn = get_railway_conn()
             try:
                 _add_interference_all_trains(
                     q_conn, rw_conn, cached["target_train_num"],
                     solution_pairs, cached["interference_density"],
-                    block_pairs={(cached["cur_from_id"], cached["cur_to_id"])},
-                    people_count=cached.get("people_count") if cached.get("fake_interference") else None,
+                    block_pairs=block_pairs, fake=fake_mode,
+                    people_count=cached.get("people_count") or 2,
+                    shortbuy_guard_from=guard_from, shortbuy_guard_to=guard_to,
                 )
             finally:
                 rw_conn.close()
-            _clear_direct_route(q_conn, cached["target_train_num"],
-                                 cached["cur_from_id"], cached["cur_to_id"])
+            if not fake_mode:
+                _clear_direct_route(q_conn, cached["target_train_num"], from_id, to_id)
 
         q_conn.commit()
     except Exception as e:
@@ -1553,13 +1615,14 @@ def api_question_list(
                 "db_exists": True,
             })
 
-    def _sort_key(x):
-        qid = x["question_id"]
-        try:
-            return (0, int(qid))
-        except ValueError:
-            return (1, qid)
-    result.sort(key=_sort_key)
+    def _natural_key(qid: str):
+        """统一题号自然序：纯数字(空前缀)在前，再 0_/1_/2_，最后字母前缀；前缀后按数字自然序。
+        例：123 → 0_2 → 0_10 → 1_26 → a1 …"""
+        m = re.match(r"^([^\d]*?)(\d+)$", str(qid))
+        if not m:
+            return (2, str(qid), 0)
+        return (1, m.group(1), int(m.group(2)))
+    result.sort(key=lambda x: _natural_key(x["question_id"]))
     return {"questions": result, "total": len(result)}
 
 
@@ -1644,6 +1707,8 @@ chat_sessions: Dict[str, List[Dict]] = {}
 chat_session_meta: Dict[str, Dict] = {}
 # 会话使用的模型名称
 chat_session_model: Dict[str, str] = {}
+# 会话工具调用日志（供测试完成落盘，统计 avg_tool_calls 用）
+chat_session_tool_calls: Dict[str, List[Dict]] = {}
 api_keys: Dict[str, str] = {}
 
 
@@ -1735,9 +1800,24 @@ class TestCompleteRequest(BaseModel):
     session_id: str = "default"
 
 
+def _resolve_llm_config(req) -> tuple:
+    """ChatRequest 未填 model/key/base_url 时，回落到 .env 的默认配置。
+
+    优先级：请求显式值 > .env（DEFAULT_MODEL / TEST_API_KEY / DEFAULT_BASE_URL）> 内置默认。
+    前端不再存 localStorage，连接配置统一由 .env 提供。
+    """
+    from config import ENV
+    model = (req.model_name or "").strip() or ENV.get("DEFAULT_MODEL", "") or "deepseek-chat"
+    key = (req.api_key or "").strip() or ENV.get("TEST_API_KEY", "") or ""
+    base_url = (req.api_base_url or "").strip() or ENV.get("DEFAULT_BASE_URL", "") or "https://api.deepseek.com"
+    return model, key, base_url
+
+
 @app.post("/api/test/chat")
 async def api_test_chat(req: ChatRequest):
     """发送对话消息，调用大模型并处理工具调用循环"""
+    model_name, api_key, api_base_url = _resolve_llm_config(req)
+
     # 设置当前题目
     if req.question_id:
         set_current_question(req.question_id)
@@ -1747,7 +1827,7 @@ async def api_test_chat(req: ChatRequest):
         chat_sessions[req.session_id] = []
 
     # 每次发消息都更新模型名称（历史记录中可能被 resetChat 删除）
-    chat_session_model[req.session_id] = req.model_name
+    chat_session_model[req.session_id] = model_name
 
     messages = chat_sessions[req.session_id]
 
@@ -1770,7 +1850,7 @@ async def api_test_chat(req: ChatRequest):
 
         # 构造请求体
         request_body = {
-            "model": req.model_name,
+            "model": model_name,
             "messages": messages,
             "tools": TOOLS,
             "tool_choice": "auto",
@@ -1779,7 +1859,7 @@ async def api_test_chat(req: ChatRequest):
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {req.api_key}",
+            "Authorization": f"Bearer {api_key}",
         }
 
         max_iterations = req.max_iterations  # 防止无限循环
@@ -1792,7 +1872,7 @@ async def api_test_chat(req: ChatRequest):
                 iteration += 1
 
                 # 调用大模型 API
-                api_url = f"{req.api_base_url.rstrip('/')}/chat/completions"
+                api_url = f"{api_base_url.rstrip('/')}/chat/completions"
                 response = await client.post(api_url, json=request_body, headers=headers)
                 response_data = response.json()
 
@@ -1880,6 +1960,9 @@ async def api_test_chat(req: ChatRequest):
         meta["token_usage"]["total_tokens"] += token_usage.get("total_tokens", 0)
         meta["duration"] += duration
 
+        # 累计工具调用日志（供 api_test_complete 落盘）
+        chat_session_tool_calls[sid] = chat_session_tool_calls.get(sid, []) + tool_calls_log
+
         return {
             "reply": final_content,
             "reasoning": final_reasoning,
@@ -1897,6 +1980,8 @@ async def api_test_chat(req: ChatRequest):
 @app.post("/api/test/chat/stream")
 async def api_test_chat_stream(req: ChatRequest, request: Request):
     """SSE 流式对话"""
+    model_name, api_key, api_base_url = _resolve_llm_config(req)
+
     # 设置当前题目
     if req.question_id:
         set_current_question(req.question_id)
@@ -1906,7 +1991,7 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
         chat_sessions[req.session_id] = []
 
     # 每次发消息都更新模型名称（历史记录中可能被 resetChat 删除）
-    chat_session_model[req.session_id] = req.model_name
+    chat_session_model[req.session_id] = model_name
 
     messages = chat_sessions[req.session_id]
 
@@ -1929,10 +2014,10 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {req.api_key}",
+            "Authorization": f"Bearer {api_key}",
         }
 
-        api_url = f"{req.api_base_url.rstrip('/')}/chat/completions"
+        api_url = f"{api_base_url.rstrip('/')}/chat/completions"
 
         # 全量累加器（跨迭代持久化，用于 done 事件输出完整文本）
         full_content_accumulated = ""
@@ -1941,7 +2026,7 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 request_body = {
-                    "model": req.model_name,
+                    "model": model_name,
                     "messages": messages,
                     "tools": TOOLS,
                     "tool_choice": "auto",
@@ -2055,6 +2140,13 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
 
                             # 执行工具
                             tool_result = await execute_tool_handler(tc["function"]["name"], func_args)
+
+                            # 累计工具调用日志（供 api_test_complete 落盘）
+                            chat_session_tool_calls.setdefault(req.session_id, []).append({
+                                "tool_name": tc["function"]["name"],
+                                "arguments": func_args,
+                                "result": tool_result,
+                            })
 
                             # 发送 tool_result 事件，让前端展示工具返回结果
                             yield f"data: {json.dumps({
@@ -2220,6 +2312,9 @@ def api_test_complete(req: TestCompleteRequest):
     # 获取模型名称
     model_name = chat_session_model.get(req.session_id, "unknown")
 
+    # 获取会话工具调用日志
+    tool_calls = chat_session_tool_calls.get(req.session_id, [])
+
     # 生成保存路径
     from config import LOGS_TEST_DIR
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2232,7 +2327,7 @@ def api_test_complete(req: TestCompleteRequest):
         final_plan = []  # 无 JSON 输出视为未规划
         plan_status = "no_plan"  # 模型未输出 final_plan
     elif len(final_plan) == 0:
-        plan_status = "no_solution"  # 模型明确无解
+        plan_status = "empty_plan"  # 模型明确无解（与 verifier verdict 词汇统一）
     else:
         plan_status = "has_solution"  # 有方案
 
@@ -2247,6 +2342,7 @@ def api_test_complete(req: TestCompleteRequest):
         "plan_status": plan_status,
         "token_usage": token_usage,
         "duration": duration,
+        "tool_calls": tool_calls,
     }
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -2262,6 +2358,7 @@ def api_test_complete(req: TestCompleteRequest):
         "model_name": model_name,
         "final_plan": final_plan,
         "plan_status": plan_status,
+        "tool_calls": tool_calls,
     }
 
 
@@ -2278,6 +2375,8 @@ def api_test_reset(req: TestResetRequest):
         del chat_session_meta[session_id]
     if session_id in chat_session_model:
         del chat_session_model[session_id]
+    if session_id in chat_session_tool_calls:
+        del chat_session_tool_calls[session_id]
     return {"success": True, "message": "对话已重置"}
 
 
@@ -2307,8 +2406,8 @@ async def execute_tool_handler(func_name: str, func_args: Dict) -> Any:
 
         elif func_name == "list_stations":
             keyword = func_args.get("keyword", "")
-            limit = func_args.get("limit", 50)
-            page = func_args.get("page", 1)
+            limit = max(1, min(int(func_args.get("limit", 50) or 50), 200))
+            page = max(1, int(func_args.get("page", 1) or 1))
             cursor = rw_conn.cursor()
             offset = (page - 1) * limit
             if keyword:
@@ -2326,8 +2425,8 @@ async def execute_tool_handler(func_name: str, func_args: Dict) -> Any:
 
         elif func_name == "list_trains":
             keyword = func_args.get("keyword", "")
-            limit = func_args.get("limit", 50)
-            page = func_args.get("page", 1)
+            limit = max(1, min(int(func_args.get("limit", 50) or 50), 200))
+            page = max(1, int(func_args.get("page", 1) or 1))
             cursor = rw_conn.cursor()
             offset = (page - 1) * limit
             if keyword:

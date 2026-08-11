@@ -1,10 +1,10 @@
 """
 工具定义模块
-依据 02_API与工具定义.md 第二部分定义的 6 个 OpenAI Tools
+定义被测模型可调用的 7 个 OpenAI Tools
 
 每个工具包含：
 - function 字典（用于传入大模型的 tool 定义）
-- handler 函数（实际执行逻辑）
+- handler 函数（实际执行逻辑，在 server.py execute_tool_handler 中分发）
 """
 
 from typing import Optional, List

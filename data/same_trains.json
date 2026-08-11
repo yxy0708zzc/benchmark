@@ -7801,32 +7801,6 @@
   },
   {
     "trains": [
-      "G3275",
-      "G3278"
-    ],
-    "count": 2,
-    "start_station": "西安北",
-    "end_station": "江阴",
-    "num_stops": 12,
-    "start_time": "06:36",
-    "end_time": "14:54",
-    "route": "西安北 → 江阴"
-  },
-  {
-    "trains": [
-      "G3276",
-      "G3277"
-    ],
-    "count": 2,
-    "start_station": "江阴",
-    "end_station": "西安北",
-    "num_stops": 12,
-    "start_time": "15:16",
-    "end_time": "23:41",
-    "route": "江阴 → 西安北"
-  },
-  {
-    "trains": [
       "G3279",
       "G3282"
     ],
@@ -10635,58 +10609,6 @@
   },
   {
     "trains": [
-      "G5249",
-      "G5252"
-    ],
-    "count": 2,
-    "start_station": "广州",
-    "end_station": "深圳",
-    "num_stops": 20,
-    "start_time": "08:36",
-    "end_time": "15:15",
-    "route": "广州 → 深圳"
-  },
-  {
-    "trains": [
-      "G5253",
-      "G5256"
-    ],
-    "count": 2,
-    "start_station": "深圳",
-    "end_station": "深  圳",
-    "num_stops": 20,
-    "start_time": "16:16",
-    "end_time": "22:41",
-    "route": "深圳 → 深  圳"
-  },
-  {
-    "trains": [
-      "G5254",
-      "G5255"
-    ],
-    "count": 2,
-    "start_station": "深圳",
-    "end_station": "深  圳",
-    "num_stops": 14,
-    "start_time": "07:41",
-    "end_time": "13:11",
-    "route": "深圳 → 深  圳"
-  },
-  {
-    "trains": [
-      "G5257",
-      "G5260"
-    ],
-    "count": 2,
-    "start_station": "深圳",
-    "end_station": "广州东",
-    "num_stops": 17,
-    "start_time": "13:43",
-    "end_time": "19:39",
-    "route": "深圳 → 广州东"
-  },
-  {
-    "trains": [
       "G5289",
       "G5292"
     ],
@@ -12663,19 +12585,6 @@
   },
   {
     "trains": [
-      "G6341",
-      "G6344"
-    ],
-    "count": 2,
-    "start_station": "广州南",
-    "end_station": "汕头",
-    "num_stops": 6,
-    "start_time": "21:13",
-    "end_time": "23:55",
-    "route": "广州南 → 汕头"
-  },
-  {
-    "trains": [
       "G6346",
       "G6347"
     ],
@@ -12870,19 +12779,6 @@
     "start_time": "07:02",
     "end_time": "10:02",
     "route": "长沙南 → 张家界西"
-  },
-  {
-    "trains": [
-      "G6433",
-      "G6436"
-    ],
-    "count": 2,
-    "start_station": "张家界西",
-    "end_station": "长沙南",
-    "num_stops": 8,
-    "start_time": "19:20",
-    "end_time": "22:24",
-    "route": "张家界西 → 长沙南"
   },
   {
     "trains": [
@@ -13104,19 +13000,6 @@
     "start_time": "19:05",
     "end_time": "22:12",
     "route": "张家界西 → 长沙南"
-  },
-  {
-    "trains": [
-      "G6498",
-      "G6499"
-    ],
-    "count": 2,
-    "start_station": "长沙南",
-    "end_station": "张家界西",
-    "num_stops": 8,
-    "start_time": "09:15",
-    "end_time": "12:21",
-    "route": "长沙南 → 张家界西"
   },
   {
     "trains": [
@@ -14638,19 +14521,6 @@
     "start_time": "17:43",
     "end_time": "21:35",
     "route": "上海 → 淮北"
-  },
-  {
-    "trains": [
-      "G7295",
-      "G7298"
-    ],
-    "count": 2,
-    "start_station": "淮北",
-    "end_station": "上海",
-    "num_stops": 10,
-    "start_time": "15:49",
-    "end_time": "19:33",
-    "route": "淮北 → 上海"
   },
   {
     "trains": [
@@ -16604,19 +16474,6 @@
   },
   {
     "trains": [
-      "G8347",
-      "G8350"
-    ],
-    "count": 2,
-    "start_station": "合肥南",
-    "end_station": "南京南",
-    "num_stops": 9,
-    "start_time": "18:12",
-    "end_time": "21:09",
-    "route": "合肥南 → 南京南"
-  },
-  {
-    "trains": [
       "G8365",
       "G8368"
     ],
@@ -16734,19 +16591,6 @@
   },
   {
     "trains": [
-      "G8431",
-      "G8432"
-    ],
-    "count": 2,
-    "start_station": "广州东",
-    "end_station": "深圳",
-    "num_stops": 15,
-    "start_time": "07:00",
-    "end_time": "12:32",
-    "route": "广州东 → 深圳"
-  },
-  {
-    "trains": [
       "G8445",
       "G8448"
     ],
@@ -16809,32 +16653,6 @@
     "start_time": "09:20",
     "end_time": "19:27",
     "route": "深圳北 → 西安北"
-  },
-  {
-    "trains": [
-      "G8466",
-      "G8467"
-    ],
-    "count": 2,
-    "start_station": "广州东",
-    "end_station": "潮汕",
-    "num_stops": 12,
-    "start_time": "19:45",
-    "end_time": "23:08",
-    "route": "广州东 → 潮汕"
-  },
-  {
-    "trains": [
-      "G8479",
-      "G8482"
-    ],
-    "count": 2,
-    "start_station": "深圳",
-    "end_station": "广州",
-    "num_stops": 17,
-    "start_time": "12:50",
-    "end_time": "19:14",
-    "route": "深圳 → 广州"
   },
   {
     "trains": [

@@ -1,0 +1,17 @@
+# 只忽略 API Key / 密钥类文件（其余全部上传）
+.env
+.env.*
+*.key
+*.pem
+*.p12
+secrets*.py
+config.local.*
+*local_config.py
+*_api_key*.txt
+
+# Python 常规缓存（无需上传）
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/

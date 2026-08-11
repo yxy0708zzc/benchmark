@@ -1,6 +1,6 @@
 """
 全局配置模块
-依据 07_全局命名与配置规范.md 定义所有路径、字段名、配置项
+定义所有路径、字段名、配置项
 """
 
 import os
@@ -10,6 +10,30 @@ from datetime import datetime, timedelta
 # 项目根目录
 # ============================================================
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# ============================================================
+# 本地环境变量（.env，已被 .gitignore 忽略，不会上传）
+# 用途：集中存放各输入点的 API Key / 模型 / 接口地址。
+#   - TEST_API_KEY       测试器（server.py 兜底，前端未传时用）
+#   - NL_API_KEY         nl_question.py（未传 --api-key 时用）
+#   - DEFAULT_MODEL / DEFAULT_BASE_URL  两处共用默认
+# ============================================================
+def load_env(path: str = None) -> dict:
+    """读取项目根目录 .env（KEY=VALUE，忽略 # 注释/空行，支持引号包裹的值）。"""
+    path = path or os.path.join(PROJECT_ROOT, ".env")
+    env = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
+
+
+ENV = load_env()
 
 # ============================================================
 # 文件夹路径
@@ -53,10 +77,11 @@ CRAWLER_CONFIG = {
 # 出题器配置
 # ============================================================
 QUESTION_CONFIG = {
-    "default_interference_density": 0.15,  # 默认干扰密度
+    "default_interference_density": 0.02,  # 默认干扰密度（全局池统一默认 2%）
     "default_solution_ticket_min": 1,      # 合法解最小票数
     "default_solution_ticket_max": 5,      # 合法解最大票数
-    "ticket_max_value": 30,                # 余票最大值
+    "ticket_max_value": 1000,              # 余票上限（宽松兜底；真干扰 1.5×人数 ≤ 30，留足余量）
+    "max_people_count": 20,                # 需求人数上限（真干扰票数 0.5~1.5×人数）
 }
 
 # ============================================================

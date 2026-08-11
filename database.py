@@ -1,6 +1,6 @@
 """
 数据库初始化与管理模块
-依据 01_数据爬取与数据库设计.md 第二部分创建和管理所有数据表
+创建和管理所有数据表
 
 包含：
 - 基础数据库 data/railway.db（stations, trains, train_stops, station_trains）

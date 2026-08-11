@@ -22,16 +22,9 @@ const App = {
   _abortController: null,
   /** 聊天区是否自动滚动到底部（用户上翻时置 false） */
   _autoScroll: true,
-  /** API Key 配置 */
-  apiConfig: {
-    configs: [{ name: '默认配置', key: '', baseUrl: 'https://api.deepseek.com', model: '' }],
-    activeIndex: 0,
-  },
-
   /** 初始化应用 */
   init: function() {
-    // 从 localStorage 恢复 API 配置
-    this._loadApiConfig();
+    // 模型/API 配置统一来自服务端 .env（前端不再存 localStorage）
     // 页面加载后立即更新模型状态显示（影响顶部栏和侧边栏）
     this._updateModelStatusDisplay();
     this._setupEventListeners();
@@ -134,46 +127,6 @@ const App = {
     });
   },
 
-  /** 获取当前激活的 API 配置 */
-  _getActiveConfig: function() {
-    const configs = this.apiConfig.configs || [];
-    const idx = this.apiConfig.activeIndex || 0;
-    return configs[idx] || configs[0] || { key: '', baseUrl: '', model: '' };
-  },
-
-  /** 从 localStorage 加载 API 配置（兼容旧格式） */
-  _loadApiConfig: function() {
-    try {
-      const saved = localStorage.getItem('benchmark_api_config');
-      if (saved) {
-        const config = JSON.parse(saved);
-        // 兼容旧格式 { test: {...}, eval: {...} } → 迁移到新格式
-        if (config.configs) {
-          this.apiConfig = config;
-        } else if (config.test) {
-          this.apiConfig.configs = [{
-            name: '默认配置',
-            key: config.test.key || '',
-            baseUrl: config.test.baseUrl || 'https://api.deepseek.com',
-            model: config.test.model || '',
-          }];
-          this.apiConfig.activeIndex = 0;
-        }
-      }
-    } catch (e) {
-      // 忽略
-    }
-  },
-
-  /** 保存 API 配置到 localStorage */
-  _saveApiConfig: function() {
-    try {
-      localStorage.setItem('benchmark_api_config', JSON.stringify(this.apiConfig));
-    } catch (e) {
-      // 忽略
-    }
-  },
-
   // ============================================================
   // 测试器初始化
   // ============================================================
@@ -216,40 +169,19 @@ const App = {
     if (loadBtn) loadBtn.onclick = () => this._onLoadQuestion();
 
     this._updateModelStatusDisplay();
-
-    const active = this._getActiveConfig();
-    if (!active.key) {
-      this._showApiKeyModal();
-    }
   },
 
-  /** 更新模型连接状态显示 */
+  /** 更新模型连接状态显示（模型配置来自服务端 .env） */
   _updateModelStatusDisplay: function() {
-    const active = this._getActiveConfig();
-    const statusText = active.key ? `● ${active.model || active.name || '已配置'}` : '● 未连接';
-    const statusColor = active.key ? '#22c55e' : '#ef4444';
     document.querySelectorAll('.test-model-status').forEach(el => {
-      el.textContent = statusText;
-      el.style.color = statusColor;
+      el.textContent = '● .env 配置';
+      el.style.color = '#22c55e';
     });
   },
 
-  /** 按题号分组自然序排序：数字题在前（1,2,3,10…），字母前缀题在后（a1,a2,a10…），其他格式最后 */
+  /** 题号排序：后端 /api/question/list 已按统一自然序排好，前端不再二次排序（避免双份逻辑漂移） */
   _sortQuestionsByQid: function(questions) {
-    const keyOf = (id) => {
-      const s = String(id || '');
-      const m = s.match(/^([a-z]*)(\d+)$/i);
-      if (!m) return [2, s, 0];
-      const prefix = (m[1] || '').toLowerCase();
-      return [prefix === '' ? 0 : 1, prefix, parseInt(m[2], 10)];
-    };
-    const cmp = (ka, kb) => {
-      if (ka[0] !== kb[0]) return ka[0] - kb[0];
-      if (ka[0] === 2) return ka[1] < kb[1] ? -1 : ka[1] > kb[1] ? 1 : 0;
-      if (ka[1] !== kb[1]) return ka[1] < kb[1] ? -1 : 1;
-      return ka[2] - kb[2];
-    };
-    return questions.sort((a, b) => cmp(keyOf(a.question_id), keyOf(b.question_id)));
+    return questions;
   },
 
   /** 加载题目列表 */
@@ -314,154 +246,6 @@ const App = {
 
     // 重置对话
     this._onResetChat();
-  },
-
-  /** 显示 API Key 填写弹窗 */
-  _showApiKeyModal: function() {
-    const configs = this.apiConfig.configs || [];
-    const activeIdx = this.apiConfig.activeIndex || 0;
-    const active = configs[activeIdx] || configs[0] || { name: '', key: '', baseUrl: '', model: '' };
-
-    // 配置列表项
-    let configListHtml = '<div style="margin-bottom:12px;max-height:120px;overflow-y:auto">';
-    configs.forEach((c, i) => {
-      const isActive = i === activeIdx;
-      configListHtml += `<div style="display:flex;align-items:center;gap:8px;padding:4px 6px;background:${isActive ? 'var(--gray-1)' : 'transparent'};border-radius:4px;cursor:pointer" onclick="App._switchApiConfig(${i})">
-        <span style="font-weight:${isActive ? '600' : '400'}">${isActive ? '▶' : ''} ${c.name || '未命名'}</span>
-        <span style="font-size:11px;color:var(--gray-4);flex:1">${c.model || ''}</span>
-        <span style="color:${c.key ? 'var(--success-green)' : 'var(--error-red)'};font-size:11px">${c.key ? '●' : '○'}</span>
-      </div>`;
-    });
-    configListHtml += '</div>';
-
-    const bodyHtml = `
-      ${configListHtml}
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <input class="input" id="cfg-name" placeholder="配置名称" value="${active.name || ''}">
-        <input class="input" id="cfg-key" placeholder="API Key" value="${active.key || ''}">
-        <input class="input" id="cfg-url" placeholder="API Base URL" value="${active.baseUrl || 'https://api.deepseek.com'}">
-        <input class="input" id="cfg-model" placeholder="模型名称" value="${active.model || ''}">
-      </div>
-    `;
-    const footerHtml = `
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary btn-sm" onclick="App._addApiConfig()">➕ 新建</button>
-        <button class="btn btn-secondary btn-sm" onclick="App._deleteApiConfig()" ${configs.length <= 1 ? 'disabled' : ''}>🗑 删除</button>
-        <button class="btn btn-primary" onclick="App._saveApiKeys()" style="margin-left:auto">✅ 保存并连接</button>
-      </div>
-    `;
-
-    Components.showModal('API Key 设置', bodyHtml, footerHtml);
-  },
-
-  /** 切换 API 配置 */
-  _switchApiConfig: function(index) {
-    this.apiConfig.activeIndex = index;
-    this._saveApiConfig();
-    this._updateModelStatusDisplay();
-    Components.closeModal();
-    this._showApiKeyModal();
-  },
-
-  /** 新建空白配置 */
-  _addApiConfig: function() {
-    const configs = this.apiConfig.configs || [];
-    configs.push({ name: `配置${configs.length + 1}`, key: '', baseUrl: 'https://api.deepseek.com', model: '' });
-    this.apiConfig.activeIndex = configs.length - 1;
-    this._saveApiConfig();
-    Components.closeModal();
-    this._showApiKeyModal();
-  },
-
-  /** 删除当前配置 */
-  _deleteApiConfig: function() {
-    const configs = this.apiConfig.configs || [];
-    if (configs.length <= 1) return;
-    const idx = this.apiConfig.activeIndex || 0;
-    configs.splice(idx, 1);
-    this.apiConfig.activeIndex = Math.min(idx, configs.length - 1);
-    this._saveApiConfig();
-    Components.closeModal();
-    this._showApiKeyModal();
-  },
-
-  /** 保存当前配置并测试连接 */
-  _saveApiKeys: async function() {
-    const name = document.getElementById('cfg-name').value.trim() || '未命名';
-    const key = document.getElementById('cfg-key').value.trim();
-    const baseUrl = document.getElementById('cfg-url').value.trim() || 'https://api.deepseek.com';
-    const model = document.getElementById('cfg-model').value.trim();
-
-    if (!key) {
-      alert('请输入 API Key');
-      return;
-    }
-
-    this._setModalStatus('正在连接...', 'pending');
-
-    try {
-      const result = await this._testConnection(model || 'deepseek-chat', key, baseUrl);
-
-      if (!result.ok) {
-        throw new Error(result.msg);
-      }
-
-      // 保存配置
-      const idx = this.apiConfig.activeIndex || 0;
-      if (!this.apiConfig.configs) this.apiConfig.configs = [];
-      this.apiConfig.configs[idx] = {
-        name: name,
-        key: key,
-        baseUrl: baseUrl,
-        model: result.modelUsed || model,
-      };
-      this._saveApiConfig();
-      this._updateModelStatusDisplay();
-
-      this._setModalStatus(`✅ 连接成功！模型: ${result.modelUsed}`, 'success');
-      setTimeout(() => Components.closeModal(), 1200);
-    } catch (e) {
-      this._setModalStatus(`❌ ${e.message}`, 'error');
-    }
-  },
-
-  /** 测试模型连接 */
-  _testConnection: async function(modelName, apiKey, baseUrl) {
-    const url = (baseUrl || 'https://api.deepseek.com').replace(/\/+$/, '') + '/chat/completions';
-    const model = modelName || 'deepseek-chat';
-    const body = {
-      model: model,
-      messages: [{ role: 'user', content: 'ping' }],
-      max_tokens: 5,
-    };
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const errData = await resp.json().catch(() => ({}));
-      return { ok: false, msg: `连接失败 (${resp.status}): ${errData.error?.message || resp.statusText}` };
-    }
-    const data = await resp.json();
-    const modelUsed = data.model || model;
-    return { ok: true, modelUsed, msg: `模型 ${modelUsed} 连接成功` };
-  },
-
-  /** 在 modal 中显示连接状态 */
-  _setModalStatus: function(text, type) {
-    let el = document.getElementById('conn-status');
-    const colors = { pending: '#f59e0b', success: '#22c55e', error: '#ef4444' };
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'conn-status';
-      el.style.cssText = 'margin-top:12px;padding:8px 12px;border-radius:6px;text-align:center;font-weight:600;font-size:14px';
-      const footer = document.querySelector('.modal-footer');
-      if (footer) footer.before(el);
-    }
-    el.textContent = text;
-    el.style.color = colors[type] || '#333';
-    el.style.background = type === 'error' ? '#fef2f2' : type === 'success' ? '#f0fdf4' : '#fffbeb';
   },
 
   /** 随机选站：随机获取一个车站填入指定输入框 */
@@ -547,12 +331,12 @@ const App = {
 
     try {
       const maxIter = parseInt(document.getElementById('max-iterations')?.value, 10) || 100;
-      const activeCfg = this._getActiveConfig();
       const response = await API.sendChatStream({
         message: text,
-        model_name: activeCfg.model,
-        api_key: activeCfg.key,
-        api_base_url: activeCfg.baseUrl,
+        // 模型/API 配置由服务端 .env 提供（前端不再存 localStorage）
+        model_name: '',
+        api_key: '',
+        api_base_url: '',
         question_id: this.currentQuestionId || '',
         session_id: this.sessionId,
         max_iterations: maxIter,
@@ -1208,8 +992,8 @@ const App = {
       people_count: parseInt(document.getElementById('auto-people-count')?.value || '2', 10),
       seat_type: document.getElementById('auto-seat-type')?.value || 'class2',
       random_tickets: document.getElementById('auto-fake-interference')?.checked ?? true,
-      fake_interference: true,
-      interference_density: parseFloat(document.getElementById('auto-interference-density')?.value || '0.001'),
+      fake_interference: document.getElementById('auto-fake-interference')?.checked ?? true,
+      interference_density: parseFloat(document.getElementById('auto-interference-density')?.value || '0.02'),
       custom_qid: document.getElementById('output-qid')?.value.trim() || '',
     };
 
@@ -1505,7 +1289,7 @@ const App = {
     const first = questions[0] || {};
     const preview = first.preview || {};
     const qid = first.question_id || '';
-    const density = document.getElementById('sel-density')?.value || '0.15';
+    const density = document.getElementById('sel-density')?.value || '0.02';
 
     let pathsHtml = '';
     if (preview.solution_segments && preview.solution_segments.length > 0) {
@@ -1541,7 +1325,7 @@ const App = {
       confirmBtn.dataset.questionType = preview.question_type || '';
       confirmBtn.dataset.answer = preview.path_description || '';
       confirmBtn.dataset.interference = 'true';
-      confirmBtn.dataset.density = document.getElementById('sel-density')?.value || '0.08';
+      confirmBtn.dataset.density = document.getElementById('sel-density')?.value || '0.02';
     }
     const reBtn = document.getElementById('btn-sel-regenerate');
     if (reBtn) {
@@ -1769,6 +1553,7 @@ const App = {
     const filename = selected.dataset.filename;
     try {
       this._currentEvalRecord = await API.loadTestRecord(filename);
+      this._currentEvalFilename = filename;
       const r = this._currentEvalRecord;
 
       // --- 提取结构化工具调用记录（换乘方案） ---
@@ -1798,7 +1583,7 @@ const App = {
       let statusBadge = '';
       if (planStatus === 'no_plan') {
         statusBadge = '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:#fef2f2;color:#dc2626;margin-left:8px">无方案输出</span>';
-      } else if (planStatus === 'no_solution') {
+      } else if (planStatus === 'empty_plan') {
         statusBadge = '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:#fefce8;color:#ca8a04;margin-left:8px">模型认为无解</span>';
       } else if (planStatus === 'has_solution') {
         statusBadge = '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:#f0fdf4;color:#16a34a;margin-left:8px">有方案</span>';
@@ -2042,7 +1827,7 @@ const App = {
         question_id: r.question_id || '',
         model_name: r.model_name || 'unknown',
         user_input: r.user_input || '',
-        test_file: '',
+        test_file: this._currentEvalFilename || '',
         score_summary: {
           hallucination_count: hallucinationCount,
           issue_count: issueCount,

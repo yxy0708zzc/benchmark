@@ -48,7 +48,7 @@ const Components = {
             html += `<td class="editable-cell"><span class="${valueClass}">${value}</span></td>`;
           } else {
             html += `<td class="editable-cell">
-              <input type="number" min="0" max="30" value="${value}"
+              <input type="number" min="0" max="1000" value="${value}"
                 class="${valueClass}"
                 data-from="${ids[i]}" data-to="${ids[j]}"
                 data-from-name="${names[i]}" data-to-name="${names[j]}"

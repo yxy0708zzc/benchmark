@@ -24,6 +24,8 @@
 
 **请求参数（ChatRequest）**：模型名称、API Key、API Base URL、消息内容、题目 ID、最大工具调用次数（`max_iterations`，默认 100）、会话 ID。
 
+> **API 配置来源**：前端不存 key（无设置弹窗）。请求可显式带 `model_name`/`api_key`/`api_base_url`；为空时服务端回落读取根目录 `.env` 的 `TEST_API_KEY`/`DEFAULT_MODEL`/`DEFAULT_BASE_URL`（再缺省用内置默认值），优先级：请求显式 > `.env` > 内置默认。
+
 ---
 
 ## 三、系统提示词（`prompts.py` 的 SYSTEM_PROMPT）
@@ -106,7 +108,9 @@ while 轮数 < max_iterations:
 
 ## 八、测试完成保存（`POST /api/test/complete`）
 
-- 汇总：Token 用量（输入/输出/总）、耗时、工具调用日志、解析出的 `final_plan`、`plan_status`
+- 汇总：Token 用量（输入/输出/总）、耗时、**顶层 `tool_calls`**（工具调用日志）、解析出的 `final_plan`、`plan_status`
+- `tool_calls` 在对话循环中按会话累计（流式/非流式均落盘），供统计模块读取 `avg_tool_calls` 等指标
+- `plan_status` 词汇与核查 verdict 统一：`has_solution` / `empty_plan`（模型明确无解）/ `no_plan`（未输出 final_plan）
 - 写入 `logs/test/`（测试记录 JSON），供测评页加载核查
 
 ---
@@ -121,4 +125,4 @@ while 轮数 < max_iterations:
 
 ---
 
-*文档版本：2026-08-07 · 对应实现：server.py（/api/test/chat、/api/test/chat/stream、/api/test/complete、execute_tool_handler、_parse_ai_final_plan）、prompts.py（SYSTEM_PROMPT）、tools/（7 个 OpenAI 工具）、static/app.js（对话 UI）*
+*文档版本：2026-08-10 · 对应实现：server.py（/api/test/chat、/api/test/chat/stream、/api/test/complete、execute_tool_handler、_parse_ai_final_plan）、prompts.py（SYSTEM_PROMPT）、tools/（7 个 OpenAI 工具）、static/app.js（对话 UI）*
