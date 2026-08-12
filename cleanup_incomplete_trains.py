@@ -1,19 +1,22 @@
 """
-清理票价数据不全的车次
-- 扫描所有车次，逐辆展示数据完整性详情
-- 每辆车逐个确认：y 删除 / n 跳过
+清理票价数据不全的车次 + 同车多号去重
 
-执行方式：
-    python cleanup_incomplete_trains.py            # 交互：逐个确认删除
-    python cleanup_incomplete_trains.py --fix      # 离线补算缺失的非相邻段票价（相邻段齐全的可算），再报告
-    python cleanup_incomplete_trains.py --apply    # 非交互：自动删除仍不全的车次
-    python cleanup_incomplete_trains.py --fix --apply   # 先补算，补算后仍不全的自动删除
+使用方式（已简化，默认即一键执行）：
+    python cleanup_incomplete_trains.py            # 一键执行：去重 → 补算 → 删除仍不全 → 重建物化视图（无需 --apply）
+    python cleanup_incomplete_trains.py --check    # 只读体检：待删清单 + 票价不全车次（不写库）
+
+遗留高级选项（可选，向后兼容）：
+    python cleanup_incomplete_trains.py --apply        # 一键执行（与无参数等价）
+    python cleanup_incomplete_trains.py --fix          # 仅离线补算缺失的非相邻段票价（相邻段齐全的可算）
+    python cleanup_incomplete_trains.py --dedup        # 仅报告同车多号去重待删清单
+    python cleanup_incomplete_trains.py --interactive  # 逐个展示、逐个确认删除
 """
 
 import sqlite3
 import os
 import json
 import sys
+from datetime import datetime
 
 # ============================================================
 # 路径
@@ -209,9 +212,10 @@ def compute_missing_pairs(train_num: str) -> int:
                         total += adj[key]
                     if valid:
                         pr.execute(
-                            "INSERT OR REPLACE INTO prices (train_num, from_station_id, to_station_id, seat, price) "
-                            "VALUES (?, ?, ?, ?, ?)",
-                            (train_num, f_id, t_id, seat, round(total, 2)))
+                            "INSERT OR REPLACE INTO prices (train_num, from_station_id, to_station_id, seat, price, crawl_date) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (train_num, f_id, t_id, seat, round(total, 2),
+                             datetime.now().strftime("%Y-%m-%d")))
                         computed += 1
         pr.commit()
     finally:
@@ -227,98 +231,209 @@ def rebuild_station_trains():
     conn.close()
 
 
-def main():
-    fix = "--fix" in sys.argv
-    apply = "--apply" in sys.argv
-    if fix and apply:
-        mode_desc = "离线补算 + 自动删除（非交互）"
-    elif fix:
-        mode_desc = "离线补算缺失的非相邻段票价"
-    elif apply:
-        mode_desc = "自动删除数据不全车次（非交互）"
-    else:
-        mode_desc = "逐个展示，逐个确认（y=删除 / n=跳过）"
+# ============================================================
+# 同车多号去重（--dedup）
+# 12306 会把同一列物理列车以多个车次号列出（collector 按「经停序列+时刻完全一致」
+# 归组到 same_trains.json）。重复号只写进了 train_stops（查得到车、查不到票价），
+# trains / prices 只保留其中一个号。去重 = 每组只保留一个主号，其余重复号全删。
+# 该流程独立于票价完整性检查，find_duplicate_trains 为只读函数，可被其他脚本复用。
+# ============================================================
 
-    print("=" * 60)
-    print("  清理票价数据不全的车次")
-    print(f"  模式：{mode_desc}")
-    print("=" * 60)
+def find_duplicate_trains() -> dict:
+    """找出「同车多号」的重复车次号 + 纯孤儿车次（只读，不删任何数据）。
 
-    # 获取所有车次
+    规则：
+    - 同车多号（same_trains.json）：每组保留一个「主号」——优先保留在 trains 表中、
+      票价记录最多的（并列取字典序最小）；其余成员视为重复号。
+    - 纯孤儿：在 train_stops 但不在 trains，且不属于任何同车组 —— 无主号的脏数据。
+
+    返回：{"canonical": {主号: [同组其他号]}, "duplicates": [...],
+          "pure_orphans": [...], "group_count": N}
+    其中待删全集 = duplicates + pure_orphans。
+    """
     rw = sqlite3.connect(RAILWAY_DB)
-    cursor = rw.cursor()
-    cursor.execute("SELECT train_num FROM trains ORDER BY train_num")
-    all_trains = [row[0] for row in cursor.fetchall()]
-    rw.close()
+    pr = sqlite3.connect(PRICES_DB)
+    try:
+        trains_set = set(r[0] for r in rw.execute("SELECT train_num FROM trains").fetchall())
+        stops_set = set(r[0] for r in rw.execute("SELECT DISTINCT train_num FROM train_stops").fetchall())
 
-    def collect_incomplete():
-        inc = []
-        for tn in all_trains:
-            info = inspect_train(tn)
-            if not info["complete"]:
-                inc.append(info)
-        return inc
+        def price_count(tn: str) -> int:
+            return pr.execute("SELECT COUNT(*) FROM prices WHERE train_num=?", (tn,)).fetchone()[0]
 
-    incomplete_trains = collect_incomplete()
+        groups = []
+        if os.path.exists(SAME_TRAINS_JSON):
+            with open(SAME_TRAINS_JSON, "r", encoding="utf-8") as f:
+                groups = json.load(f)
+
+        canonical = {}
+        duplicates = []
+        group_members = set()
+        for g in groups:
+            members = g.get("trains", [])
+            group_members.update(members)
+            in_trains = [t for t in members if t in trains_set]
+            if not in_trains:
+                # 整组都不在 trains（异常数据）：全部视为重复号
+                duplicates.extend(members)
+                continue
+            keep = min(in_trains, key=lambda t: (-price_count(t), t))
+            canonical[keep] = [t for t in members if t != keep]
+            duplicates.extend(canonical[keep])
+
+        pure_orphans = sorted(stops_set - trains_set - group_members)
+        return {
+            "canonical": canonical,
+            "duplicates": sorted(duplicates),
+            "pure_orphans": pure_orphans,
+            "group_count": len(groups),
+        }
+    finally:
+        rw.close()
+        pr.close()
+
+
+def run_dedup(apply: bool = False):
+    """同车多号去重：每组保留一个主号，删除其余重复号 + 纯孤儿车次。
+
+    apply=False（默认）：只报告将删除的车次，不删任何数据；
+    apply=True：真正删除（train_stops + trains + prices + same_trains.json），
+               并重建 station_trains 物化视图。
+    该流程独立于票价完整性检查（find_duplicate_trains 返回只读清单，可复用）。
+    """
+    plan = find_duplicate_trains()
+    dup = plan["duplicates"]
+    orphan = plan["pure_orphans"]
+    remove = sorted(set(dup) | set(orphan))
+
+    print("=" * 60)
+    print("  同车多号去重")
+    print(f"  模式：{'自动删除（--apply）' if apply else '仅报告（加 --apply 才删除）'}")
+    print("=" * 60)
+    if not remove:
+        print("\n✅ 无重复车次（同车多号已清理干净），无需去重。")
+        return
+
+    print(f"\n同车多号组：{plan['group_count']} 组；保留主号 {len(plan['canonical'])} 个")
+    print(f"重复车次号：{len(dup)} 个 -> {', '.join(dup)}")
+    print(f"纯孤儿车次：{len(orphan)} 个 -> {', '.join(orphan)}")
+    print(f"合计待删：{len(remove)} 个")
+
+    if not apply:
+        print("\n（未删除任何数据。确认后执行：python cleanup_incomplete_trains.py --dedup --apply）")
+        return
+
+    print(f"\n开始删除 {len(remove)} 个车次...")
+    deleted = []
+    need_rebuild = False
+    for tn in sorted(remove):
+        result = delete_train_completely(tn)
+        deleted.append(tn)
+        if result["success"]:
+            need_rebuild = True
+    _rebuild_and_report(deleted, [], need_rebuild)
+
+
+def _collect_incomplete():
+    """扫描 trains 表中票价不全的车次（只读）"""
+    rw = sqlite3.connect(RAILWAY_DB)
+    try:
+        cursor = rw.cursor()
+        cursor.execute("SELECT train_num FROM trains ORDER BY train_num")
+        all_trains = [row[0] for row in cursor.fetchall()]
+    finally:
+        rw.close()
+    inc = []
+    for tn in all_trains:
+        info = inspect_train(tn)
+        if not info["complete"]:
+            inc.append(info)
+    return inc
+
+
+def _run_report():
+    """只读体检：同车多号待删清单 + 票价不全车次，不写任何数据"""
+    plan = find_duplicate_trains()
+    dup = plan["duplicates"]
+    orphan = plan["pure_orphans"]
+    remove = sorted(set(dup) | set(orphan))
+    incomplete = _collect_incomplete()
+
+    print("=" * 60)
+    print("  cleanup 体检报告（只读，不写库）")
+    print("=" * 60)
+    if remove:
+        print(f"\n① 同车多号去重：{plan['group_count']} 组，保留主号 {len(plan['canonical'])} 个")
+        print(f"   重复号 {len(dup)} + 纯孤儿 {len(orphan)} = 待删 {len(remove)} 个")
+    else:
+        print("\n① 同车多号去重：无重复车次 ✅")
+    if incomplete:
+        print(f"\n② 票价不全车次：{len(incomplete)} 个 -> {', '.join(i['train_num'] for i in incomplete)}")
+    else:
+        print("\n② 票价完整性：所有车次完整 ✅")
+    print(f"\n共发现待处理项：同车去重 {len(remove)} + 票价不全 {len(incomplete)}")
+    print("\n一键执行完整清理（去重 → 补算 → 删除仍不全 → 重建物化视图）：")
+    print("  python cleanup_incomplete_trains.py")
+
+
+def _run_full_cleanup():
+    """一键全流程：①同车多号去重 ②离线补算非相邻段 ③删除仍不全 ④重建 station_trains"""
+    run_dedup(apply=True)
+
+    incomplete = _collect_incomplete()
+    if not incomplete:
+        print("\n✅ 所有车次数据完整，无需清理。")
+        return
+    print(f"\n发现 {len(incomplete)} 个票价不全车次，开始离线补算缺失的非相邻段票价...")
+    fixed = 0
+    for info in incomplete:
+        added = compute_missing_pairs(info["train_num"])
+        if added:
+            fixed += 1
+            print(f"  ✓ {info['train_num']}: 补算 {added} 条")
+    if fixed:
+        print(f"\n共补算 {fixed} 趟车，重新检查...")
+        incomplete = _collect_incomplete()
+        if not incomplete:
+            print("✅ 补算后所有车次完整，无需清理。")
+            return
+    else:
+        print("\n无可离线补算的车次（缺失的均为相邻段，需联网补爬 price_collector --supplement）。")
+
+    print(f"\n自动删除 {len(incomplete)} 个仍不全的车次...")
+    deleted = []
+    need_rebuild = False
+    for info in incomplete:
+        result = delete_train_completely(info["train_num"])
+        deleted.append(info["train_num"])
+        if result["success"]:
+            need_rebuild = True
+    _rebuild_and_report(deleted, [], need_rebuild)
+
+
+def _run_interactive():
+    """遗留高级模式：逐个展示 + 确认删除（--interactive）"""
+    print("=" * 60)
+    print("  清理票价数据不全的车次 - 逐个确认（--interactive）")
+    print("=" * 60)
+    incomplete_trains = _collect_incomplete()
     if not incomplete_trains:
         print("\n✅ 所有车次数据完整，无需清理。")
         return
-
-    # --fix：先离线补算缺失的非相邻段（相邻段齐全的可算）
-    if fix:
-        print(f"\n发现 {len(incomplete_trains)} 个数据不全的车次，开始离线补算缺失的非相邻段票价...")
-        fixed_count = 0
-        for info in incomplete_trains:
-            added = compute_missing_pairs(info["train_num"])
-            if added:
-                fixed_count += 1
-                print(f"  ✓ {info['train_num']}: 补算 {added} 条非相邻段票价")
-        if fixed_count:
-            print(f"\n共补算 {fixed_count} 趟车，重新检查...")
-            incomplete_trains = collect_incomplete()
-            if not incomplete_trains:
-                print("✅ 补算后所有车次数据完整，无需清理。")
-                return
-        else:
-            print("\n无可离线补算的车次（缺失的均为相邻段，需联网补爬）。")
-
-    # --apply：自动删除仍不全的车次（非交互）
-    if apply:
-        print(f"\n自动删除 {len(incomplete_trains)} 个仍不全的车次...")
-        deleted = []
-        need_rebuild = False
-        for info in incomplete_trains:
-            result = delete_train_completely(info["train_num"])
-            deleted.append(info["train_num"])
-            if result["success"]:
-                need_rebuild = True
-        print(f"  已删除 ({len(deleted)}): {', '.join(deleted)}")
-        _rebuild_and_report(deleted, [], need_rebuild)
-        return
-
     print(f"\n发现 {len(incomplete_trains)} 个数据不全的车次。")
-
-    # 逐个展示 + 确认（默认交互模式）
-    deleted = []
-    skipped = []
-    need_rebuild = False
-
+    deleted, skipped, need_rebuild = [], [], False
     for info in incomplete_trains:
         print_train_detail(info)
-
         while True:
             try:
                 raw = input(f"\n  删除 {info['train_num']} 的全部数据？(Y/n): ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 print("\n  检测到 Ctrl+C，停止处理，下次可继续。")
-                # 跳过当前车次，直接跳到报告
                 for remaining in incomplete_trains[incomplete_trains.index(info):]:
                     skipped.append(remaining["train_num"])
                 _rebuild_and_report(deleted, skipped, need_rebuild)
                 return
             choice = "y" if raw in ("", "y") else "n"
             break
-
         if choice == "y":
             result = delete_train_completely(info["train_num"])
             status = "✅ 已删除" if result["success"] else "⚠️ 部分失败"
@@ -331,8 +446,46 @@ def main():
         else:
             skipped.append(info["train_num"])
             print(f"  ⏭ 已跳过")
-
     _rebuild_and_report(deleted, skipped, need_rebuild)
+
+
+def main():
+    """使用方式：
+        python cleanup_incomplete_trains.py            # 一键执行：去重 → 补算 → 删除仍不全 → 重建（无需 --apply）
+        python cleanup_incomplete_trains.py --check    # 只读体检（不写库）
+    遗留高级选项：--apply（等价默认）/ --fix 仅补算 / --dedup 仅去重报告 / --interactive 逐个确认
+    """
+    if "--check" in sys.argv:
+        _run_report()
+        return
+    if "--fix" in sys.argv:
+        print("=" * 60)
+        print("  清理票价数据不全的车次 - 离线补算缺失的非相邻段票价（--fix）")
+        print("=" * 60)
+        incomplete = _collect_incomplete()
+        if not incomplete:
+            print("\n✅ 所有车次数据完整，无需清理。")
+            return
+        fixed = 0
+        for info in incomplete:
+            added = compute_missing_pairs(info["train_num"])
+            if added:
+                fixed += 1
+                print(f"  ✓ {info['train_num']}: 补算 {added} 条")
+        remaining = _collect_incomplete()
+        if remaining:
+            print(f"\n补算后仍不全 ({len(remaining)}): {', '.join(i['train_num'] for i in remaining)}")
+            print("（缺失的均为相邻段，需联网补爬 price_collector --supplement，或加 --apply 自动删除）")
+        print(f"\n共补算 {fixed} 趟车。")
+        return
+    if "--dedup" in sys.argv:
+        run_dedup(apply=False)
+        return
+    if "--interactive" in sys.argv:
+        _run_interactive()
+        return
+    # 默认（无参数）与 --apply 均执行一键全流程
+    _run_full_cleanup()
 
 
 def _rebuild_and_report(deleted: list, skipped: list, need_rebuild: bool = True):

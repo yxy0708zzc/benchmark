@@ -13,7 +13,7 @@
 |---|---|---|
 | 题型（question_type） | transfer / short_buy / extra_front / extra_rear / mixed | 全部 |
 | 出发站 / 到达站 | 支持中文站名或电报码 | 全部 |
-| 需求人数（people_count） | 答案票数 ≥ 人数（上限 20） | 全部 |
+| 需求人数（people_count） | 答案票数 1~1.5×人数随机（保证 ≥ 人数，上限 20） | 全部 |
 | 答案票等级（seat_type） | class0 特等 / class1 一等 / class2 二等 | 全部 |
 | 伪干扰开关（fake_interference） | 存在性是否额外生成 `1_` 伪干扰（False=仅 `0_`） | 存在性 |
 | 干扰密度（interference_density） | 干扰票数占**全局候选池**的比例（0~5%，默认 2%，步长 0.1%） | `1_` / `2_` |
@@ -40,17 +40,21 @@
 
 ### 2.2 合法解写入（各题型技术细节）
 
-每个合法解片段同时携带**购买区间**（from/to，查余票用）与**实际乘坐区间**（ride_from/ride_to，查可达用），票数 `randint(人数, max(人数,5))`、等级 = 所选等级。
+每个合法解片段同时携带**购买区间**（from/to，查余票用）与**实际乘坐区间**（ride_from/ride_to，查可达用），票数 `randint(人数, int(人数×1.5))`（**1~1.5× 人数随机**，保证 ≥ 人数、票够，人数=1 退化为 1）、等级 = 所选等级。
 
 | 题型 | 实现 | 购买区间 | 乘坐区间 |
 |---|---|---|---|
-| `transfer` 换乘 | T 首段 + 换乘车 U 次段；中间站过滤同城中转站（防止同城换乘失真）；用 `_find_transfer_trains` 按衔接时间找 U | A→M、M→B | 同购买 |
+| `transfer` 换乘 | T 首段 + 换乘车 U 次段；中间站过滤同城中转站（防止同城换乘失真）；**核心一：一次枚举该 T 全部可行 (M, U)**（`_find_transfer_solutions`，衔接 gap≥最短换乘），均匀随机挑一个 | A→M、M→B | 同购买 |
 | `short_buy` 买短补长 | 随机选中间站 M，只买 A→M；M→B 无票，乘客实际坐全程 | A→M | A→B |
 | `extra_front` 前额外 | 在出发站前随机取 k(1~3) 站买 A'→B | A'→B | A→B |
 | `extra_rear` 后额外 | 在到达站后随机取 k(1~3) 站买 A→B' | A→B' | A→B |
 | `mixed` 混合 | 见 2.3 | 各段 | 各段 |
 
 > 换乘/混合题型：首车 T **不经过终点站 B**（防 T 直达 B 逃逸）。
+
+**核心一枚举（`_find_transfer_solutions`）**：对一辆 T，用一次 SQL（`IN` 全部中间站 + JOIN 终点 B）枚举出所有满足「U 过 M 后过 B、U≠T、T到M+最短换乘 ≤ U从M出发」的 (M, U) 方案，再**均匀随机**挑一个——命中率 100%，替代原先“逐中间站碰运气重试”。混合题型逐段的候选同样复用该枚举（`_find_transfer_trains` 为其单中间站包装）。
+
+**换方案（`POST /api/auto_generate/swap`）**：预览阶段可「不变第一程车 T，换一组合法方案」——**换乘题**从该 T 已枚举的 (M,U) 列表里重新均匀随机挑一个（排除当前）；**混合题**同一 T 重新随机选中间站与各段换乘车次（重跑 mixed 合法解，直到与当前不同）。重建预览并重新校验时间约束（选择性题）；存在性配对 0_/1_ 会**同步换到同一方案**，保持两者一致。
 
 ### 2.3 混合题实现（`mixed`）
 
@@ -59,7 +63,7 @@
 1. **选取 N 个中间站**：在 A、B 之间随机采样 `N` 个站，得到路径节点 `[A, M1, …, MN, B]`
 2. **段 0 用目标车次 T**：写 `A→M1` 合法解，记录 T 到达 M1 的时刻作为衔接基准
 3. **段 i>0 换乘**：
-   - 用 `_find_transfer_trains` 以「上一段到达本段起点的时间 + 最短换乘」为衔接基准找换乘车
+   - 用核心一枚举（`_find_transfer_solutions`，`_find_transfer_trains` 为其单中间站包装）以「上一段到达本段起点的时间 + 最短换乘」为衔接基准找换乘车
    - 后续还有换乘的段，要求候选车次在本段终点有有效到达时间（`HH:MM`）
    - 若某段找不到合适换乘车 → 整题换车次重试
 4. **每段独立策略**（direct / short_buy / extra_front / extra_rear）：
@@ -103,7 +107,8 @@ selected = shuffle(全局候选池)[:n]
 
 - **换乘衔接**：后车发车 ≥ 前车到达 + 最短换乘（存在性固定 20，选择性可配置）
 - **时间约束**（仅选择性 `2_`）：首段出发 / 末段到达在允许区间；跨车次换乘在最短/最长之间
-- 校验不满足 → 换下一车次重试（最多 15 个）
+- **内层失败一律回外层重试（`_RetryTrainError`）**：`_write_legal_solution` 内层所有"找不到合法解"（transfer 无中间站/换乘车次、short_buy/extra 前后站不足、mixed 各段无候选等 13 处）统一抛 `_RetryTrainError`；外层 `_generate_one_variant` 捕获后换下一辆 T 重试（最多 15 个），**不会内层找不到直接报错**，仅全部 T 失败才返回 400
+- 时间约束不满足 → 同样换下一车次重试（最多 15 个）
 
 ---
 
@@ -149,9 +154,9 @@ selected = shuffle(全局候选池)[:n]
 - **换乘衔接**：后车发车 ≥ 前车到达 + 最短换乘，时间顺序正确
 - **答案唯一 / 多解**：由干扰类型保证（`0_` 无干扰 / `1_` 伪干扰 → 唯一；`2_` 真干扰 → 多解）
 - **防逃逸**：换乘/混合的首车不经过终点站；混合非末段买短补长排除经过终点的车次；`2_` 真干扰全局禁直达 `(A,B)`、transfer/mixed 另禁“买短补长到 B”（见 2.4）
-- **规模约束**：需求人数上限 20（真干扰票数 ≤ 1.5×20=30）；余票上限 1000（宽松兜底，DB `CHECK(tickets<=1000)`）
-- **数据完整性**：票价全覆盖由数据清洗脚本保证（`cleanup_incomplete_trains.py --fix --apply`），出题不依赖票价存在性
+- **规模约束**：需求人数上限 20（答案票 1~1.5×人数 ≤ 30、真干扰票数 ≤ 1.5×20=30）；余票上限 1000（宽松兜底，DB `CHECK(tickets<=1000)`）
+- **数据完整性**：票价全覆盖由数据清洗脚本保证（`cleanup_incomplete_trains.py` 无参数一键清理），出题不依赖票价存在性
 
 ---
 
-*文档版本：2026-08-10 · 对应实现：server.py（`_generate_one_variant` / `_write_legal_solution` / `_add_interference_all_trains`（全局池）/ `_get_all_stops_cached` / `_find_transfer_trains`）、config.py（QUESTION_CONFIG）、database.py（metadata）、question/*.db（题目余票库）*
+*文档版本：2026-08-12 · 对应实现：server.py（`_generate_one_variant` / `_write_legal_solution` / `_add_interference_all_trains`（全局池）/ `_get_all_stops_cached` / `_find_transfer_solutions`（核心一枚举）/ `_build_transfer_segments` / `_build_transfer_preview` / `api_auto_generate_swap`）、config.py（QUESTION_CONFIG）、database.py（metadata）、question/*.db（题目余票库）*

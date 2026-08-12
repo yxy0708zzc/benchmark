@@ -56,7 +56,7 @@ PRICES_DB_PATH = os.path.join(DATA_DIR, "prices.db")          # 票价数据库
 METADATA_PATH = os.path.join(QUESTION_DIR, "metadata.json")   # 题目元数据
 
 # ============================================================
-# 爬虫配置（来自 01_数据爬取与数据库设计.md）
+# 爬虫配置（12306 请求限速 / 超时 / 重试 / 基准日期）
 # ============================================================
 CRAWLER_CONFIG = {
     "min_interval": 0.15,             # 请求最小间隔（秒）
@@ -78,10 +78,11 @@ CRAWLER_CONFIG = {
 # ============================================================
 QUESTION_CONFIG = {
     "default_interference_density": 0.02,  # 默认干扰密度（全局池统一默认 2%）
-    "default_solution_ticket_min": 1,      # 合法解最小票数
-    "default_solution_ticket_max": 5,      # 合法解最大票数
-    "ticket_max_value": 1000,              # 余票上限（宽松兜底；真干扰 1.5×人数 ≤ 30，留足余量）
-    "max_people_count": 20,                # 需求人数上限（真干扰票数 0.5~1.5×人数）
+    "ticket_max_value": 1000,              # 余票上限（宽松兜底；合法解/真干扰最大 1.5×人数 ≤ 30，留足余量）
+    "max_people_count": 20,                # 需求人数上限（答案票 1~1.5×人数，真干扰 0.5~1.5×人数）
+    # 遗留（不再使用）：合法解票数现由 server.py `_random_solution_tickets` 生成（1~1.5×人数随机）
+    "default_solution_ticket_min": 1,
+    "default_solution_ticket_max": 5,
 }
 
 # ============================================================

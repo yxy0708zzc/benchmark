@@ -22,7 +22,7 @@
 benchmark_travelplan/
 ├── collector.py            # 基础数据爬虫（车次/经停站，含完整性/跨天验证）
 ├── price_collector.py      # 票价爬虫（支持并发、断点续爬、补充）
-├── cleanup_incomplete_trains.py  # 清理票价不全车次（--fix 离线补算 / --apply 自动删除）
+├── cleanup_incomplete_trains.py  # 一键清理：同车多号去重 + 票价不全车次（无参数即执行）
 ├── cleanup_overnight_trains.py   # 清理跨天车次（当日完成约束）
 ├── server.py               # FastAPI 服务（API + 前端）
 ├── database.py             # SQLite 数据库操作
@@ -119,7 +119,7 @@ python server.py
 4. 点击「生成并预览」→ 系统自动出**至少一份**（共用同一车次与合法解，仅干扰不同）：
    - `0_`：**无干扰**（只有答案路径有票，唯一解）
    - 勾选「加入伪干扰」时额外生成 `1_`：**伪干扰**（干扰票数严格 < 人数，唯一解）
-5. 满意则点「✅ 确认生成」循环保存生成的每份；不满意点「🔄 重新出题」（保留输入、清除缓存重新生成）
+5. 满意则点「✅ 确认生成」循环保存生成的每份；不满意点「🔄 重新出题」（保留输入、清除缓存重新生成）；换乘/混合题可点「🔄 换方案」（不变第一程车，换中间站/换乘车次，存在性 0_/1_ 同步换）
 
 **② 选择性自动出题（「选择性问题出题」标签）—— 生成一份**
 - 前缀 `2_`，答案**多个**，添加真干扰（票数 0.5~1.5×人数，可调干扰密度）
@@ -173,6 +173,7 @@ python server.py
 | `/api/auto_generate` | POST | 自动出题生成预览；`mode`=`existence` 出 `0_`（无干扰，`fake_interference=true` 时另出 `1_` 伪干扰），`selective` 出 `2_` 一份 |
 | `/api/auto_generate/confirm` | POST | 确认生成题目（存在性需分别确认每份） |
 | `/api/auto_generate/clear` | POST | 清除预览缓存 |
+| `/api/auto_generate/swap` | POST | 换方案（换乘/混合；不变首车 T，存在性配对同步换） |
 | `/api/auto_generate/previews` | GET | 查看预览缓存 |
 | `/api/question/list` | GET | 题目列表（支持 `status`/`type`/`keyword` 筛选） |
 | `/api/question/init` | POST | 初始化题目车次（含同车关联号） |
@@ -207,7 +208,7 @@ python server.py
 - 点击「生成并预览」至少出 `0_`（同一车次、同一合法解）；**勾选「加入伪干扰」时额外出 `1_`**（两份共用同一随机种子保证一致）：
   - **`0_` 无干扰**：完全不加干扰票，只有答案路径有票 → **唯一解**，核查用**对标标答**（完全一致）
   - **`1_` 伪干扰**：干扰票数**严格 < 人数**（制造"看起来像但票不够"的干扰项），仍保证唯一解，核查用对标标答
-- 可设置**需求人数**（答案票数 ≥ 人数，上限 20）和**答案票等级**（class0/1/2）；干扰密度滑条 **0~5%**（默认 2%，步长 0.1%，仅对 `1_` 生效，`0_` 无干扰）
+- 可设置**需求人数**（答案票数 1~1.5×人数随机、保证 ≥ 人数，上限 20）和**答案票等级**（class0/1/2）；干扰密度滑条 **0~5%**（默认 2%，步长 0.1%，仅对 `1_` 生效，`0_` 无干扰）
 
 ### 2. 选择性自动出题（前缀 `2_`，答案多个）
 - 只生成**一份**，前缀 `2_`
@@ -392,15 +393,15 @@ python nl_question.py --question a1 --question a2
 ### ④ 清理数据不全车次 `cleanup_incomplete_trains.py`
 
 ```bash
-python cleanup_incomplete_trains.py                  # 交互：逐个确认删除
-python cleanup_incomplete_trains.py --fix           # 离线补算缺失的非相邻段票价，再报告
-python cleanup_incomplete_trains.py --apply         # 非交互：自动删除仍不全的车次
-python cleanup_incomplete_trains.py --fix --apply   # 先补算，补算后仍不全的自动删除
+python cleanup_incomplete_trains.py              # 一键执行：去重 → 补算 → 删除仍不全 → 重建 station_trains
+python cleanup_incomplete_trains.py --check      # 只读体检（不写库）
+python cleanup_incomplete_trains.py --fix        # 遗留：仅离线补算缺失的非相邻段票价
+python cleanup_incomplete_trains.py --dedup      # 遗留：仅报告同车多号去重清单
+python cleanup_incomplete_trains.py --interactive # 遗留：逐个确认删除
 ```
 
-- 逐个检查车次的票价数据完整性（应有站对 = C(站数,2)，覆盖所有非相邻段）
-- `--fix`：对相邻段齐全的车次**离线累加补算**缺失的非相邻段票价（无需联网）；相邻段也缺的需联网补爬或删除
-- `--apply`：非交互自动删除仍不全的车次，同步从 `trains`/`train_stops`/`same_trains.json` 移除，避免出题/测评引用“幽灵车次”
+- **无参数即一键执行**：① 同车多号去重（12306 同物理列车多车次号，每组只保留一个主号，其余重复号 + 纯孤儿删除）→ ② 离线补算缺失的非相邻段票价（相邻段齐全可算）→ ③ 自动删除仍不全的车次（同步从 `trains`/`train_stops`/`prices`/`same_trains.json` 移除）→ ④ 重建 `station_trains` 物化视图
+- `--check`：只读体检，仅列出待删清单与票价不全车次，不写库
 - **数据完整性要求**：保证 `prices.db` 覆盖所有车次的所有区间票价——主核查代码（verifier）**不做数据防御**，`price_missing` 不应出现（出现即出题人数据没准备好，先跑本脚本清理）
 
 ### ⑤ 清理跨天车次 `cleanup_overnight_trains.py`

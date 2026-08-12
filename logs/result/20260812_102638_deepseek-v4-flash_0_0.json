@@ -1,0 +1,1307 @@
+{
+  "timestamp": "2026-08-12T10:26:38.731972",
+  "test_file": "20260812_102553_deepseek-v4-flash_0_0.json",
+  "question_id": "0_0",
+  "model_name": "deepseek-v4-flash",
+  "user_input": "我俩想从北京南去杭州东，路上也不久，不用整太舒服的座，经济实惠点就行，麻烦给看看有啥合适车次呗。",
+  "score_summary": {
+    "hallucination_count": 0,
+    "issue_count": 0,
+    "total_tokens": 52704,
+    "duration_seconds": 186.086017,
+    "tool_calls": [
+      {
+        "train_num": "G39",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G41",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G43",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G45",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G49",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G877",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G815",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G817",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G37",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G819",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G811",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G821",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G823",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G885",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G829",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2557",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G835",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G849",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G871",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G875",
+        "from": "VNP",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G39",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G39",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G41",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G41",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G41",
+        "from": "VNP",
+        "to": "RNH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G43",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G43",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G45",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G45",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G45",
+        "from": "VNP",
+        "to": "NGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G49",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G877",
+        "from": "VNP",
+        "to": "CTH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G877",
+        "from": "VNP",
+        "to": "NGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G3",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G5",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G7",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G9",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G11",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G13",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G15",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G17",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G19",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G21",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G25",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G27",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G29",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G33",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G35",
+        "from": "VNP",
+        "to": "NKH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G7",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G9",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G11",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G15",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G19",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G21",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G25",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G27",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G31",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G35",
+        "from": "VNP",
+        "to": "AOH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G87",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2551",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1083",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G51",
+        "from": "VNP",
+        "to": "JGK",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G39",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G877",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G41",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G45",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G49",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G3",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G5",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G7",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G9",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G11",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G13",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G15",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G17",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G19",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G21",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G23",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G25",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G27",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G29",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G31",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G33",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G35",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G37",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G43",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G47",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G51",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G53",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G65",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G547",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G565",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G549",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G597",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G599",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G633",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G643",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G657",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G669",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G693",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G811",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G813",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G815",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G817",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G819",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G821",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G823",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G829",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G835",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G849",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G871",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G875",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G885",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G887",
+        "from": "",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G733",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G735",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G737",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G741",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G745",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G747",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G749",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G751",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G795",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G799",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G801",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G803",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G805",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G807",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G809",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2573",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G31",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2551",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1083",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G87",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2553",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G887",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2555",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G981",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2571",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1063",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G983",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G963",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G965",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1067",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1527",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1069",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G51",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1071",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1058",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1059",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2575",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G797",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2561",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1089",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2577",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G7763",
+        "from": "UUH",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G7766",
+        "from": "UUH",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G835",
+        "from": "UUH",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G849",
+        "from": "UUH",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G871",
+        "from": "UUH",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G875",
+        "from": "UUH",
+        "to": "HGH",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1091",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1075",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G53",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1567",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1249",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1077",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2563",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1079",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1595",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1598",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2581",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1045",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1565",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1047",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1269",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G2587",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1055",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1049",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1719",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1722",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1259",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1053",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G101",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G103",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G105",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G107",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G109",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G111",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G113",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G115",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G117",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G119",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G121",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G123",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G125",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1001",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1003",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1005",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1007",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1009",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1010",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      },
+      {
+        "train_num": "G1012",
+        "from": "VNP",
+        "to": "",
+        "seat_types": ""
+      }
+    ]
+  },
+  "verification": {
+    "total_items": 2,
+    "correct_items": 2,
+    "issue_count": 0,
+    "hallucination_count": 0,
+    "price_issue_count": 0,
+    "invalid_plan_count": 0,
+    "route_mismatch_count": 0,
+    "ticket_shortage_count": 0,
+    "missing_ride_count": 0,
+    "question_mode": "存在性",
+    "verdict": "pass",
+    "results": [
+      {
+        "train_num": "G797",
+        "from_station_id": "VNP",
+        "to_station_id": "UUH",
+        "from_name": "北京南",
+        "to_name": "徐州东",
+        "ride_from_station_id": "VNP",
+        "ride_to_station_id": "UUH",
+        "ride_from_name": "北京南",
+        "ride_to_name": "徐州东",
+        "seat_type": "class2",
+        "claimed": 2,
+        "actual": 5,
+        "match": true,
+        "price_claimed": 457,
+        "price_actual": 457,
+        "price_match": true
+      },
+      {
+        "train_num": "G875",
+        "from_station_id": "UUH",
+        "to_station_id": "HGH",
+        "from_name": "徐州东",
+        "to_name": "杭州东",
+        "ride_from_station_id": "UUH",
+        "ride_to_station_id": "HGH",
+        "ride_from_name": "徐州东",
+        "ride_to_name": "杭州东",
+        "seat_type": "class2",
+        "claimed": 2,
+        "actual": 2,
+        "match": true,
+        "price_claimed": 360,
+        "price_actual": 360,
+        "price_match": true
+      }
+    ],
+    "issues": [],
+    "summary": "✅ 全部通过：共 2 条方案，均与数据库一致"
+  },
+  "human_confirmed": true,
+  "human_notes": "",
+  "status": "success"
+}

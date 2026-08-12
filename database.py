@@ -318,7 +318,7 @@ def update_ticket(conn: sqlite3.Connection, train_num: str,
     - tickets > 0: INSERT OR REPLACE
     - tickets == 0: DELETE（稀疏存储，空行即 0 票）
     seat_type: class0 / class1 / class2
-    tickets: 0~30 整数
+    tickets: 0~QUESTION_CONFIG["ticket_max_value"]（默认 1000）整数
     """
     if seat_type not in TICKET_TABLES:
         raise ValueError(f"无效的座位类型: {seat_type}")

@@ -11,7 +11,7 @@
 |---|---|---|
 | `collector.py` | 基础数据爬虫（车站 / 车次 / 经停站） | `data/railway.db` + `data/same_trains.json` |
 | `price_collector.py` | 票价爬虫（相邻站对票价，含并发 / 断点） | `data/prices.db` |
-| `cleanup_incomplete_trains.py` | 清理票价不全车次（补算 / 删除） | 删除后重建 `station_trains` |
+| `cleanup_incomplete_trains.py` | 一键清理：同车多号去重 + 票价不全车次（补算 / 删除） | 删除后重建 `station_trains` |
 | `cleanup_overnight_trains.py` | 清理跨天车次（当日完成约束） | 删除后重建 `station_trains` |
 | `nl_question.py` | 题目自然语言化（命令行，人工确认） | `question/metadata.json` 的 `nl_question` 字段 |
 
@@ -21,7 +21,7 @@
 python collector.py                          # 1. 基础数据（车站/车次/经停站）
 python price_collector.py --workers 4        # 2. 票价（并发 3~5）
 python cleanup_overnight_trains.py --apply   # 3. 清理跨天车次
-python cleanup_incomplete_trains.py --fix --apply  # 4. 补算缺失票价 + 清理仍不全车次
+python cleanup_incomplete_trains.py           # 4. 一键清理：同车多号去重 → 补算缺失票价 → 删除仍不全车次
 python nl_question.py                        # 5.（可选）题目自然语言化
 python server.py                             # 6. 启动服务
 ```
@@ -73,16 +73,24 @@ python server.py                             # 6. 启动服务
 
 **作用**：检查每趟车的票价数据完整性（应有站对 = `C(经停站数, 2)`，实际站对是否齐全），对不全车次处理。
 
-**用法**：
+**用法（已简化，无参数即一键执行）**：
 
 | 命令 | 说明 |
 |---|---|
-| `python cleanup_incomplete_trains.py` | 交互：逐个展示完整性详情，`y` 删除 / `n` 跳过 |
-| `python cleanup_incomplete_trains.py --fix` | 离线补算缺失的**非相邻段**票价（相邻段齐全即可按里程/递推补），再报告 |
-| `python cleanup_incomplete_trains.py --apply` | 非交互：自动删除仍不全的车次 |
-| `python cleanup_incomplete_trains.py --fix --apply` | 先补算，补算后仍不全的自动删除 |
+| `python cleanup_incomplete_trains.py` | **一键执行**：① 同车多号去重 → ② 离线补算缺失票价 → ③ 删除仍不全车次 → ④ 重建 `station_trains` |
+| `python cleanup_incomplete_trains.py --check` | **只读体检**：同车多号待删清单 + 票价不全车次（不写库） |
+| `python cleanup_incomplete_trains.py --apply` | 兼容：与无参数等价的一键执行 |
+| `python cleanup_incomplete_trains.py --fix` | 遗留：仅离线补算缺失的**非相邻段**票价，再报告 |
+| `python cleanup_incomplete_trains.py --dedup` | 遗留：仅报告同车多号去重待删清单 |
+| `python cleanup_incomplete_trains.py --interactive` | 遗留：逐个展示完整性详情，`y` 删除 / `n` 跳过 |
 
-**注意**：`--fix` 只能补**非相邻段**；缺失相邻段的必须联网补爬（`price_collector.py --supplement`）。删除会连同 `trains / train_stops / prices` 中该车数据一起清，并重建 `station_trains` 物化视图。
+**一键清理（默认 / `--apply`）包含**：
+1. **同车多号去重**——12306 会把同一列物理列车以多个车次号列出（`collector` 按「经停序列+时刻完全一致」归组到 `data/same_trains.json`）。重复号只写进了 `train_stops`（查得到车、查不到票价），`trains / prices` 只保留其中一个号。每组保留**票价记录最多**的主号（并列取字典序最小），其余重复号 + 不在任何同车组的纯孤儿全部删除，使系统里每辆物理列车**只保存一个车次号**。
+2. **离线补算**缺失的非相邻段票价（相邻段齐全可算）。
+3. **自动删除**仍不全的车次（删除会连同 `trains / train_stops / prices` 一起清、同步 `same_trains.json`）。
+4. **重建 `station_trains`** 物化视图。
+
+**注意**：缺失**相邻段**票价的无法离线补算，需联网补爬（`price_collector.py --supplement`）。去重清单只读函数 `find_duplicate_trains()` 可被其他脚本复用。
 
 ---
 
@@ -169,4 +177,4 @@ server.py ──► 读取以上全部数据，提供出题/测试/测评/统计
 
 ---
 
-*文档版本：2026-08-10 · 对应实现：collector.py / price_collector.py / cleanup_incomplete_trains.py / cleanup_overnight_trains.py / nl_question.py*
+*文档版本：2026-08-12 · 对应实现：collector.py / price_collector.py / cleanup_incomplete_trains.py / cleanup_overnight_trains.py / nl_question.py*

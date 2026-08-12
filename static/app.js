@@ -912,6 +912,11 @@ const App = {
       regenerateBtn.onclick = () => this._reAutoGenerate();
     }
 
+    const swapBtn = document.getElementById('btn-swap');
+    if (swapBtn) {
+      swapBtn.onclick = () => this._swapAutoSolution();
+    }
+
     // 题型切换时显示/隐藏混合配置
     const typeSelect = document.getElementById('question-type');
     if (typeSelect) {
@@ -1096,6 +1101,13 @@ const App = {
       reBtn.style.display = 'inline-flex';
       reBtn.dataset.questionIds = questions.map(q => q.question_id).join(',');
     }
+    const swapBtn = document.getElementById('btn-swap');
+    if (swapBtn) {
+      const qtype = (questions[0].preview || {}).question_type;
+      const isSwapable = qtype === 'transfer' || qtype === 'mixed';
+      swapBtn.style.display = isSwapable ? 'inline-flex' : 'none';
+      if (isSwapable) swapBtn.dataset.questionIds = questions.map(q => q.question_id).join(',');
+    }
   },
 
   /** 确认生成 */
@@ -1125,6 +1137,8 @@ const App = {
     confirmBtn.style.display = 'none';
     const reBtn = document.getElementById('btn-regenerate');
     if (reBtn) reBtn.style.display = 'none';
+    const swapBtn = document.getElementById('btn-swap');
+    if (swapBtn) swapBtn.style.display = 'none';
     const container = document.getElementById('preview-container');
     if (container) container.innerHTML = '';
   },
@@ -1149,8 +1163,23 @@ const App = {
     const confirmBtn = document.getElementById('btn-confirm-generate');
     if (confirmBtn) confirmBtn.style.display = 'none';
     if (reBtn) reBtn.style.display = 'none';
+    const swapBtn = document.getElementById('btn-swap');
+    if (swapBtn) swapBtn.style.display = 'none';
     // 用现有表单参数重新生成
     await this._onAutoGenerate();
+  },
+
+  /** 换方案（存在性）：不变第一程车，换中间站/换乘车次；0_/1_ 同步换 */
+  _swapAutoSolution: async function() {
+    const swapBtn = document.getElementById('btn-swap');
+    const questionIds = (swapBtn?.dataset.questionIds || swapBtn?.dataset.questionId || '').split(',').filter(Boolean);
+    if (!questionIds.length) return;
+    const qid = questionIds[0]; // 0_ 与 1_ 同车，后端会同步两者
+    try {
+      const res = await API.swapAutoGenerate(qid);
+      if (!res.success) { alert(`换方案失败: ${res.detail || '未知错误'}`); return; }
+      this._showAutoPreview({ questions: res.questions });
+    } catch (e) { alert(`换方案失败: ${e.message}`); }
   },
 
   // ============================================================
@@ -1170,6 +1199,11 @@ const App = {
     const regenerateBtn = document.getElementById('btn-sel-regenerate');
     if (regenerateBtn) {
       regenerateBtn.onclick = () => this._reSelectiveGenerate();
+    }
+
+    const swapBtn = document.getElementById('btn-sel-swap');
+    if (swapBtn) {
+      swapBtn.onclick = () => this._swapSelectiveSolution();
     }
 
     // 干扰密度滑块联动
@@ -1332,6 +1366,13 @@ const App = {
       reBtn.style.display = 'inline-flex';
       reBtn.dataset.questionId = qid;
     }
+    const swapBtn = document.getElementById('btn-sel-swap');
+    if (swapBtn) {
+      const qtype = preview.question_type;
+      const isSwapable = qtype === 'transfer' || qtype === 'mixed';
+      swapBtn.style.display = isSwapable ? 'inline-flex' : 'none';
+      if (isSwapable) swapBtn.dataset.questionId = qid;
+    }
   },
 
   /** 确认生成选择性题目 */
@@ -1353,6 +1394,8 @@ const App = {
         confirmBtn.style.display = 'none';
         const reBtn = document.getElementById('btn-sel-regenerate');
         if (reBtn) reBtn.style.display = 'none';
+        const swapBtn = document.getElementById('btn-sel-swap');
+        if (swapBtn) swapBtn.style.display = 'none';
         const container = document.getElementById('sel-preview-container');
         if (container) container.innerHTML = '';
       } else {
@@ -1383,8 +1426,22 @@ const App = {
     const confirmBtn = document.getElementById('btn-sel-confirm');
     if (confirmBtn) confirmBtn.style.display = 'none';
     if (reBtn) reBtn.style.display = 'none';
+    const swapBtn = document.getElementById('btn-sel-swap');
+    if (swapBtn) swapBtn.style.display = 'none';
     // 用现有表单参数重新生成
     await this._onSelectiveGenerate();
+  },
+
+  /** 换方案（选择性）：不变第一程车，换中间站/换乘车次 */
+  _swapSelectiveSolution: async function() {
+    const swapBtn = document.getElementById('btn-sel-swap');
+    const qid = swapBtn?.dataset.questionId || '';
+    if (!qid) return;
+    try {
+      const res = await API.swapAutoGenerate(qid);
+      if (!res.success) { alert(`换方案失败: ${res.detail || '未知错误'}`); return; }
+      this._showSelectivePreview({ questions: res.questions });
+    } catch (e) { alert(`换方案失败: ${e.message}`); }
   },
 
   // ============================================================

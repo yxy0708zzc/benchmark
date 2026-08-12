@@ -112,6 +112,16 @@ const API = {
     return resp.json();
   },
 
+  /** 换方案：不变第一程车，换中间站/换乘车次 */
+  swapAutoGenerate: async (questionId) => {
+    const resp = await fetch('/api/auto_generate/swap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_id: questionId }),
+    });
+    return resp.json();
+  },
+
   /** 从题目中删除指定车次 */
   deleteQuestionTrain: async (questionId, trainNum) => {
     const resp = await fetch(`/api/question/${encodeURIComponent(questionId)}/train/${encodeURIComponent(trainNum)}`, {

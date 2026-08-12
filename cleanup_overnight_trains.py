@@ -38,7 +38,9 @@ def find_overnight_trains() -> dict:
 
     result = {}
     for train_num, stop_no, t_from, t_to in rows:
-        result.setdefault(train_num, []).append((stop_no, t_from, t_to))
+        # 只有「时间倒退」才是跨天（如 23:20 → 00:07）；正常车次后站时间晚于前站
+        if t_from > t_to:
+            result.setdefault(train_num, []).append((stop_no, t_from, t_to))
     return result
 
 
@@ -101,13 +103,11 @@ def rebuild_station_trains():
         refresh_station_trains(conn)
         conn.close()
         return True
-    except Exception:
-        # 兜底：直接删除该表相关行
-        conn = sqlite3.connect(RAILWAY_DB)
-        conn.execute("DELETE FROM station_trains WHERE train_num NOT IN (SELECT train_num FROM trains)")
-        conn.commit()
-        conn.close()
-        return True
+    except Exception as e:
+        # station_trains 是按 station_id 聚合的物化视图，无 train_num 列；
+        # 重建失败时如实报错，避免用错误的 SQL 破坏数据
+        print(f"⚠️ station_trains 重建失败: {e}")
+        return False
 
 
 def main():
