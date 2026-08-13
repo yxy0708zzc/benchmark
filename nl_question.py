@@ -5,8 +5,9 @@
 调用大模型将僵硬的"出发站到到达站"表述转化为自然、口语化的购票需求，
 经人工确认后写回 metadata.json 的 nl_question 字段（原 question 保留）。
 
-一致性：存在性题（0_/1_）按"内容"（行程/人数/座位/时间约束）分组，
-一组生成一份自然语言并写回组内全部题目 —— 保证 0_/1_ 除干扰外完全一致。
+一致性：存在性题（0_/1_）按「基础题号 + 内容」（行程/人数/座位/时间约束）分组，
+一组生成一份自然语言并写回组内全部题目 —— 保证 0_/1_ 除干扰外完全一致；
+不同题号（如 0_34 与 0_35）即使内容相同也不合并，各自独立生成。
 
 用法：
     python nl_question.py                         # 交互式填写 API/模型/URL（默认跳过已保存的）
@@ -28,6 +29,7 @@ import json
 import os
 import sys
 import argparse
+import re
 
 import requests
 
@@ -201,9 +203,19 @@ def ask_config(args) -> dict:
     return {"api_key": api_key, "model": model, "base_url": base_url}
 
 
+def _existence_base(qid: str) -> str:
+    """取存在性题的基础题号（去掉 0_/1_ 前缀）：0_34 / 1_34 → 34。
+
+    用于分组时只让同一道题的 0_/1_ 配对共享文案，不同题号即使内容相同也不合并。
+    """
+    return re.sub(r"^[0-9]_", "", str(qid))
+
+
 def _group_existence(raw_targets):
-    """把存在性题按“内容”分组：提示词输入相同的题目（行程 / 人数 / 座位 / 时间约束）
-    共用同一份自然语言 —— 保证 0_ / 1_ 除干扰外完全一致；非存在性题（选择性等）各自独立成组。
+    """把存在性题按「基础题号 + 内容」分组：提示词输入相同的题目（行程 / 人数 / 座位 / 时间约束）
+    共用同一份自然语言 —— 保证 0_ / 1_ 除干扰外完全一致；
+    不同题号（如 0_34 与 0_35）即使内容相同也不合并，各自独立生成。
+    非存在性题（选择性等）各自独立成组。
 
     返回 [{qids: [...], entries: [...]}, ...]（保持 metadata 首次出现顺序）。
     """
@@ -212,6 +224,7 @@ def _group_existence(raw_targets):
     for qid, entry in raw_targets:
         if entry.get("type") == "存在性":
             key = (
+                _existence_base(qid),                    # 只让 0_/1_ 配对共享
                 entry.get("question", ""),
                 entry.get("people_count", 2),
                 entry.get("seat_type", "class2"),
