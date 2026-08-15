@@ -1153,6 +1153,9 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
     random.shuffle(routes)
     max_attempts = min(len(routes), 15)
 
+    # 题号查重基准：读取一次 metadata（确认时会落盘到同一份，避免覆盖同名题）
+    existing_metadata = load_metadata()
+
     last_error = None
     for attempt in range(max_attempts):
         target_train_num = routes[attempt]["train_num"]
@@ -1201,14 +1204,17 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
         # Step 3: 确定题名（前缀自动加，与输入无关；仅用于预览标识，不创建磁盘文件）
         if req.custom_qid:
             question_id = prefix + req.custom_qid
-            # 检查重复（包括已存在的数据库和缓存中的同名题）
-            existing_path = get_question_db_path(question_id)
-            if os.path.exists(existing_path) or question_id in _preview_cache:
-                last_error = f"题名 {question_id} 已存在"
-                continue
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             question_id = f"{prefix}{timestamp}_{attempt}"
+
+        # 题号查重：db 文件 / metadata / 预览缓存 任一命中即视为已占用
+        # （custom_qid 与自动题号都查；自动题号同秒撞号时换下一 attempt 重试）
+        if (os.path.exists(get_question_db_path(question_id))
+                or question_id in _preview_cache
+                or question_id in existing_metadata):
+            last_error = f"题名 {question_id} 已存在"
+            continue
 
         # 使用内存数据库做验证，不写入磁盘
         q_conn = _create_in_memory_question_db()
