@@ -27,6 +27,7 @@ HARD_ISSUES = {
     "route_mismatch_seat", "route_mismatch_ride",
     "route_invalid", "route_discontinuity", "transfer_time_conflict",
     "start_not_covered", "end_not_covered", "no_route",
+    "no_short_buy_violated", "no_extra_violated",
 }
 # 约束（硬性约束不满足）：每项 -10
 CONSTRAINT_ISSUES = {

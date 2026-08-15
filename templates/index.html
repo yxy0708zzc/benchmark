@@ -8,9 +8,9 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/static/api.js?v=53"></script>
-    <script src="/static/components.js?v=53"></script>
-    <script src="/static/app.js?v=53"></script>
+    <script src="/static/api.js?v=55"></script>
+    <script src="/static/components.js?v=55"></script>
+    <script src="/static/app.js?v=55"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -322,6 +322,15 @@
               <span style="color:var(--gray-4)">-</span>
               <input type="number" class="input" id="sel-max-transfer" value="" min="0" max="600" style="flex:1" placeholder="最长(分钟,留空不限)">
             </div>
+          </div>
+
+          <div style="border:1px solid var(--gray-2);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;background:#fafafa">
+            <label style="font-weight:600">🎯 行为约束（多选，仅选择性题）</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="sel-const-cheapest"> 最便宜</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="sel-const-fastest"> 最快</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="sel-const-no-transfer"> 不允许换乘</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="sel-const-no-short-buy"> 不允许买短补长</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="sel-const-no-extra"> 不允许额外购买</label>
           </div>
 
           <div>

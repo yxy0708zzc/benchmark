@@ -364,6 +364,10 @@ class AutoGenerateRequest(BaseModel):
     arrive_latest: Optional[str] = None    # 最晚到达时间
     min_transfer_minutes: int = 0          # 最短换乘时长（分钟）
     max_transfer_minutes: Optional[int] = None  # 最长换乘时长（分钟，None=不限）
+    # 行为约束（仅选择性题，多选；只作为题目对模型的要求，无标准答案、不影响核查）：
+    #   cheapest 最便宜 / fastest 最快 / no_transfer 不允许换乘 /
+    #   no_short_buy 不允许买短补长 / no_extra 不允许额外购买
+    constraints: List[str] = []
 
 
 # --- POST /api/update_ticket 实时更新余票 ---
@@ -1124,6 +1128,17 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
         if len(req.segment_plans) != req.transfers + 1:
             raise HTTPException(status_code=400, detail=f"段策略数需等于换乘数+1（{req.transfers + 1}）")
 
+    # 行为约束（仅选择性题）：白名单校验（不限制题型选择，约束只是对模型输出的要求）
+    VALID_CONSTRAINTS = {"cheapest", "fastest", "no_transfer", "no_short_buy", "no_extra"}
+    constraints = req.constraints or []
+    invalid = [c for c in constraints if c not in VALID_CONSTRAINTS]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"无效的行为约束: {invalid}")
+    if constraints and mode != "selective":
+        raise HTTPException(status_code=400, detail="行为约束仅选择性题支持")
+    # 不允许换乘时，换乘时长输入无意义 → 置空跳过校验（不限制题型，换乘题也可选该约束）
+    no_transfer = "no_transfer" in constraints
+
     # 选择性问题最短换乘（存在性问题固定 20 分钟）
     min_gap = (req.min_transfer_minutes if req.min_transfer_minutes and req.min_transfer_minutes > 0 else 20) \
         if not fake else 20
@@ -1240,16 +1255,19 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
             solution_segments = solution_result["segments"]
 
             # 选择性问题：校验时间约束（出发/到达区间 + 换乘范围），不满足则重试下一车次
+            # 不允许换乘时换乘时长校验跳过（无跨车次换乘）
+            eff_min_transfer = 0 if no_transfer else req.min_transfer_minutes
+            eff_max_transfer = None if no_transfer else req.max_transfer_minutes
             if with_time_constraints and (
                     req.depart_earliest or req.depart_latest
                     or req.arrive_earliest or req.arrive_latest
-                    or (req.min_transfer_minutes and req.min_transfer_minutes > 0)
-                    or (req.max_transfer_minutes and req.max_transfer_minutes > 0)):
+                    or (eff_min_transfer and eff_min_transfer > 0)
+                    or (eff_max_transfer and eff_max_transfer > 0)):
                 _validate_time_constraints(
                     solution_segments,
                     req.depart_earliest, req.depart_latest,
                     req.arrive_earliest, req.arrive_latest,
-                    req.min_transfer_minutes, req.max_transfer_minutes,
+                    eff_min_transfer, eff_max_transfer,
                     rw_conn,
                 )
 
@@ -1335,6 +1353,7 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
                 "min_transfer_minutes": req.min_transfer_minutes if with_time_constraints else None,
                 "max_transfer_minutes": req.max_transfer_minutes if with_time_constraints else None,
                 "min_gap": min_gap,  # 换乘衔接最短分钟（换方案重跑时复用）
+                "constraints": constraints,  # 行为约束（仅选择性）
                 "question": question_str,
                 "solutions": solution_result.get("solutions"),
                 "chosen_solution": solution_result.get("chosen_solution"),
@@ -1350,6 +1369,7 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_time_constraint
                 "target_section": f"{from_name}→{dest_name}",
                 "path_description": path_desc,
                 "solution_segments": solution_segments,
+                "constraints": constraints,
             }
 
         except HTTPException as e:
@@ -1792,6 +1812,9 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
     # 仅选择性题（有干扰票）才记录干扰密度，存在性题不写入该字段
     if cached.get("interference"):
         meta_kwargs["interference_density"] = cached.get("interference_density")
+    # 行为约束：仅选择性题且非空时落盘（纯要求，无标准答案）
+    if cached.get("constraints"):
+        meta_kwargs["constraints"] = cached.get("constraints")
     update_question_metadata(**meta_kwargs)
 
     # 清除缓存

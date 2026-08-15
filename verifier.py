@@ -383,6 +383,9 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
                     "max_transfer_minutes": meta.get("max_transfer_minutes"),
                 }
             issues.extend(_check_reachability(final_plan, start_id, end_id, time_constraints))
+        # 行为约束检测（仅当对应约束存在时触发）：买短补长 / 额外购买（前、后都算额外购买）
+        if meta.get("constraints"):
+            issues.extend(_check_strategy_constraints(purchase_items, meta.get("constraints")))
     finally:
         conn.close()
         p_conn.close()
@@ -571,6 +574,58 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str,
                         elif mtr_max > 0 and gap > mtr_max:
                             issues.append({"type": "transfer_too_long",
                                            "detail": f"{s1['train_num']}→{s2['train_num']} 换乘 {gap} 分钟，超过最长换乘 {mtr_max} 分钟"})
+    finally:
+        rw_conn.close()
+    return issues
+
+
+def _check_strategy_constraints(purchase_items: List[Dict], constraints: List[str]) -> List[Dict]:
+    """按行为约束检测模型方案的购票策略（**仅当对应约束存在时触发**）。
+
+    - `no_short_buy`：购买区间被乘坐区间**严格包含**（买得比坐得少 → 买短补长）→ no_short_buy_violated
+    - `no_extra`：乘坐区间被购买区间**严格包含**（买得比坐得多 → 额外购买，前/后额外都算）→ no_extra_violated
+    区间关系用同车次经停顺序比较（购买区间与乘坐区间恒等则无问题）。
+    """
+    issues: List[Dict] = []
+    no_short_buy = "no_short_buy" in (constraints or [])
+    no_extra = "no_extra" in (constraints or [])
+    if not (no_short_buy or no_extra):
+        return issues
+    rw_conn = get_railway_conn()
+    try:
+        for item in purchase_items:
+            tn = str(item.get("train_num", ""))
+            f = str(item.get("from_station_id", ""))
+            t = str(item.get("to_station_id", ""))
+            rf = str(item.get("ride_from_station_id") or "")
+            rt = str(item.get("ride_to_station_id") or "")
+            if not (tn and f and t and rf and rt):
+                continue  # 缺乘坐区间的由 missing_ride 处理，此处跳过
+            stops = get_train_stops(rw_conn, tn)
+            ids = [s["station_id"] for s in stops]
+            if f not in ids or t not in ids or rf not in ids or rt not in ids:
+                continue
+            nf, nt, nrf, nrt = ids.index(f), ids.index(t), ids.index(rf), ids.index(rt)
+            if nf >= nt or nrf >= nrt:
+                continue
+            # 买短补长：乘坐区间严格包含购买区间（坐得比买的多）
+            if no_short_buy and nrf <= nf and nt <= nrt and (nrf < nf or nt < nrt):
+                issues.append({
+                    "type": "no_short_buy_violated",
+                    "train_num": tn,
+                    "from_station_id": f,
+                    "to_station_id": t,
+                    "detail": f"题目要求不允许买短补长，但 {tn} 买 {f}→{t}、实际乘坐 {rf}→{rt}（坐得比买得多）",
+                })
+            # 额外购买：购买区间严格包含乘坐区间（买得比坐的多；前、后额外都算）
+            if no_extra and nf <= nrf and nrt <= nt and (nf < nrf or nrt < nt):
+                issues.append({
+                    "type": "no_extra_violated",
+                    "train_num": tn,
+                    "from_station_id": f,
+                    "to_station_id": t,
+                    "detail": f"题目要求不允许额外购买，但 {tn} 买 {f}→{t}、实际乘坐 {rf}→{rt}（买得比坐得多，前/后额外均算）",
+                })
     finally:
         rw_conn.close()
     return issues

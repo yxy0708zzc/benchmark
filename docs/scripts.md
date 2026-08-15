@@ -135,10 +135,11 @@ python server.py                             # 6. 启动服务
 | `people_count` | 缺省 2 | 要求自然隐含人数 |
 | `seat_label` | `seat_type` 经 `SEAT_LABELS` 映射（二等/一等/特等座） | 要求自然隐含座位偏好 |
 | `time_constraint_block` | **仅选择性题**（存在字段才传）：`depart_earliest/latest`、`arrive_earliest/latest`、`min/max_transfer_minutes` 拼成「出发/到达时间区间 + 换乘时长」一行 | 要求自然隐含时间约束（提示词规则 11：用"下午走""八点前到""换乘别等太久"等口语，不报硬性数值） |
+| `constraint_block` | **仅选择性题**（`constraints` 非空才传）：`metadata.constraints` 经 `CONSTRAINT_LABELS` 映射（最便宜/最快/不允许换乘/不允许买短补长/不允许额外购买）拼成一行 | 要求自然隐含行为约束（提示词规则 12：用"就想买最便宜的""别整换乘那套""不要买短补长的票"等口语带出，不报硬性指令） |
 
 **API 请求体（`generate_nl`）**：`model`（默认 `deepseek-v4-flash`）、`messages`（单轮 user）、`temperature=1.9`（提高多样性）、`timeout=60s`。
 
-**刻意不传（防泄露）**：题型、分段策略、标准路径、`answer`、任何车票/余票信息——生成器只"知道"行程、人数、座位等级（以及选择性的时间约束），保证生成的购票需求不含题目答案线索。
+**刻意不传（防泄露）**：题型、分段策略、标准路径、`answer`、任何车票/余票信息——生成器只"知道"行程、人数、座位等级（以及选择性的时间/行为约束），保证生成的购票需求不含题目答案线索。
 
 ### 6.4 落盘
 

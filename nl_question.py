@@ -41,7 +41,7 @@ NL_PROMPT_TEMPLATE = """你是一个想购买高铁票的真实用户。请根�
 题目约束：
 - 行程：{question}
 - 人数：{people_count} 人
-- 期望座位等级：{seat_label}{time_constraint_block}
+- 期望座位等级：{seat_label}{time_constraint_block}{constraint_block}
 
 【生成要求】
 1. 你可以以任何口气说，包括但不限于：尊敬、无奈、请求、无礼
@@ -58,6 +58,7 @@ NL_PROMPT_TEMPLATE = """你是一个想购买高铁票的真实用户。请根�
 9. 要求要适当隐讳
 10. 不要涉及“座位挨着”。不必先从人数开始，座位等级的暗示也可以先提到。
 11. 如果有时间约束（出发/到达时间段、换乘时长），要准确要求。如果没有时间约束，生成语言中也不能有这方面。
+12. 如果有行为约束（如"最便宜""最快""不允许换乘""不允许买短补长""不允许额外购买"），要用购票者口吻自然带出（如"就想买最便宜的""别整换乘那套""不要买短补长的票""不要买长坐短"），不要用"约束：不许X"这种硬性指令；没有该约束就不要提。
 
 [实例]:
 1. 我们五个同事下周要从北京南去上海虹桥，帮忙看看怎么安排最合适，预算有限，实惠点就行。
@@ -68,6 +69,15 @@ SEAT_LABELS = {
     "class2": "二等座",
     "class1": "一等座",
     "class0": "特等座",
+}
+
+# 行为约束中文标签（仅选择性题 metadata.constraints 可能含）
+CONSTRAINT_LABELS = {
+    "cheapest": "最便宜",
+    "fastest": "最快",
+    "no_transfer": "不允许换乘",
+    "no_short_buy": "不允许买短补长",
+    "no_extra": "不允许额外购买",
 }
 
 # 题型中文标签
@@ -133,11 +143,22 @@ def build_time_constraint_text(entry: dict) -> str:
     return "；".join(parts)
 
 
+def build_constraint_text(entry: dict) -> str:
+    """从题目元数据读取行为约束（仅选择性题存有 constraints），拼成一行约束文本；无则空串。"""
+    labels = []
+    for c in entry.get("constraints") or []:
+        lab = CONSTRAINT_LABELS.get(c)
+        if lab:
+            labels.append(lab)
+    return "、".join(labels)
+
+
 def build_prompt(entry: dict) -> str:
     """组装发送给大模型的提示词。
 
     传参：行程 question、人数 people_count、座位等级 seat_label，以及（仅选择性题，
-    存在这些字段才传）时间约束 time_constraint_block（出发/到达区间、换乘时长）。
+    存在这些字段才传）时间约束 time_constraint_block（出发/到达区间、换乘时长）与
+    行为约束 constraint_block（最便宜/最快/不允许换乘等）。
     不传题型、分段策略、标准路径或任何车票信息。
     """
     question = entry.get("question", "")
@@ -146,11 +167,14 @@ def build_prompt(entry: dict) -> str:
     seat_label = SEAT_LABELS.get(seat_type, seat_type)
     tc = build_time_constraint_text(entry)
     time_constraint_block = f"\n- 时间约束：{tc}" if tc else ""
+    cc = build_constraint_text(entry)
+    constraint_block = f"\n- 行为约束：{cc}" if cc else ""
     return NL_PROMPT_TEMPLATE.format(
         question=question,
         people_count=people_count,
         seat_label=seat_label,
         time_constraint_block=time_constraint_block,
+        constraint_block=constraint_block,
     )
 
 
@@ -304,9 +328,12 @@ def main():
             print(f"  题型:   {TYPE_LABELS.get(entry.get('question_type',''), entry.get('question_type','未知'))}")
             _seat = entry.get('seat_type', 'class2')
             _tc = build_time_constraint_text(entry)
+            _cc = build_constraint_text(entry)
             _line = f"  {entry.get('question','')} ｜ {entry.get('people_count', 2)} 人 ｜ {SEAT_LABELS.get(_seat, _seat)}"
             if _tc:
                 _line += f" ｜ 时间：{_tc}"
+            if _cc:
+                _line += f" ｜ 约束：{_cc}"
             print(_line)
             if len(qids) > 1:
                 print(f"  ⚠ 存在性配对：生成一份写回 {len(qids)} 题")

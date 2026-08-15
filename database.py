@@ -477,7 +477,8 @@ def update_question_metadata(question_id: str, status: str,
                              arrive_earliest: str = None,
                              arrive_latest: str = None,
                              min_transfer_minutes: int = None,
-                             max_transfer_minutes: int = None):
+                             max_transfer_minutes: int = None,
+                             constraints: list = None):
     """更新单条题目的元数据"""
     metadata = load_metadata()
     if question_id in metadata:
@@ -528,6 +529,8 @@ def update_question_metadata(question_id: str, status: str,
             entry["min_transfer_minutes"] = min_transfer_minutes
         if max_transfer_minutes is not None:
             entry["max_transfer_minutes"] = max_transfer_minutes
+        if constraints is not None:
+            entry["constraints"] = constraints
         if trains is not None:
             existing = set(entry.get("trains", []))
             existing.update(trains)
@@ -581,6 +584,8 @@ def update_question_metadata(question_id: str, status: str,
             entry["min_transfer_minutes"] = min_transfer_minutes
         if max_transfer_minutes is not None:
             entry["max_transfer_minutes"] = max_transfer_minutes
+        if constraints is not None:
+            entry["constraints"] = constraints
         if trains is not None:
             entry["trains"] = sorted(set(trains))
         metadata[question_id] = entry

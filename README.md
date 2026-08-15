@@ -216,7 +216,8 @@ python server.py
 - 可设置需求人数、答案票等级，以及**时间约束**（仅选择性生效）：
   - 最早/最晚出发（`depart_earliest/latest`，HH:MM）
   - 最早/最晚到达（`arrive_earliest/latest`，HH:MM）
-  - 最短/最长换乘（`min_transfer_minutes` / `max_transfer_minutes`，分钟；留空 = 不限）
+  - 最短/最长换乘（`min_transfer_minutes` / `max_transfer_minutes`，分钟；留空 = 不限；勾选「不允许换乘」时禁用并清空）
+- 可勾选**行为约束**（多选，仅选择性，`constraints`）：最便宜 / 最快 / 不允许换乘 / 不允许买短补长 / 不允许额外购买——作为题目对模型输出的要求，经 `nl_question` 自然化后随购票需求传达给模型（**不限制题型选择**）；核查端**仅在题目声明对应约束时**检测：`no_short_buy` 检查买短补长、`no_extra` 检查额外购买（前/后都算）
 - 核查只校验**全程可达 + 时间约束**，不与标答完全一致（答案多个）
 
 ### 元数据字段（`question/metadata.json`）

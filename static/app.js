@@ -3,6 +3,15 @@
  * 处理导航、全局状态、各页面初始化
  */
 
+// 行为约束 key → 中文标签（选择性题 metadata.constraints）
+const CONSTRAINT_LABELS = {
+  cheapest: '最便宜',
+  fastest: '最快',
+  no_transfer: '不允许换乘',
+  no_short_buy: '不允许买短补长',
+  no_extra: '不允许额外购买',
+};
+
 const App = {
   /** 当前题目 ID */
   currentQuestionId: null,
@@ -1215,7 +1224,7 @@ const App = {
       };
     }
 
-    // 题型切换显示混合配置
+    // 题型切换显示混合配置 + 行为约束联动
     const typeSelect = document.getElementById('sel-question-type');
     if (typeSelect) {
       typeSelect.onchange = function() {
@@ -1225,8 +1234,16 @@ const App = {
           mixedConfig.style.display = show ? 'block' : 'none';
           if (show) App._renderSegmentPlans('sel');
         }
+        App._applySelectiveConstraintUI();
       };
     }
+
+    // 行为约束联动：不允许换乘 ↔ 换乘时长输入
+    const noTransferBox = document.getElementById('sel-const-no-transfer');
+    if (noTransferBox) {
+      noTransferBox.onchange = () => this._applySelectiveConstraintUI();
+    }
+    this._applySelectiveConstraintUI();
 
     // 换乘次数变化时重新渲染
     document.addEventListener('change', function(e) {
@@ -1249,6 +1266,23 @@ const App = {
     });
   },
 
+  /** 收集选择性表单勾选的行为约束 */
+  _selectedConstraints: function() {
+    const keys = ['cheapest', 'fastest', 'no_transfer', 'no_short_buy', 'no_extra'];
+    return keys.filter(k => document.getElementById('sel-const-' + k)?.checked);
+  },
+
+  /** 行为约束联动：勾选「不允许换乘」→ 禁用并清空换乘时长输入（不限制题型选择） */
+  _applySelectiveConstraintUI: function() {
+    const noTransfer = document.getElementById('sel-const-no-transfer');
+    const minT = document.getElementById('sel-min-transfer');
+    const maxT = document.getElementById('sel-max-transfer');
+    if (!noTransfer) return;
+    const checked = noTransfer.checked;
+    if (minT) { minT.disabled = checked; if (checked) minT.value = ''; }
+    if (maxT) { maxT.disabled = checked; if (checked) maxT.value = ''; }
+  },
+
   /** 选择性出题 */
   _onSelectiveGenerate: async function() {
     const form = {
@@ -1268,6 +1302,7 @@ const App = {
       min_transfer_minutes: parseInt(document.getElementById('sel-min-transfer')?.value || '0', 10) || 0,
       max_transfer_minutes: parseInt(document.getElementById('sel-max-transfer')?.value || '', 10) || null,
       custom_qid: document.getElementById('sel-output-qid')?.value.trim() || '',
+      constraints: this._selectedConstraints(),
     };
 
     // 题目名必填
@@ -1343,6 +1378,7 @@ const App = {
           <div><strong>需求人数：</strong>${document.getElementById('sel-people-count')?.value || '2'} 人</div>
           <div><strong>答案票等级：</strong>${document.getElementById('sel-seat-type')?.value || 'class2'}</div>
           <div><strong>干扰密度：</strong>${Math.round(parseFloat(density) * 100)}%</div>
+          <div><strong>行为约束：</strong>${(preview.constraints && preview.constraints.length) ? preview.constraints.map(c => CONSTRAINT_LABELS[c] || c).join('、') : '无'}</div>
           <div><strong>目标区间：</strong>${preview.target_section}</div>
           <div><strong>路径描述：</strong>${pathDesc}</div>
           <div><strong>合法解（有票段）：</strong></div>
@@ -1752,6 +1788,8 @@ const App = {
         'start_not_covered': { label: '未连接出发站', color: '#dc2626', group: '硬错误' },
         'end_not_covered': { label: '未连接到达站', color: '#dc2626', group: '硬错误' },
         'no_route': { label: '无法构成全程', color: '#dc2626', group: '硬错误' },
+        'no_short_buy_violated': { label: '违反不允许买短补长', color: '#dc2626', group: '硬错误' },
+        'no_extra_violated': { label: '违反不允许额外购买', color: '#dc2626', group: '硬错误' },
         'transfer_too_short': { label: '换乘时间不足', color: '#f59e0b', group: '约束' },
         'transfer_too_long': { label: '换乘时间过长', color: '#f59e0b', group: '约束' },
         'depart_time_violation': { label: '出发时间不符', color: '#f59e0b', group: '约束' },
