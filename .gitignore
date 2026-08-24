@@ -8,6 +8,7 @@ secrets*.py
 config.local.*
 *local_config.py
 *_api_key*.txt
+__pycache__
 
 # Python 常规缓存（无需上传）
 __pycache__/
