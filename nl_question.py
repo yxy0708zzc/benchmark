@@ -5,9 +5,12 @@
 调用大模型将僵硬的"出发站到到达站"表述转化为自然、口语化的购票需求，
 经人工确认后写回 metadata.json 的 nl_question 字段（原 question 保留）。
 
-一致性：存在性题（0_/1_）按「基础题号 + 内容」（行程/人数/座位/时间约束）分组，
+一致性：存在性题（0_/1_）按「基础题号 + 内容」（行程/人数/座位/评判标准/行为约束）分组，
 一组生成一份自然语言并写回组内全部题目 —— 保证 0_/1_ 除干扰外完全一致；
 不同题号（如 0_34 与 0_35）即使内容相同也不合并，各自独立生成。
+选择性题额外携带评判标准（criterion：综合考虑/最快/最便宜/出发最晚/最早到达）
+与行为约束（constraints：不允许换乘 / 不允许买短补长与额外购买），
+仅作为题目对模型的优化/行为要求，经自然语言传达给模型。
 
 用法：
     python nl_question.py                         # 交互式填写 API/模型/URL（默认跳过已保存的）
@@ -41,7 +44,7 @@ NL_PROMPT_TEMPLATE = """你是一个想购买高铁票的真实用户。请根�
 题目约束：
 - 行程：{question}
 - 人数：{people_count} 人
-- 期望座位等级：{seat_label}{time_constraint_block}{constraint_block}
+- 期望座位等级：{seat_label}{criterion_block}{constraint_block}
 
 【生成要求】
 1. 你可以以任何口气说，包括但不限于：尊敬、无奈、请求、无礼
@@ -57,8 +60,8 @@ NL_PROMPT_TEMPLATE = """你是一个想购买高铁票的真实用户。请根�
 8. 约束的语序要随机，可以任意布置约束的要求，口语词也可以有
 9. 要求要适当隐讳
 10. 不要涉及“座位挨着”。不必先从人数开始，座位等级的暗示也可以先提到。
-11. 如果有时间约束（出发/到达时间段、换乘时长），要准确要求。如果没有时间约束，生成语言中也不能有这方面。
-12. 如果有行为约束（如"最便宜""最快""不允许换乘""不允许买短补长""不允许额外购买"），要用购票者口吻自然带出（如"就想买最便宜的""别整换乘那套""不要买短补长的票""不要买长坐短"），不要用"约束：不许X"这种硬性指令；没有该约束就不要提。
+11. 如果有评判标准（综合考虑/最快/最便宜/出发最晚/最早到达），要用购票者口吻自然带出（如"综合考虑看看""越快越好""实惠点就行""尽量晚点出发""尽量早点到"），不要用"约束：评判标准X"这种硬性指令；没有该标准就不要提。
+12. 如果有行为约束（不允许换乘、不允许买短补长与额外购买），要用购票者口吻自然带出（如"别整换乘那套""不要买短补长的票""不要买长坐短"），不要用"约束：不许X"这种硬性指令；没有该约束就不要提。
 
 [实例]:
 1. 我们五个同事下周要从北京南去上海虹桥，帮忙看看怎么安排最合适，预算有限，实惠点就行。
@@ -71,13 +74,19 @@ SEAT_LABELS = {
     "class0": "特等座",
 }
 
+# 评判标准中文标签（仅选择性题 metadata.criterion，单选）
+CRITERION_LABELS = {
+    "comprehensive": "综合考虑",
+    "fastest": "最快",
+    "cheapest": "最便宜",
+    "depart_latest": "出发最晚",
+    "arrive_earliest": "最早到达",
+}
+
 # 行为约束中文标签（仅选择性题 metadata.constraints 可能含）
 CONSTRAINT_LABELS = {
-    "cheapest": "最便宜",
-    "fastest": "最快",
     "no_transfer": "不允许换乘",
-    "no_short_buy": "不允许买短补长",
-    "no_extra": "不允许额外购买",
+    "no_short_buy_extra": "不允许买短补长与额外购买",
 }
 
 # 题型中文标签
@@ -104,43 +113,14 @@ def save_metadata(metadata_path: str, metadata: dict):
         json.dump(metadata, f, ensure_ascii=False, indent=2)
 
 
-def build_time_constraint_text(entry: dict) -> str:
-    """从题目元数据读取时间约束（仅选择性题存有），拼成一行约束文本。
+def build_criterion_text(entry: dict) -> str:
+    """从题目元数据读取评判标准（仅选择性题存有 criterion，单选），拼成一行文本；无则空串。
 
-    读取字段：depart_earliest/latest、arrive_earliest/latest（HH:MM）、
-    min/max_transfer_minutes（分钟；0/缺省=不限）。存在性题无这些字段 → 返回空串。
+    评判标准值：comprehensive 综合考虑 / fastest 最快 / cheapest 最便宜 /
+    depart_latest 出发最晚 / arrive_earliest 最早到达。
     """
-    de = entry.get("depart_earliest")
-    dl = entry.get("depart_latest")
-    ae = entry.get("arrive_earliest")
-    al = entry.get("arrive_latest")
-    mn = entry.get("min_transfer_minutes")
-    mx = entry.get("max_transfer_minutes")
-
-    def _time_range(lo, hi, verb_lo, verb_hi):
-        if lo and hi:
-            return f"{lo}~{hi}"
-        if lo:
-            return f"{verb_lo} {lo}"
-        if hi:
-            return f"{verb_hi} {hi}"
-        return ""
-
-    parts = []
-    dep = _time_range(de, dl, "不早于", "不晚于")
-    if dep:
-        parts.append(f"出发时间 {dep}")
-    arr = _time_range(ae, al, "不早于", "不晚于")
-    if arr:
-        parts.append(f"到达时间 {arr}")
-    if mn or mx:
-        if mn and mx:
-            parts.append(f"换乘 {mn}~{mx} 分钟")
-        elif mn:
-            parts.append(f"换乘至少 {mn} 分钟")
-        else:
-            parts.append(f"换乘至多 {mx} 分钟")
-    return "；".join(parts)
+    lab = CRITERION_LABELS.get(entry.get("criterion"))
+    return lab or ""
 
 
 def build_constraint_text(entry: dict) -> str:
@@ -157,23 +137,23 @@ def build_prompt(entry: dict) -> str:
     """组装发送给大模型的提示词。
 
     传参：行程 question、人数 people_count、座位等级 seat_label，以及（仅选择性题，
-    存在这些字段才传）时间约束 time_constraint_block（出发/到达区间、换乘时长）与
-    行为约束 constraint_block（最便宜/最快/不允许换乘等）。
+    存在这些字段才传）评判标准 criterion_block（综合考虑/最快/最便宜/出发最晚/最早到达）与
+    行为约束 constraint_block（不允许换乘 / 不允许买短补长与额外购买）。
     不传题型、分段策略、标准路径或任何车票信息。
     """
     question = entry.get("question", "")
     people_count = entry.get("people_count", 2)
     seat_type = entry.get("seat_type", "class2")
     seat_label = SEAT_LABELS.get(seat_type, seat_type)
-    tc = build_time_constraint_text(entry)
-    time_constraint_block = f"\n- 时间约束：{tc}" if tc else ""
+    cr = build_criterion_text(entry)
+    criterion_block = f"\n- 评判标准：{cr}" if cr else ""
     cc = build_constraint_text(entry)
     constraint_block = f"\n- 行为约束：{cc}" if cc else ""
     return NL_PROMPT_TEMPLATE.format(
         question=question,
         people_count=people_count,
         seat_label=seat_label,
-        time_constraint_block=time_constraint_block,
+        criterion_block=criterion_block,
         constraint_block=constraint_block,
     )
 
@@ -236,7 +216,7 @@ def _existence_base(qid: str) -> str:
 
 
 def _group_existence(raw_targets):
-    """把存在性题按「基础题号 + 内容」分组：提示词输入相同的题目（行程 / 人数 / 座位 / 时间约束）
+    """把存在性题按「基础题号 + 内容」分组：提示词输入相同的题目（行程 / 人数 / 座位 / 评判标准 / 行为约束）
     共用同一份自然语言 —— 保证 0_ / 1_ 除干扰外完全一致；
     不同题号（如 0_34 与 0_35）即使内容相同也不合并，各自独立生成。
     非存在性题（选择性等）各自独立成组。
@@ -252,7 +232,8 @@ def _group_existence(raw_targets):
                 entry.get("question", ""),
                 entry.get("people_count", 2),
                 entry.get("seat_type", "class2"),
-                build_time_constraint_text(entry),
+                build_criterion_text(entry),
+                build_constraint_text(entry),
             )
             if key not in by_key:
                 by_key[key] = {"qids": [], "entries": []}
@@ -327,11 +308,11 @@ def main():
             print(f"[{idx}/{len(target_groups)}] 组: {', '.join(qids)}")
             print(f"  题型:   {TYPE_LABELS.get(entry.get('question_type',''), entry.get('question_type','未知'))}")
             _seat = entry.get('seat_type', 'class2')
-            _tc = build_time_constraint_text(entry)
+            _cr = build_criterion_text(entry)
             _cc = build_constraint_text(entry)
             _line = f"  {entry.get('question','')} ｜ {entry.get('people_count', 2)} 人 ｜ {SEAT_LABELS.get(_seat, _seat)}"
-            if _tc:
-                _line += f" ｜ 时间：{_tc}"
+            if _cr:
+                _line += f" ｜ 评判标准：{_cr}"
             if _cc:
                 _line += f" ｜ 约束：{_cc}"
             print(_line)

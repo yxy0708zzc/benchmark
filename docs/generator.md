@@ -11,16 +11,17 @@
 
 | 参数 | 说明 | 适用 |
 |---|---|---|
-| 题型（question_type） | transfer / short_buy / extra_front / extra_rear / mixed | 全部 |
+| 题型（question_type） | transfer / short_buy / extra_front / extra_rear / mixed；存在性必传；选择性缺省由行为约束自动推导（no_transfer→short_buy，否则→transfer） | 全部 |
 | 出发站 / 到达站 | 支持中文站名或电报码 | 全部 |
 | 需求人数（people_count） | 答案票数 1~1.5×人数随机（保证 ≥ 人数，上限 20） | 全部 |
 | 答案票等级（seat_type） | class0 特等 / class1 一等 / class2 二等 | 全部 |
 | 伪干扰开关（fake_interference） | 存在性是否额外生成 `1_` 伪干扰（False=仅 `0_`） | 存在性 |
 | 干扰密度（interference_density） | 干扰票数占**全局候选池**的比例（0~5%，默认 2%，步长 0.1%） | `1_` / `2_` |
 | 换乘次数 / 各段策略 | 仅混合题型 | `mixed` |
-| 时间约束（出发/到达/换乘） | 最早/最晚出发、最早/最晚到达、最短/最长换乘 | 仅 `2_` |
-| 行为约束（constraints，多选） | 最便宜 / 最快 / 不允许换乘 / 不允许买短补长 / 不允许额外购买；**仅 `2_`**，纯题目要求、无标准答案 | 仅 `2_` |
+| 评判标准（criterion，单选必选） | comprehensive 综合考虑（默认）/ fastest 最快 / cheapest 最便宜 / depart_latest 出发最晚 / arrive_earliest 最早到达；**仅 `2_`**，是对模型的优化目标、无标准答案 | 仅 `2_` |
+| 行为约束（constraints，多选） | no_transfer 不允许换乘 / no_short_buy_extra 不允许买短补长与额外购买；**仅 `2_`**，纯题目要求，核查端硬校验 | 仅 `2_` |
 | 题目名（custom_qid） | 前缀由系统自动添加，与输入无关 | 全部 |
+| 需求人数缺省 | `people_count` 缺省时服务端随机 3~6；手动页每次进入/重新出题自动随机 3~6（可手动改） | 全部 |
 
 ---
 
@@ -55,7 +56,7 @@
 
 **核心一枚举（`_find_transfer_solutions`）**：对一辆 T，用一次 SQL（`IN` 全部中间站 + JOIN 终点 B）枚举出所有满足「U 过 M 后过 B、U≠T、T到M+最短换乘 ≤ U从M出发」的 (M, U) 方案，再**均匀随机**挑一个——命中率 100%，替代原先“逐中间站碰运气重试”。混合题型逐段的候选同样复用该枚举（`_find_transfer_trains` 为其单中间站包装）。
 
-**换方案（`POST /api/auto_generate/swap`）**：预览阶段可「不变第一程车 T，换一组合法方案」——**换乘题**从该 T 已枚举的 (M,U) 列表里重新均匀随机挑一个（排除当前）；**混合题**同一 T 重新随机选中间站与各段换乘车次（重跑 mixed 合法解，直到与当前不同）。重建预览并重新校验时间约束（选择性题）；存在性配对 0_/1_ 会**同步换到同一方案**，保持两者一致。
+**换方案（`POST /api/auto_generate/swap`）**：预览阶段可「不变第一程车 T，换一组合法方案」——**换乘题**从该 T 已枚举的 (M,U) 列表里重新均匀随机挑一个（排除当前）；**混合题**同一 T 重新随机选中间站与各段换乘车次（重跑 mixed 合法解，直到与当前不同）。重建预览；存在性配对 0_/1_ 会**同步换到同一方案**，保持两者一致。
 
 ### 2.3 混合题实现（`mixed`）
 
@@ -106,32 +107,24 @@ selected = shuffle(全局候选池)[:n]
 
 ### 2.5 出题校验
 
-- **换乘衔接**：后车发车 ≥ 前车到达 + 最短换乘（存在性固定 20，选择性可配置）
-- **时间约束**（仅选择性 `2_`）：首段出发 / 末段到达在允许区间；跨车次换乘在最短/最长之间
+- **换乘衔接**：后车发车 ≥ 前车到达 + 20 分钟（所有题型固定 20；时间约束配置已整体移除）
 - **内层失败一律回外层重试（`_RetryTrainError`）**：`_write_legal_solution` 内层所有"找不到合法解"（transfer 无中间站/换乘车次、short_buy/extra 前后站不足、mixed 各段无候选等 13 处）统一抛 `_RetryTrainError`；外层 `_generate_one_variant` 捕获后换下一辆 T 重试（最多 15 个），**不会内层找不到直接报错**，仅全部 T 失败才返回 400
-- 时间约束不满足 → 同样换下一车次重试（最多 15 个）
 
 ---
 
 ## 三、题型变体 `0_` / `1_` / `2_`（在核心逻辑上添加的不同内容）
 
-三个变体共用**同一套核心出题逻辑**与同一合法解（`0_`/`1_` 共用同一随机种子 → 同一车次同一合法解），仅在"干扰"与"时间约束"上不同：
+三个变体共用**同一套核心出题逻辑**与同一合法解（`0_`/`1_` 共用同一随机种子 → 同一车次同一合法解），仅在"干扰"与"约束内容"（评判标准/行为约束仅 `2_`）上不同：
 
 | 变体 | 添加内容 | 效果 | 核查 |
 |---|---|---|---|
 | `0_` | **无干扰**（不注入任何干扰票） | 只有合法解路径有票 → 答案唯一 | 对标标准答案 |
 | `1_` | **伪干扰**（票数严格 < 人数，`randint(1,人数-1)`） | 干扰路径票数不足 → 答案仍唯一 | 对标标准答案 |
-| `2_` | **真干扰**（票数 `0.5~1.5×人数`）+ **时间约束** | 多条可行路径 → 答案多个 | 全程可达 + 时间约束 |
+| `2_` | **真干扰**（票数 `0.5~1.5×人数`） | 多条可行路径 → 答案多个 | 全程可达 + 行为约束硬校验 |
 
 > 存在性出题：`0_` 必出；勾选「加入伪干扰」时额外生成 `1_`（`0_`/`1_` 共用同一随机种子 → 同一车次同一合法解，仅干扰不同）。
 
-时间约束仅 `2_` 启用：
-
-| 约束 | 校验 |
-|---|---|
-| 出发时间 | 首段发车 ∈ [最早出发, 最晚出发] |
-| 到达时间 | 末段到达 ∈ [最早到达, 最晚到达] |
-| 换乘时间 | 跨车次换乘 ∈ [最短换乘, 最长换乘]（分钟） |
+> 时间约束配置已整体移除（不再有出发/到达/换乘时间窗口）。换乘衔接固定 20 分钟。
 
 ---
 
@@ -142,7 +135,8 @@ selected = shuffle(全局候选池)[:n]
 | `type`（核查分类） | 存在性 | 选择性 |
 | `question_mode` | existence | selective |
 | `interference_mode` | `0_` 无干扰不存 / `1_` fake | real |
-| 时间约束 5 字段 | **不存** | **存** |
+| `criterion`（评判标准） | 不存 | 存 |
+| `constraints`（行为约束） | 不存 | 存（非空时） |
 | `ground_truth`（结构化标答） | 存（对标用） | 存 |
 | `start_station_id` / `end_station_id` | 存 | 存 |
 | `people_count` / `seat_type` | 存 | 存 |
@@ -157,9 +151,27 @@ selected = shuffle(全局候选池)[:n]
 - **防逃逸**：换乘/混合的首车不经过终点站；混合非末段买短补长排除经过终点的车次；`2_` 真干扰全局禁直达 `(A,B)`、transfer/mixed 另禁“买短补长到 B”（见 2.4）
 - **规模约束**：需求人数上限 20（答案票 1~1.5×人数 ≤ 30、真干扰票数 ≤ 1.5×20=30）；余票上限 1000（宽松兜底，DB `CHECK(tickets<=1000)`）
 - **题号查重**：`custom_qid` 与自动题号都会查重——`question/*.db` 文件、`metadata.json`、内存预览缓存**任一命中即视为占用**，换下一车次重试（防止覆盖同名题；2026-08-15 修复：原逻辑只查 db 文件与缓存，漏查 metadata、且自动题号完全不查重）
-- **行为约束（仅 `2_`，2026-08-15）**：`constraints` 多选（最便宜/最快/不允许换乘/不允许买短补长/不允许额外购买）**不限制题型选择**（transfer/mixed 也可选"不允许换乘"），是**对模型输出的要求**，经 nl_question 自然化传达。`no_transfer` 时跳过换乘时长校验（换乘时长输入无意义）。落盘 `metadata.constraints`；**核查端仅在题目声明对应约束时触发**：`no_short_buy` 检测买短补长、`no_extra` 检测额外购买（前/后都算）→ `no_short_buy_violated`/`no_extra_violated`
+- **评判标准与行为约束（仅 `2_`，2026-08-26）**：`criterion` 单选（comprehensive/fastest/cheapest/depart_latest/arrive_earliest）为**优化目标**，经 nl_question 自然化传达、不参与核查；`constraints` 多选（`no_transfer` / `no_short_buy_extra`）**不限制题型选择**，是**对模型输出的硬校验要求**：`no_transfer` → 方案含跨车次换乘即 `no_transfer_violated`；`no_short_buy_extra` → 检出买短补长（`no_short_buy_violated`）或额外购买（`no_extra_violated`，前/后都算）
 - **数据完整性**：票价全覆盖由数据清洗脚本保证（`cleanup_incomplete_trains.py` 无参数一键清理），出题不依赖票价存在性
 
 ---
 
-*文档版本：2026-08-12 · 对应实现：server.py（`_generate_one_variant` / `_write_legal_solution` / `_add_interference_all_trains`（全局池）/ `_get_all_stops_cached` / `_find_transfer_solutions`（核心一枚举）/ `_build_transfer_segments` / `_build_transfer_preview` / `api_auto_generate_swap`）、config.py（QUESTION_CONFIG）、database.py（metadata）、question/*.db（题目余票库）*
+## 六、批量出题（`/api/batch/*`）
+
+**输入**：① 1.xlsx 题目分布表（`POST /api/batch/parse-distribution` 解析，前端可编辑）；② 2.xlsx 到发站对（`POST /api/batch/parse-stations`，出题时**随机站对 + 随机倒置方向 + 允许重复**）；③ 座位等级比例（前端输入 class0/class1/class2 百分比，总和必须 100%，每题按权重**随机抽取**，与人数/站对/题型独立）；④ 干扰密度（默认 2%）；⑤ 每题重试上限（默认 40）；⑥ `nl_enabled`（默认开，落盘后自动生成自然语言写回 `metadata['nl_question']`，需 .env `NL_API_KEY`）
+
+**策略映射**（1.xlsx 分布表 → 出题参数）：
+| 分布行 | 题型参数 |
+|---|---|
+| 单策略：换乘 / 买短补长 / 额外购买（前）/ 额外购买（后） | `transfer` / `short_buy` / `extra_front` / `extra_rear`（transfers=0） |
+| 双策略：X+换乘 | `mixed` transfers=1，段策略 `[direct, X]`（前半段直达 + 后半段指定策略） |
+| 三策略：X+Y | `mixed` transfers=1，段策略 `[X, Y]`（前后两段都有策略） |
+| 选择性区：评判标准 × 行为约束 × 数量 | `2_` 真干扰，`criterion` + `constraints`（行为约束映射：不允许换乘→`no_transfer`；不允许买短补长与额外购买→`no_short_buy_extra`） |
+
+**生成流程**：每题固定参数（站对/方向/人数 3~6 随机/座位按权重随机）**重试 ≤ 40 次**（每次=一次完整 `_generate_one_variant`，成功即经 `_confirm_generated_question` 直接落盘）；选择性题题型由行为约束推导（同手动页规则）；全部落盘后若开启 `nl_enabled`，依次对成功题目 `build_prompt` + `generate_nl`（复用 nl_question.py 的评判标准/行为约束自然化）写回 `metadata['nl_question']`——单题自然语言失败不影响题目本身，结果汇总中给出 generated/failed/skipped 统计；随后返回逐题结果 + 汇总 + 失败回执数据。
+
+**单进度条**：`GET /api/batch/status` 返回 `done_count/total` 单一总进度（存在性 + 选择性合计）+ 当前任务，前端轮询渲染。
+
+**失败回执 xlsx**（`POST /api/batch/report`）：布局与 1.xlsx 同构——存在性区每行 = 类别/名称/有干扰失败数/无干扰失败数；选择性区每行 = 评判标准/行为约束/失败数；顶部 A1-B3 = 总题目/成功/总失败数。题号沿用原名规则 `前缀+时间戳+序号`（如 `2_20260812_102638_0001`）。
+
+*文档版本：2026-08-26 · 对应实现：server.py（`_generate_one_variant` / `_write_legal_solution` / `_add_interference_all_trains`（全局池）/ `_get_all_stops_cached` / `_find_transfer_solutions`（核心一枚举）/ `_swap_transfer` / `_swap_mixed` / `_confirm_generated_question` / 批量端点 `_run_batch`）、config.py（QUESTION_CONFIG）、database.py（metadata）、verifier.py（行为约束硬校验）、question/*.db（题目余票库）*

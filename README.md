@@ -9,9 +9,9 @@
 | 模块 | 说明 |
 |------|------|
 | **数据爬取** | 基于 12306 真实车次、经停站、票价数据 |
-| **出题器** | 存在性自动（`0_` 无干扰必出 + 勾选伪干扰时另出 `1_`）/ 选择性自动（`2_` 真干扰，可配时间约束） |
+| **出题器** | 存在性自动（`0_` 无干扰必出 + 勾选伪干扰时另出 `1_`）/ 选择性自动（`2_` 真干扰，可配评判标准与行为约束）/ **批量出题**（上传 1.xlsx 分布表 + 2.xlsx 站对表，单进度条一键生成落盘 + 自动自然语言化 + 失败回执） |
 | **测试器** | 对话式测试，调用大模型并处理工具调用循环 |
-| **测评器** | 核查 final_plan：购买/乘坐双区间；分类按 `type`——存在性对标标答、选择性校全程可达+时间约束；verdict 分 `pass`/`hallucination`/`no_plan`/`empty_plan`/`db_not_found` |
+| **测评器** | 核查 final_plan：购买/乘坐双区间；分类按 `type`——存在性对标标答、选择性校全程可达+行为约束（含 `no_transfer_violated`）；verdict 分 `pass`/`hallucination`/`no_plan`/`empty_plan`/`db_not_found` |
 | **统计** | 完成率、幻觉率、平均分、Token 效率等指标与报告 |
 
 ---
@@ -123,8 +123,18 @@ python server.py
 
 **② 选择性自动出题（「选择性问题出题」标签）—— 生成一份**
 - 前缀 `2_`，答案**多个**，添加真干扰（票数 0.5~1.5×人数，可调干扰密度）
-- 可配置**时间约束**（最早/最晚出发、最早/最晚到达、最短/最长换乘）
-- 生成的题目模型需**筛选可行且满足约束的最优方案**（核查只校验全程可达 + 时间约束，不做标答对标）
+- **评判标准**（单选必选，默认综合考虑）：综合考虑 / 最快 / 最便宜 / 出发最晚 / 最早到达——作为题目对模型的优化目标，经 `nl_question` 自然化传达，不参与核查硬校验
+- **行为约束**（可多选）：不允许换乘 / 不允许买短补长与额外购买——作为题目对模型的要求，**参与核查硬校验**（换乘 → `no_transfer_violated`；买短补长/额外购买 → `no_short_buy_violated` / `no_extra_violated`）
+- 生成的题目模型需**筛选可行且满足约束的最优方案**（核查只校验全程可达 + 行为约束，不做标答对标）
+
+**③ 批量出题（「批量出题」标签）**
+1. 上传 **1.xlsx**（题目分布表，同一格式）→ 解析为可编辑表格（存在性区：单/双/三策略 × 有干扰/无干扰；选择性区：评判标准 × 行为约束 × 数量），单元格可直接修改；
+2. 上传 **2.xlsx**（到发站对，可倒置）→ 展示站对表（可编辑），出题时**随机选取站对、方向随机可倒置、允许重复**；
+3. 填写**座位等级比例**（特等/一等/二等，总和必须 100%，完全由前端输入、非随机），每题按比例加权随机抽取；**干扰密度**滑条（默认 2%）；**每题重试上限**（默认 40 次，固定参数重试直到成功）；可选勾选**批量后自动生成自然语言**（写回 `nl_question`，需 .env `NL_API_KEY`）；
+4. 选择性题题型由行为约束自动推导（不允许换乘→买短补长；否则→换乘，保证有解），手动/批量一致，无需指定；
+5. 点击「开始批量出题」→ **一键生成并直接落盘**：**单进度条**（存在性 + 选择性合计）实时显示，每题显示实际尝试次数，落盘后自动执行自然语言化；
+6. 完成后可下载**失败回执 xlsx**（布局与 1.xlsx 同构，每格=该格失败题数，顶部=总失败数）；题号沿用原名规则 `前缀+时间戳+序号`（如 `2_20260812_102638_0001`）；
+7. 人数规则：**每道题独立随机 3~6**（手动页每次进入/重新出题同样自动随机 3~6，仍可手动修改）。
 
 > 生成的题目保存在 `question/*.db`，元数据在 `question/metadata.json`。
 
@@ -184,6 +194,15 @@ python server.py
 | `/api/question/{qid}` | DELETE | 删除题目 |
 | `/api/update_ticket` | POST | 实时更新余票 |
 
+### 批量出题
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/batch/parse-distribution` | POST | 上传 1.xlsx 解析题目分布表（multipart `file`）→ 可编辑分布结构 |
+| `/api/batch/parse-stations` | POST | 上传 2.xlsx 解析到发站对（multipart `file`） |
+| `/api/batch/generate` | POST | 启动批量出题（分布+站对+座位比例+密度+重试上限+选择性题型），线程内一键生成并直接落盘 |
+| `/api/batch/status` | GET | 批量进度（`done_count/total` 单进度条 + 当前任务 + 结果，含自然语言化统计） |
+| `/api/batch/report` | POST | 生成失败回执 xlsx（布局与 1.xlsx 同构，每格=失败数，顶部=总失败数） |
+
 ### 测试器 / 测评器 / 统计
 | 接口 | 方法 | 说明 |
 |------|------|------|
@@ -208,17 +227,16 @@ python server.py
 - 点击「生成并预览」至少出 `0_`（同一车次、同一合法解）；**勾选「加入伪干扰」时额外出 `1_`**（两份共用同一随机种子保证一致）：
   - **`0_` 无干扰**：完全不加干扰票，只有答案路径有票 → **唯一解**，核查用**对标标答**（完全一致）
   - **`1_` 伪干扰**：干扰票数**严格 < 人数**（制造"看起来像但票不够"的干扰项），仍保证唯一解，核查用对标标答
-- 可设置**需求人数**（答案票数 1~1.5×人数随机、保证 ≥ 人数，上限 20）和**答案票等级**（class0/1/2）；干扰密度滑条 **0~5%**（默认 2%，步长 0.1%，仅对 `1_` 生效，`0_` 无干扰）
+- 可设置**需求人数**（每次进入页面或点击「重新出题」时自动随机 3~6，仍可手动修改；答案票数 1~1.5×人数随机、保证 ≥ 人数）和**答案票等级**（class0/1/2）；干扰密度滑条 **0~5%**（默认 2%，步长 0.1%，仅对 `1_` 生效，`0_` 无干扰）
 
 ### 2. 选择性自动出题（前缀 `2_`，答案多个）
 - 只生成**一份**，前缀 `2_`
 - 添加**真干扰**（票数 0.5~1.5×人数、等级随机），密度滑条 **0~5%**（默认 2%，步长 0.1%）
-- 可设置需求人数、答案票等级，以及**时间约束**（仅选择性生效）：
-  - 最早/最晚出发（`depart_earliest/latest`，HH:MM）
-  - 最早/最晚到达（`arrive_earliest/latest`，HH:MM）
-  - 最短/最长换乘（`min_transfer_minutes` / `max_transfer_minutes`，分钟；留空 = 不限；勾选「不允许换乘」时禁用并清空）
-- 可勾选**行为约束**（多选，仅选择性，`constraints`）：最便宜 / 最快 / 不允许换乘 / 不允许买短补长 / 不允许额外购买——作为题目对模型输出的要求，经 `nl_question` 自然化后随购票需求传达给模型（**不限制题型选择**）；核查端**仅在题目声明对应约束时**检测：`no_short_buy` 检查买短补长、`no_extra` 检查额外购买（前/后都算）
-- 核查只校验**全程可达 + 时间约束**，不与标答完全一致（答案多个）
+- 可设置需求人数（进入页面/重新出题时自动随机 3~6，仍可手动修改）和答案票等级
+- **题型由行为约束自动推导**（手动/批量一致，保证有解）：勾选「不允许换乘」→ 题型=买短补长；否则（无约束或仅「不允许买短补长与额外购买」）→ 题型=换乘；前端不再需要选择题型
+- **评判标准**（单选必选，`criterion`）：`comprehensive` 综合考虑（默认）/ `fastest` 最快 / `cheapest` 最便宜 / `depart_latest` 出发最晚 / `arrive_earliest` 最早到达——仅作为题目对模型的优化目标，经 `nl_question` 自然化传达，不参与核查
+- 可勾选**行为约束**（多选，`constraints`）：`no_transfer` 不允许换乘 / `no_short_buy_extra` 不允许买短补长与额外购买——作为题目对模型输出的要求，经 `nl_question` 自然化传达；核查端**仅在题目声明对应约束时**硬校验：`no_transfer` → 方案含跨车次换乘判定 `no_transfer_violated`；`no_short_buy_extra` → 检出买短补长（`no_short_buy_violated`）或额外购买（`no_extra_violated`，前/后都算）
+- 核查只校验**全程可达 + 行为约束**，不与标答完全一致（答案多个）
 
 ### 元数据字段（`question/metadata.json`）
 生成确认后写入：
@@ -228,14 +246,15 @@ python server.py
 - `interference_mode`：真实干扰类型（`fake`=伪干扰、`real`=真干扰；无干扰题不存）
 - `ground_truth`：结构化标准答案（含购买+乘坐区间 id），供存在性对标
 - `start_station_id` / `end_station_id`：真实 A/B 站，供可达性校验
-- 时间约束 5 字段：仅选择性题存储
+- `criterion`：评判标准（仅选择性题，`comprehensive/fastest/cheapest/depart_latest/arrive_earliest`）
+- `constraints`：行为约束（仅选择性题且非空时：`no_transfer` / `no_short_buy_extra`）
 
 ### 支持题型
 `transfer`（换乘）/ `short_buy`（买短补长）/ `extra_front`（额外前）/ `extra_rear`（额外后）/ `mixed`（混合，每段可独立选策略）
 
 > 买短补长与额外购买在模型输出中统一用「购买区间 + 乘坐区间（ride）」表达（无独立补票段）。
 
-> 换乘出题保证：**当天换乘**、后一趟发车时间 ≥ 前一趟到达时间 + 20 分钟（选择性可配最短/最长换乘）、时间顺序正确。
+> 换乘出题保证：**当天换乘**、后一趟发车时间 ≥ 前一趟到达时间 + 20 分钟、时间顺序正确（时间约束配置已整体移除）。
 
 ---
 
@@ -267,7 +286,7 @@ python server.py
 |----|------------------------|------------------------|
 | 层0 归一化 | `normalize_final_plan` 统一字段契约：兼容 `from/to` 与 `from_station_id/to_station_id`；分购票段/补票段；购买段缺 `ride` → `missing_ride`（**一律按不全处理，不兜底**）；缺关键字段/非对象 → `invalid_plan_item` | 同左 |
 | 层1 余票/票价 | 购买区间查 DB 余票 ≥ 声称张数（否则 `hallucination`）+ 票价核验（`price_wrong`/`price_missing`）+ 张数 ≥ 人数（否则 `ticket_shortage`） | 同左 |
-| 层2 | 与 `ground_truth` **完全一致**（车次+购买+座位+乘坐区间），否则 `route_mismatch` | **全程可达**（`_check_reachability`）：地点连续 + 时间衔接 + 覆盖出发/到达站 + **时间约束**（出发/到达区间、换乘 min/max） |
+| 层2 | 与 `ground_truth` **完全一致**（车次+购买+座位+乘坐区间），否则 `route_mismatch` | **全程可达**（`_check_reachability`）：地点连续 + 时间衔接 + 覆盖出发/到达站；另按 `constraints` 硬校验（`no_transfer`/`no_short_buy_extra`） |
 | 判定 | 无任何 issue → `pass`；否则 `hallucination` | 同左 |
 
 **verdict 取值**：`pass`（全部通过）/ `hallucination`（任一 issue 即判错）/ `no_plan`（无任何可核查购票段）/ `empty_plan`（final_plan 为空数组，server 层判定）/ `db_not_found`（题目库不存在）。
@@ -278,14 +297,14 @@ python server.py
 
 | 分组 | 类型 |
 |------|------|
-| 🚫 硬错误（方案不可行/编造） | `hallucination`、`price_wrong`、`route_mismatch`、`route_invalid`、`route_discontinuity`、`transfer_time_conflict`、`start_not_covered`、`end_not_covered`、`no_route` |
-| ⚠️ 约束（硬性约束不满足） | `depart_time_violation`、`arrive_time_violation`、`transfer_too_short`、`transfer_too_long`、`ticket_shortage`、`price_missing` |
+| 🚫 硬错误（方案不可行/编造） | `hallucination`、`price_wrong`、`route_mismatch`、`route_invalid`、`route_discontinuity`、`transfer_time_conflict`、`start_not_covered`、`end_not_covered`、`no_route`、`no_transfer_violated`、`no_short_buy_violated`、`no_extra_violated` |
+| ⚠️ 约束（硬性约束不满足） | `ticket_shortage`、`price_missing` |
 | 📝 格式/缺失 | `invalid_seat`、`invalid_plan_item`、`missing_ride` |
 
 ### 前端核查展示
 
 测评页「代码核查」结果体系化展示：
-- **模式徽章**：按 `type` 显示「存在性问题·答案唯一（对标标答）」/「选择性问题·答案多个（全程可达+时间约束）」
+- **模式徽章**：按 `type` 显示「存在性问题·答案唯一（对标标答）」/「选择性问题·答案多个（全程可达+行为约束）」
 - **verdict 徽章**：✅全部通过 / ❌存在错误 / ⚠️最终方案为空 / ⚠️无可核查方案 / ❌数据库不存在
 - **动态统计卡**：方案总数 + 余票通过（段级）+ 各问题类型动态聚合
 - **明细表**：每段显示 车次 / 购买区间 / 乘坐区间（汉字）/ 座位 / 票数(声称/实际) / 票价(声称/实际) / 核对；购买≠乘坐时标注「买≠坐」

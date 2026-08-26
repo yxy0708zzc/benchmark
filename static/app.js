@@ -3,13 +3,19 @@
  * 处理导航、全局状态、各页面初始化
  */
 
-// 行为约束 key → 中文标签（选择性题 metadata.constraints）
-const CONSTRAINT_LABELS = {
-  cheapest: '最便宜',
+// 评判标准 key → 中文标签（选择性题 metadata.criterion，单选必选）
+const CRITERION_LABELS = {
+  comprehensive: '综合考虑',
   fastest: '最快',
+  cheapest: '最便宜',
+  depart_latest: '出发最晚',
+  arrive_earliest: '最早到达',
+};
+
+// 行为约束 key → 中文标签（选择性题 metadata.constraints，多选可选）
+const CONSTRAINT_LABELS = {
   no_transfer: '不允许换乘',
-  no_short_buy: '不允许买短补长',
-  no_extra: '不允许额外购买',
+  no_short_buy_extra: '不允许买短补长与额外购买',
 };
 
 const App = {
@@ -45,6 +51,7 @@ const App = {
       '/index.html': 'test',
       '/auto_question': 'auto-question',
       '/selective_question': 'selective-question',
+      '/batch_question': 'batch-question',
       '/edit_question': 'edit-question',
       '/question_manager': 'question-manager',
       '/stats': 'stats',
@@ -85,6 +92,7 @@ const App = {
         'edit-question': '/edit_question',
         'auto-question': '/auto_question',
         'selective-question': '/selective_question',
+        'batch-question': '/batch_question',
         'question-manager': '/question_manager',
         'stats': '/stats',
         'eval': '/eval',
@@ -108,6 +116,9 @@ const App = {
           break;
         case 'selective-question':
           this.initSelectiveQuestion();
+          break;
+        case 'batch-question':
+          this.initBatchQuestion();
           break;
         case 'question-manager':
           this.initQuestionManager();
@@ -906,6 +917,8 @@ const App = {
   // auto出题器初始化
   // ============================================================
   initAutoQuestion: function() {
+    // 每次进入该页：需求人数随机 3~6
+    this._randomPeopleInto('auto-people-count');
     const generateBtn = document.getElementById('btn-generate');
     if (generateBtn) {
       generateBtn.onclick = () => this._onAutoGenerate();
@@ -1154,6 +1167,8 @@ const App = {
 
   /** 重新出题：保留表单输入，清除上次预览缓存并重新生成 */
   _reAutoGenerate: async function() {
+    // 重新出题时需求人数随机 3~6
+    this._randomPeopleInto('auto-people-count');
     const reBtn = document.getElementById('btn-regenerate');
     const questionIds = (reBtn?.dataset.questionIds || reBtn?.dataset.questionId || '').split(',').filter(Boolean);
     // 清除后端预览缓存（存在性一次可能有多份）
@@ -1195,6 +1210,8 @@ const App = {
   // 选择性问题出题初始化
   // ============================================================
   initSelectiveQuestion: function() {
+    // 每次进入该页：需求人数随机 3~6
+    this._randomPeopleInto('sel-people-count');
     const generateBtn = document.getElementById('btn-sel-generate');
     if (generateBtn) {
       generateBtn.onclick = () => this._onSelectiveGenerate();
@@ -1224,33 +1241,7 @@ const App = {
       };
     }
 
-    // 题型切换显示混合配置 + 行为约束联动
-    const typeSelect = document.getElementById('sel-question-type');
-    if (typeSelect) {
-      typeSelect.onchange = function() {
-        const mixedConfig = document.getElementById('sel-mixed-config');
-        if (mixedConfig) {
-          const show = this.value === 'mixed';
-          mixedConfig.style.display = show ? 'block' : 'none';
-          if (show) App._renderSegmentPlans('sel');
-        }
-        App._applySelectiveConstraintUI();
-      };
-    }
-
-    // 行为约束联动：不允许换乘 ↔ 换乘时长输入
-    const noTransferBox = document.getElementById('sel-const-no-transfer');
-    if (noTransferBox) {
-      noTransferBox.onchange = () => this._applySelectiveConstraintUI();
-    }
-    this._applySelectiveConstraintUI();
-
-    // 换乘次数变化时重新渲染
-    document.addEventListener('change', function(e) {
-      if (e.target.id === 'sel-mixed-transfers') {
-        App._renderSegmentPlans('sel');
-      }
-    });
+    // 选择性题题型由后端按行为约束自动推导（不允许换乘→买短补长；否则→换乘），前端不再需要题型选择
 
     // 回车触发
     ['sel-from-station', 'sel-to-station'].forEach(id => {
@@ -1266,27 +1257,31 @@ const App = {
     });
   },
 
-  /** 收集选择性表单勾选的行为约束 */
+  /** 收集选择性表单勾选的行为约束（新约束键：不允许换乘 / 不允许买短补长与额外购买） */
   _selectedConstraints: function() {
-    const keys = ['cheapest', 'fastest', 'no_transfer', 'no_short_buy', 'no_extra'];
-    return keys.filter(k => document.getElementById('sel-const-' + k)?.checked);
+    const out = [];
+    if (document.getElementById('sel-const-no-transfer')?.checked) out.push('no_transfer');
+    if (document.getElementById('sel-const-no-short-buy-extra')?.checked) out.push('no_short_buy_extra');
+    return out;
   },
 
-  /** 行为约束联动：勾选「不允许换乘」→ 禁用并清空换乘时长输入（不限制题型选择） */
-  _applySelectiveConstraintUI: function() {
-    const noTransfer = document.getElementById('sel-const-no-transfer');
-    const minT = document.getElementById('sel-min-transfer');
-    const maxT = document.getElementById('sel-max-transfer');
-    if (!noTransfer) return;
-    const checked = noTransfer.checked;
-    if (minT) { minT.disabled = checked; if (checked) minT.value = ''; }
-    if (maxT) { maxT.disabled = checked; if (checked) maxT.value = ''; }
+  /** 收集选择性表单的评判标准（单选必选，默认综合） */
+  _selectedCriterion: function() {
+    const checked = document.querySelector('input[name="sel-criterion"]:checked');
+    return checked ? checked.value : 'comprehensive';
+  },
+
+  /** 人数随机 3~6：进入页面 / 重新出题时写入对应人数输入框（仍可手动修改） */
+  _randomPeopleInto: function(elementId) {
+    const el = document.getElementById(elementId);
+    if (el) {
+      el.value = Math.floor(Math.random() * 4) + 3; // 3 ~ 6
+    }
   },
 
   /** 选择性出题 */
   _onSelectiveGenerate: async function() {
     const form = {
-      question_type: document.getElementById('sel-question-type')?.value || 'direct',
       mode: 'selective',
       from_station_id: document.getElementById('sel-from-station')?.value.trim(),
       to_station_id: document.getElementById('sel-to-station')?.value.trim(),
@@ -1295,12 +1290,7 @@ const App = {
       interference_density: parseFloat(document.getElementById('sel-density')?.value || '0.02'),
       people_count: parseInt(document.getElementById('sel-people-count')?.value || '2', 10),
       seat_type: document.getElementById('sel-seat-type')?.value || 'class2',
-      depart_earliest: document.getElementById('sel-depart-earliest')?.value || null,
-      depart_latest: document.getElementById('sel-depart-latest')?.value || null,
-      arrive_earliest: document.getElementById('sel-arrive-earliest')?.value || null,
-      arrive_latest: document.getElementById('sel-arrive-latest')?.value || null,
-      min_transfer_minutes: parseInt(document.getElementById('sel-min-transfer')?.value || '0', 10) || 0,
-      max_transfer_minutes: parseInt(document.getElementById('sel-max-transfer')?.value || '', 10) || null,
+      criterion: this._selectedCriterion(),
       custom_qid: document.getElementById('sel-output-qid')?.value.trim() || '',
       constraints: this._selectedConstraints(),
     };
@@ -1309,20 +1299,6 @@ const App = {
     if (!form.custom_qid) {
       alert('请填写题目名');
       return;
-    }
-
-    // 混合题型
-    if (form.question_type === 'mixed') {
-      form.transfers = parseInt(document.getElementById('sel-mixed-transfers')?.value || '1', 10);
-      form.segment_plans = [];
-      for (let i = 0; i <= form.transfers; i++) {
-        const sel = document.getElementById('sel-seg-' + i);
-        form.segment_plans.push(sel ? sel.value : 'direct');
-      }
-      if (form.transfers < 1) {
-        alert('换乘数至少为 1');
-        return;
-      }
     }
 
     if (!form.from_station_id || !form.to_station_id) {
@@ -1378,6 +1354,7 @@ const App = {
           <div><strong>需求人数：</strong>${document.getElementById('sel-people-count')?.value || '2'} 人</div>
           <div><strong>答案票等级：</strong>${document.getElementById('sel-seat-type')?.value || 'class2'}</div>
           <div><strong>干扰密度：</strong>${Math.round(parseFloat(density) * 100)}%</div>
+          <div><strong>评判标准：</strong>${CRITERION_LABELS[preview.criterion] || preview.criterion || '综合考虑'}</div>
           <div><strong>行为约束：</strong>${(preview.constraints && preview.constraints.length) ? preview.constraints.map(c => CONSTRAINT_LABELS[c] || c).join('、') : '无'}</div>
           <div><strong>目标区间：</strong>${preview.target_section}</div>
           <div><strong>路径描述：</strong>${pathDesc}</div>
@@ -1444,6 +1421,8 @@ const App = {
 
   /** 重新出题（选择性）：保留表单输入，清除上次预览缓存并重新生成 */
   _reSelectiveGenerate: async function() {
+    // 重新出题时需求人数随机 3~6
+    this._randomPeopleInto('sel-people-count');
     const reBtn = document.getElementById('btn-sel-regenerate');
     const questionIds = (reBtn?.dataset.questionIds || reBtn?.dataset.questionId || '').split(',').filter(Boolean);
     // 清除后端预览缓存
@@ -1478,6 +1457,294 @@ const App = {
       if (!res.success) { alert(`换方案失败: ${res.detail || '未知错误'}`); return; }
       this._showSelectivePreview({ questions: res.questions });
     } catch (e) { alert(`换方案失败: ${e.message}`); }
+  },
+
+  // ============================================================
+  // 批量出题
+  // ============================================================
+  batchDistribution: null,   // 解析后的分布表 [{category,name,has_interference,no_interference,question_type,transfers,segment_plans}]
+  batchSelective: [],        // 解析后的选择性区 [{criterion,behavior,count}]
+  batchStations: [],         // 站对 [[from,to], ...]
+  batchReportData: null,     // 批量完成后服务端返回的回执数据
+
+  initBatchQuestion: function() {
+    const btnParseDist = document.getElementById('btn-batch-parse-distribution');
+    if (btnParseDist) btnParseDist.onclick = () => this._parseBatchDistribution();
+
+    const btnParseStations = document.getElementById('btn-batch-parse-stations');
+    if (btnParseStations) btnParseStations.onclick = () => this._parseBatchStations();
+
+    const btnGenerate = document.getElementById('btn-batch-generate');
+    if (btnGenerate) btnGenerate.onclick = () => this._startBatchGenerate();
+
+    const btnReport = document.getElementById('btn-batch-report');
+    if (btnReport) btnReport.onclick = () => this._downloadBatchReport();
+
+    // 干扰密度滑块联动
+    const densitySlider = document.getElementById('batch-density');
+    const densityLabel = document.getElementById('batch-density-label');
+    if (densitySlider && densityLabel) {
+      densitySlider.oninput = function() {
+        densityLabel.textContent = parseFloat((this.value * 100).toFixed(3)) + '%';
+      };
+    }
+
+    // 座位等级比例实时校验（总和必须=100%）
+    ['batch-seat-class0', 'batch-seat-class1', 'batch-seat-class2'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.oninput = () => this._validateSeatTotal();
+    });
+    this._validateSeatTotal();
+    this._resetBatchProgress();
+  },
+
+  /** 校验座位等级比例总和 = 100% */
+  _validateSeatTotal: function() {
+    const get = id => parseFloat(document.getElementById(id)?.value || '0') || 0;
+    const total = get('batch-seat-class0') + get('batch-seat-class1') + get('batch-seat-class2');
+    const label = document.getElementById('batch-seat-total-label');
+    if (!label) return;
+    const ok = Math.abs(total - 100) < 0.01;
+    label.textContent = `= ${total}%`;
+    label.style.color = ok ? 'var(--success-green)' : 'var(--error-red)';
+    label.style.fontWeight = ok ? '400' : '700';
+    return ok;
+  },
+
+  /** 重置单进度条 */
+  _resetBatchProgress: function() {
+    const bar = document.getElementById('batch-total-bar');
+    if (bar) bar.style.width = '0%';
+    const count = document.getElementById('batch-total-count');
+    if (count) count.textContent = '0 / 0';
+    const cur = document.getElementById('batch-current-task');
+    if (cur) cur.textContent = '尚未开始';
+    const result = document.getElementById('batch-result');
+    if (result) { result.style.display = 'none'; result.innerHTML = ''; }
+    const btnReport = document.getElementById('btn-batch-report');
+    if (btnReport) btnReport.style.display = 'none';
+  },
+
+  /** 解析 1.xlsx 分布表 */
+  _parseBatchDistribution: async function() {
+    const fileInput = document.getElementById('batch-distribution-file');
+    const file = fileInput?.files?.[0];
+    if (!file) { alert('请先选择 1.xlsx 文件'); return; }
+    try {
+      const result = await API.batchParseDistribution(file);
+      if (!result.success) { alert(`解析失败: ${result.detail || '未知错误'}`); return; }
+      this.batchDistribution = result.exists || [];
+      this.batchSelective = result.selective || [];
+      this._renderBatchDistributionTable();
+    } catch (e) { alert(`解析失败: ${e.message}`); }
+  },
+
+  /** 渲染可编辑分布表 */
+  _renderBatchDistributionTable: function() {
+    const container = document.getElementById('batch-distribution-table');
+    if (!container) return;
+    let html = '<div style="overflow-x:auto"><table class="table" style="width:100%"><thead><tr>';
+    html += '<th>类型</th><th>类别</th><th>名称</th><th>有干扰数</th><th>无干扰数</th></tr></thead><tbody>';
+    (this.batchDistribution || []).forEach((row, i) => {
+      html += `<tr>
+        <td>存在性</td>
+        <td>${row.category}</td>
+        <td>${row.name}</td>
+        <td><input class="input" type="number" min="0" data-dist-idx="${i}" data-dist-key="has_interference" value="${row.has_interference}" style="width:70px"></td>
+        <td><input class="input" type="number" min="0" data-dist-idx="${i}" data-dist-key="no_interference" value="${row.no_interference}" style="width:70px"></td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+
+    html += '<div style="margin-top:8px;overflow-x:auto"><table class="table" style="width:100%"><thead><tr>';
+    html += '<th>评判标准</th><th>行为约束</th><th>数量</th></tr></thead><tbody>';
+    (this.batchSelective || []).forEach((row, i) => {
+      html += `<tr>
+        <td>${CRITERION_LABELS[row.criterion] || row.criterion}</td>
+        <td>${row.behavior === 'none' ? '随意' : CONSTRAINT_LABELS[row.behavior] || row.behavior}</td>
+        <td><input class="input" type="number" min="0" data-sel-idx="${i}" data-sel-key="count" value="${row.count}" style="width:70px"></td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+  },
+
+  /** 解析 2.xlsx 站对表 */
+  _parseBatchStations: async function() {
+    const fileInput = document.getElementById('batch-stations-file');
+    const file = fileInput?.files?.[0];
+    if (!file) { alert('请先选择 2.xlsx 文件'); return; }
+    try {
+      const result = await API.batchParseStations(file);
+      if (!result.success) { alert(`解析失败: ${result.detail || '未知错误'}`); return; }
+      this.batchStations = result.stations || [];
+      this._renderBatchStationsTable();
+    } catch (e) { alert(`解析失败: ${e.message}`); }
+  },
+
+  /** 渲染可编辑站对表 */
+  _renderBatchStationsTable: function() {
+    const container = document.getElementById('batch-stations-table');
+    if (!container) return;
+    const pairs = this.batchStations || [];
+    if (!pairs.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--gray-4);padding:20px">未解析到站对</div>';
+      return;
+    }
+    let html = '<div style="overflow-x:auto"><table class="table" style="width:100%"><thead><tr><th>#</th><th>出发站</th><th>到达站</th></tr></thead><tbody>';
+    pairs.forEach((p, i) => {
+      html += `<tr>
+        <td>${i + 1}</td>
+        <td><input class="input" type="text" data-st-idx="${i}" data-st-side="from" value="${p[0]}" style="width:100%"></td>
+        <td><input class="input" type="text" data-st-idx="${i}" data-st-side="to" value="${p[1]}" style="width:100%"></td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    html += '<div style="color:var(--gray-4);margin-top:6px">出题时随机选取站对，方向随机可倒置，允许重复使用</div>';
+    container.innerHTML = html;
+  },
+
+  /** 从可编辑表格回读分布与站对（含单元格修改） */
+  _collectBatchInputs: function() {
+    // 分布表
+    const distRows = (this.batchDistribution || []).map(row => ({...row}));
+    document.querySelectorAll('[data-dist-idx][data-dist-key]').forEach(input => {
+      const idx = parseInt(input.dataset.distIdx, 10);
+      const key = input.dataset.distKey;
+      if (distRows[idx]) distRows[idx][key] = parseInt(input.value || '0', 10) || 0;
+    });
+    const selRows = (this.batchSelective || []).map(row => ({...row}));
+    document.querySelectorAll('[data-sel-idx][data-sel-key]').forEach(input => {
+      const idx = parseInt(input.dataset.selIdx, 10);
+      if (selRows[idx]) selRows[idx].count = parseInt(input.value || '0', 10) || 0;
+    });
+    // 站对表
+    const stations = (this.batchStations || []).map(p => [...p]);
+    document.querySelectorAll('[data-st-idx][data-st-side]').forEach(input => {
+      const idx = parseInt(input.dataset.stIdx, 10);
+      const side = input.dataset.stSide === 'from' ? 0 : 1;
+      if (stations[idx]) stations[idx][side] = input.value.trim();
+    });
+    return { distribution: distRows, selective: selRows, stations };
+  },
+
+  /** 开始批量出题（一键生成并落盘，单进度条轮询） */
+  _startBatchGenerate: async function() {
+    if (!this._validateSeatTotal()) { alert('座位等级比例总和必须为 100%'); return; }
+    const { distribution, selective, stations } = this._collectBatchInputs();
+    const totalCount = distribution.reduce((s, r) => s + (r.has_interference || 0) + (r.no_interference || 0), 0)
+      + selective.reduce((s, r) => s + (r.count || 0), 0);
+    if (!totalCount) { alert('分布表数量全为 0，无可生成题目'); return; }
+    if (!stations.length) { alert('请先解析 2.xlsx 站对表'); return; }
+
+    const payload = {
+      distribution,
+      selective,
+      stations,
+      seat_weights: {
+        class0: parseFloat(document.getElementById('batch-seat-class0')?.value || '0') || 0,
+        class1: parseFloat(document.getElementById('batch-seat-class1')?.value || '0') || 0,
+        class2: parseFloat(document.getElementById('batch-seat-class2')?.value || '0') || 0,
+      },
+      interference_density: parseFloat(document.getElementById('batch-density')?.value || '0.02'),
+      max_retries: parseInt(document.getElementById('batch-max-retries')?.value || '40', 10) || 40,
+      nl_enabled: document.getElementById('batch-nl-enabled')?.checked ?? true,
+    };
+
+    this._resetBatchProgress();
+    const count = document.getElementById('batch-total-count');
+    if (count) count.textContent = `0 / ${totalCount}`;
+
+    try {
+      const result = await API.batchGenerate(payload);
+      if (!result.success) { alert(`批量出题启动失败: ${result.detail || '未知错误'}`); this._resetBatchProgress(); return; }
+      this._pollBatchStatus();
+    } catch (e) {
+      alert(`批量出题启动失败: ${e.message}`);
+      this._resetBatchProgress();
+    }
+  },
+
+  /** 轮询批量状态，更新单进度条 */
+  _pollBatchStatus: async function() {
+    try {
+      const status = await API.batchStatus();
+      this._renderBatchProgress(status);
+      if (status.running) {
+        setTimeout(() => this._pollBatchStatus(), 500);
+      } else if (status.done) {
+        this._renderBatchResult(status.result);
+      }
+    } catch (e) {
+      console.error('批量状态轮询失败:', e);
+      setTimeout(() => this._pollBatchStatus(), 500);
+    }
+  },
+
+  /** 渲染单进度条 */
+  _renderBatchProgress: function(status) {
+    const bar = document.getElementById('batch-total-bar');
+    if (bar) bar.style.width = status.total ? `${Math.round((status.done_count / status.total) * 100)}%` : '0%';
+    const count = document.getElementById('batch-total-count');
+    if (count) count.textContent = `${status.done_count || 0} / ${status.total || 0}`;
+    const cur = document.getElementById('batch-current-task');
+    if (cur) cur.textContent = status.current || '';
+  },
+
+  /** 渲染批量结果 + 显示回执下载按钮 */
+  _renderBatchResult: function(result) {
+    const container = document.getElementById('batch-result');
+    if (!container) return;
+    container.style.display = 'block';
+    let html = '<div class="card"><div class="card-header">📋 批量出题结果</div>';
+    html += `<div style="display:flex;gap:16px;padding:8px 0;font-size:var(--font-size-small)">
+      <div><strong>总题数：</strong>${result.summary.total}</div>
+      <div style="color:var(--success-green)"><strong>成功：</strong>${result.summary.success}</div>
+      <div style="color:var(--error-red)"><strong>失败：</strong>${result.summary.failed}</div>
+    </div>`;
+    const nl = result.summary || {};
+    if (nl.nl_generated !== undefined) {
+      html += `<div style="display:flex;gap:16px;padding:4px 0;font-size:var(--font-size-small)">
+        <div><strong>自然语言生成：</strong><span style="color:var(--success-green)">${nl.nl_generated}</span> 成功</div>
+        <div style="color:var(--error-red)">${nl.nl_failed} 失败</div>
+        <div style="color:var(--gray-4)">${nl.nl_skipped} 跳过</div>
+      </div>`;
+      if (nl.nl_error) {
+        html += `<div style="color:var(--gray-5);font-size:var(--font-size-small);padding-bottom:4px">${nl.nl_error}</div>`;
+      }
+    }
+    if (result.summary.failed > 0) {
+      html += '<div style="color:var(--error-red);font-size:var(--font-size-small);padding-bottom:8px">失败明细见回执 xlsx（每格=该格失败题数，表头=总失败数），可点击下方按钮下载</div>';
+    }
+    if (result.details && result.details.length) {
+      html += '<div style="max-height:260px;overflow-y:auto;font-size:var(--font-size-small)"><table class="table" style="width:100%"><thead><tr><th>题号</th><th>类型行</th><th>尝试次数</th><th>结果</th></tr></thead><tbody>';
+      result.details.forEach(d => {
+        html += `<tr><td>${d.question_id}</td><td>${d.row || ''}</td><td>${d.attempts}</td>
+          <td style="color:${d.ok ? 'var(--success-green)' : 'var(--error-red)'}">${d.ok ? '✅ 成功' : `❌ ${d.error || '失败'}`}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+    this.batchReportData = result.report || null;
+    const btnReport = document.getElementById('btn-batch-report');
+    if (btnReport) btnReport.style.display = this.batchReportData ? 'inline-flex' : 'none';
+  },
+
+  /** 下载失败回执 xlsx */
+  _downloadBatchReport: async function() {
+    if (!this.batchReportData) { alert('暂无回执数据'); return; }
+    try {
+      const blob = await API.batchReport(this.batchReportData);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'batch_failure_report.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert(`下载回执失败: ${e.message}`); }
   },
 
   // ============================================================
@@ -1766,10 +2033,10 @@ const App = {
       const vInfo = verdictMap[verify.verdict] || { label: verify.verdict || '未知', bg: '#f5f5f5', color: '#6b7280' };
       const hasIssues = (verify.issues || []).length > 0;
 
-      // 题型模式（分类按 type：存在性=对标标答 / 选择性=全程可达+时间约束）
+      // 题型模式（分类按 type：存在性=对标标答 / 选择性=全程可达+行为约束）
       const modeMap = {
         '存在性': { label: '存在性问题 · 答案唯一（对标标答）', color: '#2563eb', bg: '#eff6ff' },
-        '选择性': { label: '选择性问题 · 答案多个（全程可达+时间约束）', color: '#7c3aed', bg: '#f5f3ff' },
+        '选择性': { label: '选择性问题 · 答案多个（全程可达+行为约束）', color: '#7c3aed', bg: '#f5f3ff' },
       };
       const modeInfo = modeMap[verify.question_mode] || { label: '题目类型未知', color: '#6b7280', bg: '#f3f4f6' };
 
@@ -1788,12 +2055,9 @@ const App = {
         'start_not_covered': { label: '未连接出发站', color: '#dc2626', group: '硬错误' },
         'end_not_covered': { label: '未连接到达站', color: '#dc2626', group: '硬错误' },
         'no_route': { label: '无法构成全程', color: '#dc2626', group: '硬错误' },
+        'no_transfer_violated': { label: '违反不允许换乘', color: '#dc2626', group: '硬错误' },
         'no_short_buy_violated': { label: '违反不允许买短补长', color: '#dc2626', group: '硬错误' },
         'no_extra_violated': { label: '违反不允许额外购买', color: '#dc2626', group: '硬错误' },
-        'transfer_too_short': { label: '换乘时间不足', color: '#f59e0b', group: '约束' },
-        'transfer_too_long': { label: '换乘时间过长', color: '#f59e0b', group: '约束' },
-        'depart_time_violation': { label: '出发时间不符', color: '#f59e0b', group: '约束' },
-        'arrive_time_violation': { label: '到达时间不符', color: '#f59e0b', group: '约束' },
         'ticket_shortage': { label: '票数不足', color: '#f59e0b', group: '约束' },
         'price_missing': { label: '票价缺失', color: '#f59e0b', group: '约束' },
         'invalid_seat': { label: '无效座位', color: '#f59e0b', group: '格式' },
@@ -2027,8 +2291,7 @@ const App = {
         'route_invalid': '区间无效', 'route_discontinuity': '乘坐不连续',
         'transfer_time_conflict': '换乘时间冲突', 'start_not_covered': '未连接出发站',
         'end_not_covered': '未连接到达站', 'no_route': '无法构成全程',
-        'depart_time_violation': '出发时间不符', 'arrive_time_violation': '到达时间不符',
-        'transfer_too_short': '换乘时间不足', 'transfer_too_long': '换乘时间过长',
+        'no_transfer_violated': '违反不允许换乘',
         'ticket_shortage': '票数不足', 'price_missing': '票价缺失',
         'missing_ride': '缺乘坐区间', 'invalid_seat': '无效座位', 'invalid_plan_item': '无效条目',
       };

@@ -273,4 +273,56 @@ const API = {
     const resp = await fetch('/api/stats/export/markdown');
     return resp.text();
   },
+
+  // ============================================================
+  // 批量出题接口
+  // ============================================================
+
+  /** 上传 1.xlsx 解析题目分布（返回可编辑分布表） */
+  batchParseDistribution: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch('/api/batch/parse-distribution', {
+      method: 'POST',
+      body: formData,
+    });
+    return resp.json();
+  },
+
+  /** 上传 2.xlsx 解析到发站对 */
+  batchParseStations: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch('/api/batch/parse-stations', {
+      method: 'POST',
+      body: formData,
+    });
+    return resp.json();
+  },
+
+  /** 启动批量出题（一键生成并直接落盘） */
+  batchGenerate: async (payload) => {
+    const resp = await fetch('/api/batch/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.json();
+  },
+
+  /** 查询批量出题进度（单进度条状态） */
+  batchStatus: async () => {
+    const resp = await fetch('/api/batch/status');
+    return resp.json();
+  },
+
+  /** 下载失败回执 xlsx（返回 Blob） */
+  batchReport: async (reportData) => {
+    const resp = await fetch('/api/batch/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reportData),
+    });
+    return resp.blob();
+  },
 };

@@ -27,12 +27,10 @@ HARD_ISSUES = {
     "route_mismatch_seat", "route_mismatch_ride",
     "route_invalid", "route_discontinuity", "transfer_time_conflict",
     "start_not_covered", "end_not_covered", "no_route",
-    "no_short_buy_violated", "no_extra_violated",
+    "no_transfer_violated", "no_short_buy_violated", "no_extra_violated",
 }
 # 约束（硬性约束不满足）：每项 -10
 CONSTRAINT_ISSUES = {
-    "depart_time_violation", "arrive_time_violation",
-    "transfer_too_short", "transfer_too_long",
     "ticket_shortage", "price_missing",
 }
 # 其余（格式/缺失）：每项 -5
