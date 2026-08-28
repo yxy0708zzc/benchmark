@@ -158,7 +158,7 @@ selected = shuffle(全局候选池)[:n]
 
 ## 六、批量出题（`/api/batch/*`）
 
-**输入**：① 1.xlsx 题目分布表（`POST /api/batch/parse-distribution` 解析，前端可编辑）；② 2.xlsx 到发站对（`POST /api/batch/parse-stations`，出题时**随机站对 + 随机倒置方向 + 允许重复**）；③ 座位等级比例（前端输入 class0/class1/class2 百分比，总和必须 100%，每题按权重**随机抽取**，与人数/站对/题型独立）；④ 干扰密度（默认 2%）；⑤ 每题重试上限（默认 40）；⑥ `nl_enabled`（默认开，落盘后自动生成自然语言写回 `metadata['nl_question']`，需 .env `NL_API_KEY`）
+**输入**：① 1.xlsx 题目分布表（`POST /api/batch/parse-distribution` 解析，前端可编辑）；② 2.xlsx 到发站对（`POST /api/batch/parse-stations`，出题时**随机站对 + 随机倒置方向 + 允许重复**）；③ 座位等级比例（前端输入 class0/class1/class2 百分比，总和必须 100%，每题按权重**随机抽取**，与人数/站对/题型独立）；④ 干扰密度（默认 2%）；⑤ 每题重试上限（默认 40）。批量出题目**不再内嵌自动自然语言化**（`nl_enabled` 默认关）——自然语言生成由独立的「批量自然语言化」框（`/api/batch_nl/*`）异步执行，与批量出题互不影响。
 
 **策略映射**（1.xlsx 分布表 → 出题参数）：
 | 分布行 | 题型参数 |
@@ -168,10 +168,27 @@ selected = shuffle(全局候选池)[:n]
 | 三策略：X+Y | `mixed` transfers=1，段策略 `[X, Y]`（前后两段都有策略） |
 | 选择性区：评判标准 × 行为约束 × 数量 | `2_` 真干扰，`criterion` + `constraints`（行为约束映射：不允许换乘→`no_transfer`；不允许买短补长与额外购买→`no_short_buy_extra`） |
 
-**生成流程**：每题固定参数（站对/方向/人数 3~6 随机/座位按权重随机）**重试 ≤ 40 次**（每次=一次完整 `_generate_one_variant`，成功即经 `_confirm_generated_question` 直接落盘）；选择性题题型由行为约束推导（同手动页规则）；全部落盘后若开启 `nl_enabled`，依次对成功题目 `build_prompt` + `generate_nl`（复用 nl_question.py 的评判标准/行为约束自然化）写回 `metadata['nl_question']`——单题自然语言失败不影响题目本身，结果汇总中给出 generated/failed/skipped 统计；随后返回逐题结果 + 汇总 + 失败回执数据。
+**生成流程**：每题固定参数（站对/方向/人数 3~6 随机/座位按权重随机）**重试 ≤ 40 次**（每次=一次完整 `_generate_one_variant`，成功即经 `_confirm_generated_question` 直接落盘）；选择性题题型由行为约束推导（同手动页规则）；随后返回逐题结果 + 汇总 + 失败回执数据。**自然语言化不内嵌**：由独立的「批量自然语言化」框（`/api/batch_nl/*`）异步执行（见下文“批量自然语言化/批量测试”小节）。
 
 **单进度条**：`GET /api/batch/status` 返回 `done_count/total` 单一总进度（存在性 + 选择性合计）+ 当前任务，前端轮询渲染。
 
 **失败回执 xlsx**（`POST /api/batch/report`）：布局与 1.xlsx 同构——存在性区每行 = 类别/名称/有干扰失败数/无干扰失败数；选择性区每行 = 评判标准/行为约束/失败数；顶部 A1-B3 = 总题目/成功/总失败数。题号沿用原名规则 `前缀+时间戳+序号`（如 `2_20260812_102638_0001`）。
+
+---
+
+## 七、批量自然语言化（导航栏独立页，与「批量出题」「批量测试」并列，与批量出题异步）
+
+- `GET /api/batch_nl/scan`：列出缺失 `nl_question` 的题目（含类型/题型/行程/人数/座位/评判标准/行为约束/是否存在 db），前端勾选增删；
+- `POST /api/batch_nl/generate`：`{question_ids}` → 独立线程逐题 `build_prompt` + `generate_nl`（复用 nl_question.py，含评判标准/行为约束自然化）写回 `metadata['nl_question']`；单题失败不影响其它题；缺 `NL_API_KEY` 整批跳过；
+- `GET /api/batch_nl/status`：单进度条 `done_count/total` + 当前题目 + 逐题结果 + 汇总（generated/failed/skipped）。
+- 与批量出题互不影响（各自独立线程与状态），前端为独立面板（左输入/右进度+表格）。
+
+## 八、批量测试（导航栏独立页：扫描 → 勾选 → 逐题测试）
+
+- **可测试条件**：题目已落盘（`question/*.db`）且**信息核查完备（含自然语言问题 `nl_question`）**，且**该模型未测试过**——已测模型记录在 `metadata['tested_models']`（每个模型每题只测一次，重复即去重跳过）；
+- `POST /api/batch_test/scan`：`{model}` → 列出全部已落盘题目的基本信息（题号/类型/题型/行程/是否有自然语言/已测模型/是否可测），前端按 `testable` 勾选增删；
+- `POST /api/batch_test/start`：`{model, question_ids, max_iterations}` → 独立线程逐题执行：重置会话 `batch_test_{qid}` → 以 `nl_question` 作为用户输入走工具调用循环（复用 `/api/test/chat`）→ 保存测试记录到 `logs/test/`（复用 `/api/test/complete`）→ 成功后把 `model` 追加到 `tested_models`；信息不完备或该模型已测的题自动去重跳过；
+- `GET /api/batch_test/status`：单进度条 + 当前题目 + 逐题结果（记录文件 / plan_status / 耗时）+ 汇总（total/success/failed/model）。
+- 与批量出题、批量自然语言化各自独立（独立线程与状态），互不影响。
 
 *文档版本：2026-08-26 · 对应实现：server.py（`_generate_one_variant` / `_write_legal_solution` / `_add_interference_all_trains`（全局池）/ `_get_all_stops_cached` / `_find_transfer_solutions`（核心一枚举）/ `_swap_transfer` / `_swap_mixed` / `_confirm_generated_question` / 批量端点 `_run_batch`）、config.py（QUESTION_CONFIG）、database.py（metadata）、verifier.py（行为约束硬校验）、question/*.db（题目余票库）*

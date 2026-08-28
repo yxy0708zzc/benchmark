@@ -52,6 +52,8 @@ const App = {
       '/auto_question': 'auto-question',
       '/selective_question': 'selective-question',
       '/batch_question': 'batch-question',
+      '/batch_nl_question': 'batch-nl-question',
+      '/batch_test_question': 'batch-test-question',
       '/edit_question': 'edit-question',
       '/question_manager': 'question-manager',
       '/stats': 'stats',
@@ -93,6 +95,8 @@ const App = {
         'auto-question': '/auto_question',
         'selective-question': '/selective_question',
         'batch-question': '/batch_question',
+        'batch-nl-question': '/batch_nl_question',
+        'batch-test-question': '/batch_test_question',
         'question-manager': '/question_manager',
         'stats': '/stats',
         'eval': '/eval',
@@ -119,6 +123,12 @@ const App = {
           break;
         case 'batch-question':
           this.initBatchQuestion();
+          break;
+        case 'batch-nl-question':
+          this.initBatchNlQuestion();
+          break;
+        case 'batch-test-question':
+          this.initBatchTestQuestion();
           break;
         case 'question-manager':
           this.initQuestionManager();
@@ -1468,6 +1478,7 @@ const App = {
   batchReportData: null,     // 批量完成后服务端返回的回执数据
 
   initBatchQuestion: function() {
+    // 批量出题
     const btnParseDist = document.getElementById('btn-batch-parse-distribution');
     if (btnParseDist) btnParseDist.onclick = () => this._parseBatchDistribution();
 
@@ -1496,6 +1507,30 @@ const App = {
     });
     this._validateSeatTotal();
     this._resetBatchProgress();
+  },
+
+  /** 批量自然语言化页初始化（导航栏独立页） */
+  initBatchNlQuestion: function() {
+    const nlScan = document.getElementById('btn-batch-nl-scan');
+    if (nlScan) nlScan.onclick = () => this._scanBatchNl();
+    const nlGen = document.getElementById('btn-batch-nl-generate');
+    if (nlGen) nlGen.onclick = () => this._startBatchNl();
+    const nlAll = document.getElementById('btn-batch-nl-select-all');
+    if (nlAll) nlAll.onclick = () => this._selectBatchNl(true);
+    const nlNone = document.getElementById('btn-batch-nl-select-none');
+    if (nlNone) nlNone.onclick = () => this._selectBatchNl(false);
+  },
+
+  /** 批量测试页初始化（导航栏独立页） */
+  initBatchTestQuestion: function() {
+    const testScan = document.getElementById('btn-batch-test-scan');
+    if (testScan) testScan.onclick = () => this._scanBatchTest();
+    const testStart = document.getElementById('btn-batch-test-start');
+    if (testStart) testStart.onclick = () => this._startBatchTest();
+    const testAll = document.getElementById('btn-batch-test-select-all');
+    if (testAll) testAll.onclick = () => this._selectBatchTest(true);
+    const testNone = document.getElementById('btn-batch-test-select-none');
+    if (testNone) testNone.onclick = () => this._selectBatchTest(false);
   },
 
   /** 校验座位等级比例总和 = 100% */
@@ -1648,8 +1683,8 @@ const App = {
       },
       interference_density: parseFloat(document.getElementById('batch-density')?.value || '0.02'),
       max_retries: parseInt(document.getElementById('batch-max-retries')?.value || '40', 10) || 40,
-      nl_enabled: document.getElementById('batch-nl-enabled')?.checked ?? true,
     };
+    // 注：批量自然语言化已独立成框（/api/batch_nl/*），不再内嵌于批量出题请求
 
     this._resetBatchProgress();
     const count = document.getElementById('batch-total-count');
@@ -1745,6 +1780,271 @@ const App = {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) { alert(`下载回执失败: ${e.message}`); }
+  },
+
+  // ============================================================
+  // 批量自然语言化（独立框，与批量出题异步）
+  // ============================================================
+  batchNlItems: [],   // 扫描结果 [{question_id, type, question, ...}]
+  batchNlSelected: new Set(),
+  batchNlReport: null,
+
+  /** 扫描缺失自然语言的题目 */
+  _scanBatchNl: async function() {
+    try {
+      const res = await API.batchNlScan();
+      if (!res.success) { alert(`扫描失败: ${res.detail || '未知错误'}`); return; }
+      this.batchNlItems = res.items || [];
+      this.batchNlSelected = new Set(this.batchNlItems.map(i => i.question_id));
+      this._renderBatchNlTable();
+    } catch (e) { alert(`扫描失败: ${e.message}`); }
+  },
+
+  /** 渲染批量自然语言扫描表（勾选增删） */
+  _renderBatchNlTable: function() {
+    const container = document.getElementById('batch-nl-table');
+    if (!container) return;
+    if (!this.batchNlItems.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--gray-4);padding:16px">没有缺失自然语言的题目（全部已生成）</div>';
+      return;
+    }
+    let html = '<table class="table" style="width:100%"><thead><tr><th></th><th>题号</th><th>类型</th><th>题型</th><th>行程</th><th>人数</th><th>座位</th><th>评判标准</th><th>行为约束</th></tr></thead><tbody>';
+    this.batchNlItems.forEach(item => {
+      const sel = this.batchNlSelected.has(item.question_id);
+      html += `<tr>
+        <td><input type="checkbox" data-nl-qid="${item.question_id}" ${sel ? 'checked' : ''}></td>
+        <td>${item.question_id}</td>
+        <td>${item.type || ''}</td>
+        <td>${item.question_type || ''}</td>
+        <td>${item.question || ''}</td>
+        <td>${item.people_count ?? ''}</td>
+        <td>${item.seat_type || ''}</td>
+        <td>${CRITERION_LABELS[item.criterion] || item.criterion || ''}</td>
+        <td>${(item.constraints || []).map(c => CONSTRAINT_LABELS[c] || c).join('、')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    container.querySelectorAll('input[data-nl-qid]').forEach(input => {
+      input.onchange = () => {
+        if (input.checked) this.batchNlSelected.add(input.dataset.nlQid);
+        else this.batchNlSelected.delete(input.dataset.nlQid);
+      };
+    });
+  },
+
+  /** 批量自然语言全选/取消 */
+  _selectBatchNl: function(all) {
+    this.batchNlSelected = all ? new Set(this.batchNlItems.map(i => i.question_id)) : new Set();
+    this._renderBatchNlTable();
+  },
+
+  /** 开始批量自然语言化 */
+  _startBatchNl: async function() {
+    if (!this.batchNlSelected.size) { alert('未勾选任何题目'); return; }
+    try {
+      const res = await API.batchNlGenerate({ question_ids: [...this.batchNlSelected] });
+      if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
+      this._resetBatchNlProgress();
+      this._pollBatchNlStatus();
+    } catch (e) { alert(`启动失败: ${e.message}`); }
+  },
+
+  /** 轮询批量自然语言化进度 */
+  _pollBatchNlStatus: async function() {
+    try {
+      const status = await API.batchNlStatus();
+      this._renderBatchNlProgress(status);
+      if (status.running) { setTimeout(() => this._pollBatchNlStatus(), 600); }
+      else if (status.done) { this._renderBatchNlResult(status.result); }
+    } catch (e) {
+      console.error('自然语言化进度轮询失败:', e);
+      setTimeout(() => this._pollBatchNlStatus(), 600);
+    }
+  },
+
+  _resetBatchNlProgress: function() {
+    const bar = document.getElementById('batch-nl-bar');
+    if (bar) bar.style.width = '0%';
+    const count = document.getElementById('batch-nl-count');
+    if (count) count.textContent = `0 / ${this.batchNlSelected.size}`;
+    const cur = document.getElementById('batch-nl-current');
+    if (cur) cur.textContent = '尚未开始';
+    const res = document.getElementById('batch-nl-result');
+    if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+  },
+
+  _renderBatchNlProgress: function(status) {
+    const bar = document.getElementById('batch-nl-bar');
+    if (bar) bar.style.width = status.total ? `${Math.round((status.done_count / status.total) * 100)}%` : '0%';
+    const count = document.getElementById('batch-nl-count');
+    if (count) count.textContent = `${status.done_count || 0} / ${status.total || 0}`;
+    const cur = document.getElementById('batch-nl-current');
+    if (cur) cur.textContent = status.current || '';
+  },
+
+  _renderBatchNlResult: function(result) {
+    const container = document.getElementById('batch-nl-result');
+    if (!container) return;
+    container.style.display = 'block';
+    const s = result.summary || {};
+    let html = '<div class="card"><div class="card-header">📋 批量自然语言化结果</div>';
+    html += `<div style="display:flex;gap:16px;padding:8px 0;font-size:var(--font-size-small)">
+      <div><strong>总数：</strong>${s.total}</div>
+      <div style="color:var(--success-green)"><strong>生成成功：</strong>${s.generated}</div>
+      <div style="color:var(--error-red)"><strong>失败：</strong>${s.failed}</div>
+      <div style="color:var(--gray-4)"><strong>跳过：</strong>${s.skipped}</div>
+    </div>`;
+    if (result.error) html += `<div style="color:var(--error-red);font-size:var(--font-size-small);padding-bottom:6px">${result.error}</div>`;
+    if (result.details && result.details.length) {
+      html += '<div style="max-height:220px;overflow-y:auto;font-size:var(--font-size-small)"><table class="table" style="width:100%"><thead><tr><th>题号</th><th>结果</th></tr></thead><tbody>';
+      result.details.forEach(d => {
+        html += `<tr><td>${d.question_id}</td>
+          <td style="color:${d.ok ? 'var(--success-green)' : 'var(--error-red)'}">${d.ok ? '✅ 已生成' : `❌ ${d.error || '失败'}`}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+    // 完成后刷新扫描（缺 nl 的题目已减少）
+    this._scanBatchNl();
+  },
+
+  // ============================================================
+  // 批量测试（扫描可测题目 → 勾选 → 逐题测试）
+  // ============================================================
+  batchTestItems: [],   // 扫描结果 [{question_id, ..., testable, tested_models}]
+  batchTestSelected: new Set(),
+
+  /** 扫描可测试题目（模型未测过且信息完备） */
+  _scanBatchTest: async function() {
+    const model = document.getElementById('batch-test-model')?.value.trim();
+    if (!model) { alert('请先填写测试模型编号（名称）'); return; }
+    try {
+      const res = await API.batchTestScan({ model });
+      if (!res.success) { alert(`扫描失败: ${res.detail || '未知错误'}`); return; }
+      this.batchTestItems = res.items || [];
+      // 默认勾选全部可测试项
+      this.batchTestSelected = new Set(this.batchTestItems.filter(i => i.testable).map(i => i.question_id));
+      this._renderBatchTestTable();
+    } catch (e) { alert(`扫描失败: ${e.message}`); }
+  },
+
+  /** 渲染批量测试扫描表（勾选增删 + 基本信息） */
+  _renderBatchTestTable: function() {
+    const container = document.getElementById('batch-test-table');
+    if (!container) return;
+    if (!this.batchTestItems.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--gray-4);padding:16px">没有可测试题目（模型已全部测过，或题目缺自然语言）</div>';
+      return;
+    }
+    let html = '<table class="table" style="width:100%"><thead><tr><th></th><th>题号</th><th>类型</th><th>题型</th><th>行程</th><th>自然语言</th><th>已测模型</th><th>可测</th></tr></thead><tbody>';
+    this.batchTestItems.forEach(item => {
+      const sel = this.batchTestSelected.has(item.question_id);
+      const testable = item.testable;
+      html += `<tr>
+        <td><input type="checkbox" data-test-qid="${item.question_id}" ${sel && testable ? 'checked' : ''} ${testable ? '' : 'disabled'}></td>
+        <td>${item.question_id}</td>
+        <td>${item.type || ''}</td>
+        <td>${item.question_type || ''}</td>
+        <td>${item.question || ''}</td>
+        <td>${item.nl_exists ? '✅ 有' : '❌ 缺'}</td>
+        <td>${(item.tested_models || []).join('、') || '—'}</td>
+        <td>${testable ? '<span style="color:var(--success-green)">可测</span>' : '<span style="color:var(--error-red)">不可测</span>'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    container.querySelectorAll('input[data-test-qid]').forEach(input => {
+      input.onchange = () => {
+        if (input.checked) this.batchTestSelected.add(input.dataset.testQid);
+        else this.batchTestSelected.delete(input.dataset.testQid);
+      };
+    });
+  },
+
+  /** 批量测试全选/取消（仅可测项） */
+  _selectBatchTest: function(all) {
+    this.batchTestSelected = all
+      ? new Set(this.batchTestItems.filter(i => i.testable).map(i => i.question_id))
+      : new Set();
+    this._renderBatchTestTable();
+  },
+
+  /** 开始批量测试 */
+  _startBatchTest: async function() {
+    if (!this.batchTestSelected.size) { alert('未勾选任何可测试题目'); return; }
+    const model = document.getElementById('batch-test-model')?.value.trim();
+    if (!model) { alert('请先填写测试模型编号（名称）'); return; }
+    const maxIter = parseInt(document.getElementById('batch-test-max-iter')?.value || '30', 10) || 30;
+    try {
+      const res = await API.batchTestStart({ model, question_ids: [...this.batchTestSelected], max_iterations: maxIter });
+      if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
+      this._resetBatchTestProgress();
+      this._pollBatchTestStatus();
+    } catch (e) { alert(`启动失败: ${e.message}`); }
+  },
+
+  /** 轮询批量测试进度 */
+  _pollBatchTestStatus: async function() {
+    try {
+      const status = await API.batchTestStatus();
+      this._renderBatchTestProgress(status);
+      if (status.running) { setTimeout(() => this._pollBatchTestStatus(), 800); }
+      else if (status.done) { this._renderBatchTestResult(status.result); }
+    } catch (e) {
+      console.error('批量测试进度轮询失败:', e);
+      setTimeout(() => this._pollBatchTestStatus(), 800);
+    }
+  },
+
+  _resetBatchTestProgress: function() {
+    const bar = document.getElementById('batch-test-bar');
+    if (bar) bar.style.width = '0%';
+    const count = document.getElementById('batch-test-count');
+    if (count) count.textContent = `0 / ${this.batchTestSelected.size}`;
+    const cur = document.getElementById('batch-test-current');
+    if (cur) cur.textContent = '尚未开始';
+    const res = document.getElementById('batch-test-result');
+    if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+  },
+
+  _renderBatchTestProgress: function(status) {
+    const bar = document.getElementById('batch-test-bar');
+    if (bar) bar.style.width = status.total ? `${Math.round((status.done_count / status.total) * 100)}%` : '0%';
+    const count = document.getElementById('batch-test-count');
+    if (count) count.textContent = `${status.done_count || 0} / ${status.total || 0}`;
+    const cur = document.getElementById('batch-test-current');
+    if (cur) cur.textContent = status.current || '';
+  },
+
+  _renderBatchTestResult: function(result) {
+    const container = document.getElementById('batch-test-result');
+    if (!container) return;
+    container.style.display = 'block';
+    const s = result.summary || {};
+    let html = '<div class="card"><div class="card-header">🧪 批量测试结果</div>';
+    html += `<div style="display:flex;gap:16px;padding:8px 0;font-size:var(--font-size-small)">
+      <div><strong>模型：</strong>${s.model || ''}</div>
+      <div><strong>总数：</strong>${s.total}</div>
+      <div style="color:var(--success-green)"><strong>成功：</strong>${s.success}</div>
+      <div style="color:var(--error-red)"><strong>失败/跳过：</strong>${s.failed}</div>
+    </div>`;
+    if (result.details && result.details.length) {
+      html += '<div style="max-height:280px;overflow-y:auto;font-size:var(--font-size-small)"><table class="table" style="width:100%"><thead><tr><th>题号</th><th>结果</th><th>记录文件</th><th>plan_status</th><th>耗时(s)</th></tr></thead><tbody>';
+      result.details.forEach(d => {
+        html += `<tr><td>${d.question_id}</td>
+          <td style="color:${d.ok ? 'var(--success-green)' : 'var(--error-red)'}">${d.ok ? '✅ 已保存测试记录' : `❌ ${d.error || '失败'}`}</td>
+          <td>${d.filename || ''}</td>
+          <td>${d.plan_status || ''}</td>
+          <td>${d.duration ?? ''}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+    // 测试后刷新扫描（该模型已测的项将变为不可测）
+    this._scanBatchTest();
   },
 
   // ============================================================

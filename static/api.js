@@ -325,4 +325,52 @@ const API = {
     });
     return resp.blob();
   },
+
+  /** 扫描缺失自然语言的题目 */
+  batchNlScan: async () => {
+    const resp = await fetch('/api/batch_nl/scan');
+    return resp.json();
+  },
+
+  /** 启动批量自然语言化 */
+  batchNlGenerate: async (payload) => {
+    const resp = await fetch('/api/batch_nl/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.json();
+  },
+
+  /** 查询批量自然语言化进度 */
+  batchNlStatus: async () => {
+    const resp = await fetch('/api/batch_nl/status');
+    return resp.json();
+  },
+
+  /** 扫描可测试题目（某模型未测过且信息完备） */
+  batchTestScan: async (payload) => {
+    const resp = await fetch('/api/batch_test/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.json();
+  },
+
+  /** 启动批量测试 */
+  batchTestStart: async (payload) => {
+    const resp = await fetch('/api/batch_test/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.json();
+  },
+
+  /** 查询批量测试进度 */
+  batchTestStatus: async () => {
+    const resp = await fetch('/api/batch_test/status');
+    return resp.json();
+  },
 };

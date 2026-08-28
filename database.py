@@ -473,7 +473,8 @@ def update_question_metadata(question_id: str, status: str,
                              start_station_id: str = None,
                              end_station_id: str = None,
                              criterion: str = None,
-                             constraints: list = None):
+                             constraints: list = None,
+                             tested_models: list = None):
     """更新单条题目的元数据"""
     metadata = load_metadata()
     if question_id in metadata:
@@ -516,6 +517,8 @@ def update_question_metadata(question_id: str, status: str,
             entry["criterion"] = criterion
         if constraints is not None:
             entry["constraints"] = constraints
+        if tested_models is not None:
+            entry["tested_models"] = tested_models
         if trains is not None:
             existing = set(entry.get("trains", []))
             existing.update(trains)
@@ -561,6 +564,8 @@ def update_question_metadata(question_id: str, status: str,
             entry["criterion"] = criterion
         if constraints is not None:
             entry["constraints"] = constraints
+        if tested_models is not None:
+            entry["tested_models"] = tested_models
         if trains is not None:
             entry["trains"] = sorted(set(trains))
         metadata[question_id] = entry

@@ -3224,7 +3224,8 @@ class BatchGenerateRequest(BaseModel):
     interference_density: float = 0.02
     max_retries: int = 40
     # 批量落盘后是否自动生成自然语言并写回 metadata['nl_question']（需 .env NL_API_KEY）
-    nl_enabled: bool = True
+    # 默认关闭：批量自然语言化由独立的批量语言框（/api/batch_nl/*）异步执行，与批量出题不混合
+    nl_enabled: bool = False
 
 
 # --- POST /api/batch/generate 启动批量出题（线程内执行，双进度条轮询） ---
@@ -3303,6 +3304,251 @@ def api_batch_report(report: Dict = Body(...)):
 
 
 # ============================================================
+# 第五部分C：批量自然语言化（独立框，与批量出题异步、互不影响）
+# ============================================================
+
+_nl_state: Dict[str, Any] = {
+    "running": False, "done": False, "current": "",
+    "total": 0, "done_count": 0, "result": None,
+}
+
+
+def _run_batch_nl(question_ids: List[str]) -> None:
+    """在线程中对勾选题目逐个生成自然语言并写回 metadata['nl_question']。
+
+    复用 nl_question.py 的 build_prompt（含评判标准/行为约束自然化）与 generate_nl；
+    单题失败不影响其它题；缺 NL_API_KEY 时整批跳过。
+    """
+    from nl_question import build_prompt, generate_nl
+    from config import ENV
+    api_key = (ENV.get("NL_API_KEY") or "").strip()
+    if not api_key:
+        _nl_state.update({
+            "running": False, "done": True, "current": "",
+            "result": {"summary": {"total": len(question_ids), "generated": 0, "failed": 0,
+                                    "skipped": len(question_ids)},
+                       "details": [], "error": "未配置 NL_API_KEY，批量自然语言化已整批跳过"},
+        })
+        return
+    model = (ENV.get("DEFAULT_MODEL") or "").strip() or "deepseek-v4-flash"
+    base_url = (ENV.get("DEFAULT_BASE_URL") or "").strip() or "https://api.deepseek.com"
+
+    _nl_state.update({"running": True, "done": False, "current": "",
+                      "total": len(question_ids), "done_count": 0, "result": None})
+    metadata = load_metadata()
+    details = []
+    generated = failed = 0
+    for qid in question_ids:
+        entry = metadata.get(qid)
+        _nl_state["current"] = f"自然语言化：{qid}"
+        if not entry or not entry.get("question"):
+            failed += 1
+            details.append({"question_id": qid, "ok": False, "error": "题目缺少 question 字段"})
+        else:
+            try:
+                nl = generate_nl(api_key, model, base_url, build_prompt(entry))
+                entry["nl_question"] = nl
+                generated += 1
+                details.append({"question_id": qid, "ok": True, "error": None})
+            except Exception as e:
+                failed += 1
+                details.append({"question_id": qid, "ok": False, "error": str(e)})
+        _nl_state["done_count"] += 1
+    save_metadata(metadata)
+    _nl_state["result"] = {
+        "summary": {"total": len(question_ids), "generated": generated, "failed": failed,
+                    "skipped": len(question_ids) - generated - failed},
+        "details": details, "error": None,
+    }
+    _nl_state.update({"running": False, "done": True, "current": ""})
+
+
+class BatchNlGenerateRequest(BaseModel):
+    question_ids: List[str] = []
+
+
+@app.get("/api/batch_nl/scan")
+def api_batch_nl_scan():
+    """扫描缺失自然语言（nl_question）的题目列表，供批量语言面板勾选。"""
+    metadata = load_metadata()
+    from config import QUESTION_DIR
+    db_names = {f[:-3] for f in os.listdir(QUESTION_DIR) if f.endswith(".db")} if os.path.isdir(QUESTION_DIR) else set()
+    items = []
+    for qid, m in metadata.items():
+        if not isinstance(m, dict):
+            continue
+        if m.get("nl_question"):
+            continue
+        items.append({
+            "question_id": qid,
+            "type": m.get("type", ""),
+            "question_type": m.get("question_type", ""),
+            "question": m.get("question", ""),
+            "people_count": m.get("people_count"),
+            "seat_type": m.get("seat_type"),
+            "criterion": m.get("criterion"),
+            "constraints": m.get("constraints"),
+            "db_exists": qid in db_names,
+        })
+    return {"success": True, "items": items, "total": len(items)}
+
+
+@app.post("/api/batch_nl/generate")
+def api_batch_nl_generate(req: BatchNlGenerateRequest):
+    """启动批量自然语言化（独立线程与进度，与批量出题互不影响）。"""
+    if _nl_state.get("running"):
+        raise HTTPException(status_code=400, detail="已有批量自然语言任务运行中，请等待完成")
+    if not req.question_ids:
+        raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描缺失自然语言的题目）")
+    import threading
+    threading.Thread(target=_run_batch_nl, args=(list(req.question_ids),), daemon=True).start()
+    return {"success": True, "message": "批量自然语言化已启动（逐题生成并写回 nl_question）"}
+
+
+@app.get("/api/batch_nl/status")
+def api_batch_nl_status():
+    """返回批量自然语言化进度（单进度条）+ 结果。"""
+    s = _nl_state
+    return {"running": s["running"], "done": s["done"], "current": s["current"],
+            "total": s["total"], "done_count": s["done_count"], "result": s["result"]}
+
+
+# ============================================================
+# 第五部分D：批量测试（扫描可测题目 → 勾选 → 逐题测试）
+# ============================================================
+
+_test_state: Dict[str, Any] = {
+    "running": False, "done": False, "current": "",
+    "total": 0, "done_count": 0, "result": None,
+}
+
+
+def _batch_test_model_testable(m: Dict, model: str) -> bool:
+    """可测试条件：题目信息核查完备（含自然语言问题）且该模型未测试过。"""
+    return bool(m.get("question")) and bool(m.get("nl_question")) \
+        and model not in (m.get("tested_models") or [])
+
+
+def _run_batch_test(model: str, question_ids: List[str], max_iterations: int) -> None:
+    """在线程中逐题测试：重置会话 → 用题目自然语言作为用户消息跑工具循环 → 保存测试记录；
+    成功后把模型名写入该题 metadata.tested_models（每个模型每题只测一次）。"""
+    _test_state.update({"running": True, "done": False, "current": "",
+                        "total": len(question_ids), "done_count": 0, "result": None})
+    metadata = load_metadata()
+    details = []
+    ok_count = 0
+    for qid in question_ids:
+        entry = metadata.get(qid) or {}
+        _test_state["current"] = f"测试：{qid}"
+        if not _batch_test_model_testable(entry, model):
+            details.append({"question_id": qid, "ok": False,
+                            "error": "题目信息不完备（缺 nl_question）或该模型已测试过，已跳过（去重）"})
+        else:
+            try:
+                session_id = f"batch_test_{qid}"
+                api_test_reset(TestResetRequest(session_id=session_id))
+                set_current_question(qid)
+                chat_r = asyncio.run(api_test_chat(ChatRequest(
+                    message=entry.get("nl_question", ""),
+                    model_name=model,
+                    question_id=qid,
+                    session_id=session_id,
+                    max_iterations=max_iterations,
+                )))
+                if chat_r.get("error"):
+                    raise RuntimeError(str(chat_r["error"]))
+                complete_r = api_test_complete(TestCompleteRequest(session_id=session_id))
+                if not complete_r.get("success"):
+                    raise RuntimeError(str(complete_r.get("error", "测试记录保存失败")))
+                tested = list(entry.get("tested_models") or [])
+                if model not in tested:
+                    tested.append(model)
+                entry["tested_models"] = tested
+                ok_count += 1
+                details.append({
+                    "question_id": qid, "ok": True, "error": None,
+                    "filename": complete_r.get("filename", ""),
+                    "plan_status": complete_r.get("plan_status", ""),
+                    "duration": round(complete_r.get("duration", 0), 1),
+                })
+            except Exception as e:
+                details.append({"question_id": qid, "ok": False, "error": str(e)})
+        _test_state["done_count"] += 1
+    save_metadata(metadata)
+    _test_state["result"] = {
+        "summary": {"total": len(question_ids), "success": ok_count,
+                    "failed": len(details) - ok_count, "model": model},
+        "details": details,
+    }
+    _test_state.update({"running": False, "done": True, "current": ""})
+
+
+class BatchTestScanRequest(BaseModel):
+    model: str = ""
+
+
+class BatchTestStartRequest(BaseModel):
+    model: str = ""
+    question_ids: List[str] = []
+    max_iterations: int = 30
+
+
+@app.post("/api/batch_test/scan")
+def api_batch_test_scan(req: BatchTestScanRequest):
+    """扫描可测试题目：信息核查完备（含 nl_question）且该模型未测过；前端据此勾选增删。"""
+    model = (req.model or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="请先填写测试模型编号（名称）")
+    metadata = load_metadata()
+    from config import QUESTION_DIR
+    db_names = {f[:-3] for f in os.listdir(QUESTION_DIR) if f.endswith(".db")} if os.path.isdir(QUESTION_DIR) else set()
+    items = []
+    for qid, m in metadata.items():
+        if not isinstance(m, dict):
+            continue
+        if qid not in db_names:
+            continue
+        items.append({
+            "question_id": qid,
+            "type": m.get("type", ""),
+            "question_type": m.get("question_type", ""),
+            "question": m.get("question", ""),
+            "nl_exists": bool(m.get("nl_question")),
+            "people_count": m.get("people_count"),
+            "seat_type": m.get("seat_type"),
+            "criterion": m.get("criterion"),
+            "constraints": m.get("constraints"),
+            "tested_models": m.get("tested_models") or [],
+            "testable": _batch_test_model_testable(m, model),
+        })
+    return {"success": True, "model": model, "items": items, "total": len(items)}
+
+
+@app.post("/api/batch_test/start")
+def api_batch_test_start(req: BatchTestStartRequest):
+    """启动批量测试：仅对“信息完备且该模型未测过”的题目执行，逐题保存测试记录并写回 tested_models。"""
+    model = (req.model or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="请先填写测试模型编号（名称）")
+    if _test_state.get("running"):
+        raise HTTPException(status_code=400, detail="已有批量测试任务运行中，请等待完成")
+    if not req.question_ids:
+        raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描可测试题目）")
+    import threading
+    max_iter = max(1, min(int(req.max_iterations or 30), 100))
+    threading.Thread(target=_run_batch_test, args=(model, list(req.question_ids), max_iter), daemon=True).start()
+    return {"success": True, "message": "批量测试已启动（仅对信息完备且该模型未测过的题目执行）"}
+
+
+@app.get("/api/batch_test/status")
+def api_batch_test_status():
+    """返回批量测试进度（单进度条）+ 逐题结果。"""
+    s = _test_state
+    return {"running": s["running"], "done": s["done"], "current": s["current"],
+            "total": s["total"], "done_count": s["done_count"], "result": s["result"]}
+
+
+# ============================================================
 # 第六部分：静态文件服务
 # ============================================================
 
@@ -3337,6 +3583,16 @@ def selective_question():
 
 @app.get("/batch_question", response_class=HTMLResponse)
 def batch_question():
+    return get_html("index.html")
+
+
+@app.get("/batch_nl_question", response_class=HTMLResponse)
+def batch_nl_question():
+    return get_html("index.html")
+
+
+@app.get("/batch_test_question", response_class=HTMLResponse)
+def batch_test_question():
     return get_html("index.html")
 
 
