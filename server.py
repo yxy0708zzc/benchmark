@@ -18,6 +18,7 @@ import random
 import re
 import logging
 import asyncio
+import threading
 from io import BytesIO
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
@@ -31,7 +32,7 @@ from pydantic import BaseModel
 
 from config import (
     API_CONFIG, QUESTION_CONFIG, ensure_directories,
-    RAILWAY_DB_PATH, METADATA_PATH,
+    RAILWAY_DB_PATH, METADATA_PATH, LOGS_DIR,
     get_question_db_path, TEMPLATES_DIR
 )
 from database import (
@@ -2314,10 +2315,14 @@ async def api_test_chat(req: ChatRequest):
         iteration = 0
         final_content = ""
         final_reasoning = ""
+        # 批量测试会话（batch_test_<qid>）：逐轮写入批量日志，供前端实时观察执行进度
+        batch_qid = req.session_id[len("batch_test_"):] if req.session_id.startswith("batch_test_") else None
 
         async with httpx.AsyncClient(timeout=60) as client:
             while iteration < max_iterations:
                 iteration += 1
+                if batch_qid:
+                    _batch_log("batch_test", f"{batch_qid} 第 {iteration}/{max_iterations} 轮对话：请求模型 {model_name}")
 
                 # 调用大模型 API
                 api_url = f"{api_base_url.rstrip('/')}/chat/completions"
@@ -2374,6 +2379,8 @@ async def api_test_chat(req: ChatRequest):
 
                     # 执行工具
                     tool_result = await execute_tool_handler(func_name, func_args)
+                    if batch_qid:
+                        _batch_log("batch_test", f"{batch_qid} 第 {iteration} 轮执行工具 {func_name}")
 
                     tool_calls_log.append({
                         "tool_name": func_name,
@@ -3264,6 +3271,69 @@ _batch_state: Dict[str, Any] = {
 }
 
 
+# ============================================================
+# 批量工具日志：三个批量任务（batch_generate / batch_nl / batch_test）共用
+# - 内存环形缓冲：供前端 status 接口增量轮询（seq 游标）
+# - 追加落盘 logs/batch_tools.log：供后台直接查看
+# ============================================================
+_batch_logs: Dict[str, List[Dict[str, Any]]] = {
+    "batch_generate": [], "batch_nl": [], "batch_test": [],
+}
+_batch_logs_lock = threading.Lock()
+_batch_log_seq = 0
+_BATCH_LOG_MAX = 500                    # 每个任务内存中保留的最大条数
+_BATCH_LOG_PATH = os.path.join(LOGS_DIR, "batch_tools.log")
+
+
+def _batch_log(job: str, message: str, level: str = "info") -> None:
+    """写一条批量任务日志：内存缓冲（带全局自增 seq）+ 追加落盘。"""
+    global _batch_log_seq
+    with _batch_logs_lock:
+        _batch_log_seq += 1
+        entry = {
+            "seq": _batch_log_seq,
+            "t": datetime.now().strftime("%H:%M:%S"),
+            "level": level,
+            "msg": message,
+        }
+        buf = _batch_logs.setdefault(job, [])
+        buf.append(entry)
+        if len(buf) > _BATCH_LOG_MAX:
+            del buf[: len(buf) - _BATCH_LOG_MAX]
+    try:
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        with open(_BATCH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{job}] [{level}] {message}\n")
+    except OSError:
+        pass  # 落盘失败不影响任务执行
+
+
+def _batch_log_clear(job: str) -> None:
+    """任务启动时清空对应缓冲（全局 seq 不回退，前端游标安全）。"""
+    with _batch_logs_lock:
+        _batch_logs[job] = []
+
+
+def _batch_log_payload(job: str, after_seq: int) -> Dict[str, Any]:
+    """返回 seq > after_seq 的增量日志 + 当前全局 seq（前端下次带来的游标）。"""
+    with _batch_logs_lock:
+        items = [e for e in _batch_logs.get(job, []) if e["seq"] > after_seq]
+        return {"items": items, "last_seq": _batch_log_seq}
+
+
+@app.get("/api/batch/logs")
+def api_batch_logs_file(lines: int = 500):
+    """读取后台日志文件（logs/batch_tools.log）最后 N 行，纯文本输出，可直接在浏览器打开。"""
+    if not os.path.exists(_BATCH_LOG_PATH):
+        return Response(content="（日志文件尚不存在）", media_type="text/plain; charset=utf-8")
+    try:
+        with open(_BATCH_LOG_PATH, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+        return Response(content="".join(all_lines[-max(1, lines):]), media_type="text/plain; charset=utf-8")
+    except OSError as e:
+        return Response(content=f"读取日志失败: {e}", media_type="text/plain; charset=utf-8")
+
+
 def _generate_batch_nl(question_ids: List[str]) -> Dict[str, Any]:
     """批量落盘后为成功题目自动生成自然语言并写回 metadata['nl_question']。
 
@@ -3319,6 +3389,8 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             "done_count": 0,
             "result": None,
         })
+        _batch_log("batch_generate",
+                   f"批量出题开始：共 {exists_total + sel_total} 题（存在性 {exists_total} + 选择性 {sel_total}），每题重试上限 {max_retries}")
 
         details: List[Dict] = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3351,10 +3423,15 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 constraints=constraints,
             ), seq
 
-        def _generate_one(req, prefix, fake, with_if):
-            """固定参数重试 ≤ max_retries：成功返回 (qid, 尝试次数, None)，失败返回 (None, 尝试次数, 错误)"""
+        def _generate_one(question_type, transfers, plans, mode, criterion, constraints, prefix, fake, with_if):
+            """重试 ≤ max_retries：每次重试都重新随机站对/方向/人数/座位（换站对提高成功率）；
+            成功返回 (qid, 尝试次数, None, seq)，失败返回 (None, max_retries, 错误, 首次seq)"""
             last_err = ""
+            first_sq = None
             for attempt in range(1, max_retries + 1):
+                req, sq = _build_request(question_type, transfers, plans, mode, criterion, constraints)
+                if first_sq is None:
+                    first_sq = sq
                 try:
                     qid, _preview = _generate_one_variant(
                         req, prefix, fake,
@@ -3362,12 +3439,12 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                         rw_conn, with_if,
                     )
                     _confirm_generated_question(qid, interference=with_if, interference_density=density)
-                    return qid, attempt, None
+                    return qid, attempt, None, sq
                 except HTTPException as e:
                     last_err = str(e.detail) if hasattr(e, "detail") else str(e)
                 except Exception as e:
                     last_err = str(e)
-            return None, max_retries, last_err
+            return None, max_retries, last_err, first_sq
 
         # ---- 存在性问题：1_ 伪干扰（有干扰）/ 0_ 无干扰 ----
         exists_fail = [{"has_interference": 0, "no_interference": 0} for _ in distribution]
@@ -3378,8 +3455,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             plans = row.get("segment_plans") or []
             for _ in range(int(row.get("has_interference") or 0)):
                 _batch_state["current"] = f"存在性（有干扰）：{row_label}"
-                req, sq = _build_request(qtype, transfers, plans, "existence", "comprehensive", [])
-                qid, attempt, err = _generate_one(req, "1_", True, True)
+                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "1_", True, True)
                 details.append({
                     "question_id": qid or f"1_B{timestamp}_{sq:04d}",
                     "row": f"{row_label}/有干扰",
@@ -3387,11 +3463,13 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 })
                 if qid is None:
                     exists_fail[idx]["has_interference"] += 1
+                    _batch_log("batch_generate", f"[{sq:04d}] 1_ 存在性（有干扰）{row_label} 失败（重试 {attempt} 次）：{err}", "error")
+                else:
+                    _batch_log("batch_generate", f"[{sq:04d}] 1_ 存在性（有干扰）{row_label} → {qid}（尝试 {attempt} 次）", "success")
                 _batch_state["done_count"] += 1
             for _ in range(int(row.get("no_interference") or 0)):
                 _batch_state["current"] = f"存在性（无干扰）：{row_label}"
-                req, sq = _build_request(qtype, transfers, plans, "existence", "comprehensive", [])
-                qid, attempt, err = _generate_one(req, "0_", False, False)
+                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "0_", False, False)
                 details.append({
                     "question_id": qid or f"0_B{timestamp}_{sq:04d}",
                     "row": f"{row_label}/无干扰",
@@ -3399,6 +3477,9 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 })
                 if qid is None:
                     exists_fail[idx]["no_interference"] += 1
+                    _batch_log("batch_generate", f"[{sq:04d}] 0_ 存在性（无干扰）{row_label} 失败（重试 {attempt} 次）：{err}", "error")
+                else:
+                    _batch_log("batch_generate", f"[{sq:04d}] 0_ 存在性（无干扰）{row_label} → {qid}（尝试 {attempt} 次）", "success")
                 _batch_state["done_count"] += 1
 
         # ---- 选择性问题：2_ 真干扰（评判标准 + 行为约束） ----
@@ -3410,8 +3491,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             for _ in range(int(row.get("count") or 0)):
                 _batch_state["current"] = f"选择性：{_CRITERION_CN.get(crit, crit)}({_BEHAVIOR_CN.get(beh, beh)})"
                 # 题型不在此处指定：_generate_one_variant 对选择性题按行为约束自动推导（保证有解）
-                req, sq = _build_request(None, 0, [], "selective", crit, constraints)
-                qid, attempt, err = _generate_one(req, "2_", False, True)
+                qid, attempt, err, sq = _generate_one(None, 0, [], "selective", crit, constraints, "2_", False, True)
                 details.append({
                     "question_id": qid or f"2_B{timestamp}_{sq:04d}",
                     "row": f"{_CRITERION_CN.get(crit, crit)}/{_BEHAVIOR_CN.get(beh, beh)}",
@@ -3419,9 +3499,15 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 })
                 if qid is None:
                     sel_fail[idx] += 1
+                    _batch_log("batch_generate", f"[{sq:04d}] 2_ 选择性 {_CRITERION_CN.get(crit, crit)}({_BEHAVIOR_CN.get(beh, beh)}) 失败（重试 {attempt} 次）：{err}", "error")
+                else:
+                    _batch_log("batch_generate", f"[{sq:04d}] 2_ 选择性 {_CRITERION_CN.get(crit, crit)}({_BEHAVIOR_CN.get(beh, beh)}) → {qid}（尝试 {attempt} 次）", "success")
                 _batch_state["done_count"] += 1
 
         ok_count = sum(1 for d in details if d["ok"])
+        _batch_log("batch_generate",
+                   f"出题完成：成功 {ok_count} / 失败 {len(details) - ok_count}（共 {len(details)} 题）",
+                   "success" if ok_count == len(details) else "warn")
         nl_result = None
         if nl_enabled and ok_count > 0:
             nl_result = _generate_batch_nl([d["question_id"] for d in details if d["ok"]])
@@ -3450,6 +3536,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             "details": details, "report": report,
         }
     except Exception as e:
+        _batch_log("batch_generate", f"批量出题异常终止：{e}", "error")
         _batch_state["result"] = {
             "summary": {"total": 0, "success": 0, "failed": 0,
                         "nl_generated": 0, "nl_failed": 0, "nl_skipped": 0, "nl_error": str(e)},
@@ -3504,15 +3591,17 @@ def api_batch_generate(req: BatchGenerateRequest):
     if not req.stations:
         raise HTTPException(status_code=400, detail="未提供站对表（2.xlsx），请先上传解析")
     import threading
+    _batch_log_clear("batch_generate")
+    _batch_log("batch_generate", "收到批量出题请求，任务已启动")
     thread = threading.Thread(target=_run_batch, args=(req.model_dump(),), daemon=True)
     thread.start()
     return {"success": True, "message": "批量出题已启动，可轮询 /api/batch/status 查看进度"}
 
 
-# --- GET /api/batch/status 批量进度（单进度条） ---
+# --- GET /api/batch/status 批量进度（单进度条 + 增量日志） ---
 @app.get("/api/batch/status")
-def api_batch_status():
-    """返回批量出题进度：done_count/total 单一进度 + 当前任务 + 完成结果（含自然语言化统计）。"""
+def api_batch_status(after_seq: int = 0):
+    """返回批量出题进度：done_count/total 单一进度 + 当前任务 + 完成结果 + 增量日志。"""
     s = _batch_state
     return {
         "running": s["running"],
@@ -3521,6 +3610,7 @@ def api_batch_status():
         "total": s["total"],
         "done_count": s["done_count"],
         "result": s["result"],
+        "logs": _batch_log_payload("batch_generate", after_seq),
     }
 
 
@@ -3590,6 +3680,7 @@ def _run_batch_nl(question_ids: List[str]) -> None:
     from config import ENV
     api_key = (ENV.get("NL_API_KEY") or "").strip()
     if not api_key:
+        _batch_log("batch_nl", "未配置 NL_API_KEY，批量自然语言化整批跳过", "error")
         _nl_state.update({
             "running": False, "done": True, "current": "",
             "result": {"summary": {"total": len(question_ids), "generated": 0, "failed": 0,
@@ -3602,24 +3693,31 @@ def _run_batch_nl(question_ids: List[str]) -> None:
 
     _nl_state.update({"running": True, "done": False, "current": "",
                       "total": len(question_ids), "done_count": 0, "result": None})
+    _batch_log("batch_nl", f"批量自然语言化开始：共 {len(question_ids)} 题（模型 {model}）")
     metadata = load_metadata()
     details = []
     generated = failed = 0
-    for qid in question_ids:
+    for i, qid in enumerate(question_ids, 1):
         entry = metadata.get(qid)
-        _nl_state["current"] = f"自然语言化：{qid}"
+        _nl_state["current"] = f"自然语言化（{i}/{len(question_ids)}）：{qid}"
+        _batch_log("batch_nl", f"（{i}/{len(question_ids)}）开始生成 {qid} 的自然语言")
         if not entry or not entry.get("question"):
             failed += 1
             details.append({"question_id": qid, "ok": False, "error": "题目缺少 question 字段"})
+            _batch_log("batch_nl", f"{qid} 缺少 question 字段，跳过", "error")
         else:
             try:
                 nl = generate_nl(api_key, model, base_url, build_prompt(entry))
                 entry["nl_question"] = nl
                 generated += 1
                 details.append({"question_id": qid, "ok": True, "error": None})
+                # 每题成功立即落盘：进度实时可见，中断不丢已生成结果
+                save_metadata(metadata)
+                _batch_log("batch_nl", f"{qid} 自然语言生成成功并已写回 metadata", "success")
             except Exception as e:
                 failed += 1
                 details.append({"question_id": qid, "ok": False, "error": str(e)})
+                _batch_log("batch_nl", f"{qid} 自然语言生成失败：{e}", "error")
         _nl_state["done_count"] += 1
     save_metadata(metadata)
     _nl_state["result"] = {
@@ -3627,6 +3725,8 @@ def _run_batch_nl(question_ids: List[str]) -> None:
                     "skipped": len(question_ids) - generated - failed},
         "details": details, "error": None,
     }
+    _batch_log("batch_nl", f"批量自然语言化完成：成功 {generated} / 失败 {failed} / 跳过 {len(question_ids) - generated - failed}",
+               "success" if failed == 0 else "warn")
     _nl_state.update({"running": False, "done": True, "current": ""})
 
 
@@ -3668,16 +3768,19 @@ def api_batch_nl_generate(req: BatchNlGenerateRequest):
     if not req.question_ids:
         raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描缺失自然语言的题目）")
     import threading
+    _batch_log_clear("batch_nl")
+    _batch_log("batch_nl", f"收到批量自然语言化请求：{len(req.question_ids)} 题，任务已启动")
     threading.Thread(target=_run_batch_nl, args=(list(req.question_ids),), daemon=True).start()
     return {"success": True, "message": "批量自然语言化已启动（逐题生成并写回 nl_question）"}
 
 
 @app.get("/api/batch_nl/status")
-def api_batch_nl_status():
-    """返回批量自然语言化进度（单进度条）+ 结果。"""
+def api_batch_nl_status(after_seq: int = 0):
+    """返回批量自然语言化进度（单进度条）+ 增量日志 + 结果。"""
     s = _nl_state
     return {"running": s["running"], "done": s["done"], "current": s["current"],
-            "total": s["total"], "done_count": s["done_count"], "result": s["result"]}
+            "total": s["total"], "done_count": s["done_count"], "result": s["result"],
+            "logs": _batch_log_payload("batch_nl", after_seq)}
 
 
 # ============================================================
@@ -3701,15 +3804,18 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int) ->
     成功后把模型名写入该题 metadata.tested_models（每个模型每题只测一次）。"""
     _test_state.update({"running": True, "done": False, "current": "",
                         "total": len(question_ids), "done_count": 0, "result": None})
+    _batch_log("batch_test", f"批量测试开始：模型 {model}，共 {len(question_ids)} 题，最大工具调用 {max_iterations}")
     metadata = load_metadata()
     details = []
     ok_count = 0
-    for qid in question_ids:
+    for i, qid in enumerate(question_ids, 1):
         entry = metadata.get(qid) or {}
-        _test_state["current"] = f"测试：{qid}"
+        _test_state["current"] = f"测试（{i}/{len(question_ids)}）：{qid}"
+        _batch_log("batch_test", f"（{i}/{len(question_ids)}）开始测试 {qid}")
         if not _batch_test_model_testable(entry, model):
             details.append({"question_id": qid, "ok": False,
                             "error": "题目信息不完备（缺 nl_question）或该模型已测试过，已跳过（去重）"})
+            _batch_log("batch_test", f"{qid} 不可测（缺 nl_question 或该模型已测过），跳过", "warn")
         else:
             try:
                 session_id = f"batch_test_{qid}"
@@ -3738,8 +3844,12 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int) ->
                     "plan_status": complete_r.get("plan_status", ""),
                     "duration": round(complete_r.get("duration", 0), 1),
                 })
+                _batch_log("batch_test",
+                           f"{qid} 测试完成（plan_status={complete_r.get('plan_status', '')}，耗时 {round(complete_r.get('duration', 0), 1)}s）→ {complete_r.get('filename', '')}",
+                           "success")
             except Exception as e:
                 details.append({"question_id": qid, "ok": False, "error": str(e)})
+                _batch_log("batch_test", f"{qid} 测试失败：{e}", "error")
         _test_state["done_count"] += 1
     save_metadata(metadata)
     _test_state["result"] = {
@@ -3747,6 +3857,8 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int) ->
                     "failed": len(details) - ok_count, "model": model},
         "details": details,
     }
+    _batch_log("batch_test", f"批量测试完成：成功 {ok_count} / 失败 {len(details) - ok_count}（共 {len(question_ids)} 题）",
+               "success" if ok_count == len(details) else "warn")
     _test_state.update({"running": False, "done": True, "current": ""})
 
 
@@ -3803,16 +3915,19 @@ def api_batch_test_start(req: BatchTestStartRequest):
         raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描可测试题目）")
     import threading
     max_iter = max(1, min(int(req.max_iterations or 30), 100))
+    _batch_log_clear("batch_test")
+    _batch_log("batch_test", f"收到批量测试请求：模型 {model}，{len(req.question_ids)} 题，任务已启动")
     threading.Thread(target=_run_batch_test, args=(model, list(req.question_ids), max_iter), daemon=True).start()
     return {"success": True, "message": "批量测试已启动（仅对信息完备且该模型未测过的题目执行）"}
 
 
 @app.get("/api/batch_test/status")
-def api_batch_test_status():
-    """返回批量测试进度（单进度条）+ 逐题结果。"""
+def api_batch_test_status(after_seq: int = 0):
+    """返回批量测试进度（单进度条）+ 增量日志 + 逐题结果。"""
     s = _test_state
     return {"running": s["running"], "done": s["done"], "current": s["current"],
-            "total": s["total"], "done_count": s["done_count"], "result": s["result"]}
+            "total": s["total"], "done_count": s["done_count"], "result": s["result"],
+            "logs": _batch_log_payload("batch_test", after_seq)}
 
 
 # ============================================================

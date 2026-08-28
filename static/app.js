@@ -1507,6 +1507,8 @@ const App = {
     });
     this._validateSeatTotal();
     this._resetBatchProgress();
+    // 服务端任务若仍在运行（如页面刷新后），自动恢复进度与日志轮询
+    this._resumeBatchPolling('batch_generate');
   },
 
   /** 批量自然语言化页初始化（导航栏独立页） */
@@ -1519,6 +1521,20 @@ const App = {
     if (nlAll) nlAll.onclick = () => this._selectBatchNl(true);
     const nlNone = document.getElementById('btn-batch-nl-select-none');
     if (nlNone) nlNone.onclick = () => this._selectBatchNl(false);
+
+    // 拖选：按住鼠标划过选框即可批量勾选/取消勾选
+    this._bindDragSelect(
+      document.getElementById('batch-nl-table'),
+      'input[data-nl-qid]',
+      (cb, checked) => {
+        cb.checked = checked;
+        if (checked) this.batchNlSelected.add(cb.dataset.nlQid);
+        else this.batchNlSelected.delete(cb.dataset.nlQid);
+      },
+    );
+
+    // 服务端任务若仍在运行（如页面刷新后），自动恢复进度与日志轮询
+    this._resumeBatchPolling('batch_nl');
   },
 
   /** 批量测试页初始化（导航栏独立页） */
@@ -1531,6 +1547,21 @@ const App = {
     if (testAll) testAll.onclick = () => this._selectBatchTest(true);
     const testNone = document.getElementById('btn-batch-test-select-none');
     if (testNone) testNone.onclick = () => this._selectBatchTest(false);
+
+    // 拖选：按住鼠标划过选框即可批量勾选/取消勾选（不可测的 disabled 项自动跳过）
+    this._bindDragSelect(
+      document.getElementById('batch-test-table'),
+      'input[data-test-qid]',
+      (cb, checked) => {
+        cb.checked = checked;
+        if (checked) this.batchTestSelected.add(cb.dataset.testQid);
+        else this.batchTestSelected.delete(cb.dataset.testQid);
+      },
+      (cb) => !cb.disabled,
+    );
+
+    // 服务端任务若仍在运行（如页面刷新后），自动恢复进度与日志轮询
+    this._resumeBatchPolling('batch_test');
   },
 
   /** 校验座位等级比例总和 = 100% */
@@ -1558,6 +1589,7 @@ const App = {
     if (result) { result.style.display = 'none'; result.innerHTML = ''; }
     const btnReport = document.getElementById('btn-batch-report');
     if (btnReport) btnReport.style.display = 'none';
+    this._resetBatchLog('batch-gen-log', 'batch_generate');
   },
 
   /** 解析 1.xlsx 分布表 */
@@ -1693,22 +1725,33 @@ const App = {
     try {
       const result = await API.batchGenerate(payload);
       if (!result.success) { alert(`批量出题启动失败: ${result.detail || '未知错误'}`); this._resetBatchProgress(); return; }
-      this._pollBatchStatus();
+      if (!this._batchGenPolling) this._pollBatchStatus();
     } catch (e) {
       alert(`批量出题启动失败: ${e.message}`);
       this._resetBatchProgress();
     }
   },
 
-  /** 轮询批量状态，更新单进度条 */
-  _pollBatchStatus: async function() {
+  /** 轮询批量状态，更新单进度条与日志（skipLogReplay=true 仅同步游标不回放旧日志） */
+  _pollBatchStatus: async function(skipLogReplay) {
+    this._batchGenPolling = true;
     try {
-      const status = await API.batchStatus();
+      const status = await API.batchStatus(this._batchLogSeqs.batch_generate || 0);
       this._renderBatchProgress(status);
+      this._appendBatchLog('batch-gen-log', 'batch_generate', status.logs, skipLogReplay);
       if (status.running) {
         setTimeout(() => this._pollBatchStatus(), 500);
-      } else if (status.done) {
-        this._renderBatchResult(status.result);
+      } else {
+        this._batchGenPolling = false;
+        if (status.done) {
+          this._renderBatchResult(status.result);
+          // 任务在本页面会话中运行结束后，弹窗提示失败题目数
+          const failed = status.result?.summary?.failed;
+          if (this._batchGenWasRunning && typeof failed === 'number') {
+            alert(`批量出题结束\n失败题目数：${failed}`);
+          }
+          this._batchGenWasRunning = false;
+        }
       }
     } catch (e) {
       console.error('批量状态轮询失败:', e);
@@ -1724,6 +1767,66 @@ const App = {
     if (count) count.textContent = `${status.done_count || 0} / ${status.total || 0}`;
     const cur = document.getElementById('batch-current-task');
     if (cur) cur.textContent = status.current || '';
+    // 标记任务在本页面会话中处于运行态（用于结束时弹窗判断）
+    if (status.running) this._batchGenWasRunning = true;
+  },
+
+  // ============================================================
+  // 批量日志通用渲染（三个批量工具共用）
+  // ============================================================
+  // 各任务已读日志游标（seq），与服务端全局自增序号对应
+  _batchLogSeqs: { batch_generate: 0, batch_nl: 0, batch_test: 0 },
+  // 各任务轮询进行中标志（防止多条轮询链并行）
+  _batchGenPolling: false,
+  _batchNlPolling: false,
+  _batchTestPolling: false,
+  // 批量出题任务在本页面会话中处于运行态（结束时据此弹窗提示失败数）
+  _batchGenWasRunning: false,
+
+  /** 增量追加日志行并自动滚动到底部（textContent 渲染，防注入）
+   *  syncOnly=true 时仅同步游标、不渲染（进入页面时避免回放旧日志，只显示新出现的） */
+  _appendBatchLog: function(containerId, job, payload, syncOnly) {
+    if (!payload) return;
+    this._batchLogSeqs[job] = payload.last_seq ?? this._batchLogSeqs[job] ?? 0;
+    const items = payload.items || [];
+    if (syncOnly || !items.length) return;
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    if (box.dataset.hasLog !== '1') { box.innerHTML = ''; box.dataset.hasLog = '1'; }
+    const frag = document.createDocumentFragment();
+    items.forEach(it => {
+      const div = document.createElement('div');
+      div.style.color = it.level === 'error' ? 'var(--error-red)'
+        : it.level === 'success' ? 'var(--success-green)'
+        : it.level === 'warn' ? '#d97706' : 'var(--gray-5)';
+      div.textContent = `[${it.t}] ${it.msg}`;
+      frag.appendChild(div);
+    });
+    box.appendChild(frag);
+    box.scrollTop = box.scrollHeight;
+  },
+
+  /** 重置日志区（任务启动时调用） */
+  _resetBatchLog: function(containerId, job) {
+    this._batchLogSeqs[job] = 0;
+    const box = document.getElementById(containerId);
+    if (box) {
+      box.dataset.hasLog = '0';
+      box.innerHTML = '<div style="color:var(--gray-4)">暂无日志</div>';
+    }
+  },
+
+  /** 进入页面时恢复轮询：服务端任务仍在运行（如刷新页面后）则继续更新进度与日志。
+   *  首次拉取仅同步日志游标（不回放旧日志，前端只显示之后新出现的日志） */
+  _resumeBatchPolling: function(job) {
+    const flag = { batch_generate: '_batchGenPolling', batch_nl: '_batchNlPolling', batch_test: '_batchTestPolling' }[job];
+    if (this[flag]) return;
+    const start = {
+      batch_generate: () => this._pollBatchStatus(true),
+      batch_nl: () => this._pollBatchNlStatus(true),
+      batch_test: () => this._pollBatchTestStatus(true),
+    }[job];
+    if (start) start();
   },
 
   /** 渲染批量结果 + 显示回执下载按钮 */
@@ -1812,7 +1915,7 @@ const App = {
     this.batchNlItems.forEach(item => {
       const sel = this.batchNlSelected.has(item.question_id);
       html += `<tr>
-        <td><input type="checkbox" data-nl-qid="${item.question_id}" ${sel ? 'checked' : ''}></td>
+        <td style="text-align:center;user-select:none"><input type="checkbox" data-nl-qid="${item.question_id}" ${sel ? 'checked' : ''} style="cursor:pointer;vertical-align:middle"></td>
         <td>${item.question_id}</td>
         <td>${item.type || ''}</td>
         <td>${item.question_type || ''}</td>
@@ -1846,17 +1949,19 @@ const App = {
       const res = await API.batchNlGenerate({ question_ids: [...this.batchNlSelected] });
       if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
       this._resetBatchNlProgress();
-      this._pollBatchNlStatus();
+      if (!this._batchNlPolling) this._pollBatchNlStatus();
     } catch (e) { alert(`启动失败: ${e.message}`); }
   },
 
-  /** 轮询批量自然语言化进度 */
-  _pollBatchNlStatus: async function() {
+  /** 轮询批量自然语言化进度（含增量日志；skipLogReplay=true 仅同步游标不回放旧日志） */
+  _pollBatchNlStatus: async function(skipLogReplay) {
+    this._batchNlPolling = true;
     try {
-      const status = await API.batchNlStatus();
+      const status = await API.batchNlStatus(this._batchLogSeqs.batch_nl || 0);
       this._renderBatchNlProgress(status);
+      this._appendBatchLog('batch-nl-log', 'batch_nl', status.logs, skipLogReplay);
       if (status.running) { setTimeout(() => this._pollBatchNlStatus(), 600); }
-      else if (status.done) { this._renderBatchNlResult(status.result); }
+      else { this._batchNlPolling = false; if (status.done) this._renderBatchNlResult(status.result); }
     } catch (e) {
       console.error('自然语言化进度轮询失败:', e);
       setTimeout(() => this._pollBatchNlStatus(), 600);
@@ -1872,6 +1977,7 @@ const App = {
     if (cur) cur.textContent = '尚未开始';
     const res = document.getElementById('batch-nl-result');
     if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+    this._resetBatchLog('batch-nl-log', 'batch_nl');
   },
 
   _renderBatchNlProgress: function(status) {
@@ -1943,7 +2049,7 @@ const App = {
       const sel = this.batchTestSelected.has(item.question_id);
       const testable = item.testable;
       html += `<tr>
-        <td><input type="checkbox" data-test-qid="${item.question_id}" ${sel && testable ? 'checked' : ''} ${testable ? '' : 'disabled'}></td>
+        <td style="text-align:center;user-select:none"><input type="checkbox" data-test-qid="${item.question_id}" ${sel && testable ? 'checked' : ''} ${testable ? '' : 'disabled'} style="cursor:pointer;vertical-align:middle"></td>
         <td>${item.question_id}</td>
         <td>${item.type || ''}</td>
         <td>${item.question_type || ''}</td>
@@ -1981,17 +2087,19 @@ const App = {
       const res = await API.batchTestStart({ model, question_ids: [...this.batchTestSelected], max_iterations: maxIter });
       if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
       this._resetBatchTestProgress();
-      this._pollBatchTestStatus();
+      if (!this._batchTestPolling) this._pollBatchTestStatus();
     } catch (e) { alert(`启动失败: ${e.message}`); }
   },
 
-  /** 轮询批量测试进度 */
-  _pollBatchTestStatus: async function() {
+  /** 轮询批量测试进度（含增量日志；skipLogReplay=true 仅同步游标不回放旧日志） */
+  _pollBatchTestStatus: async function(skipLogReplay) {
+    this._batchTestPolling = true;
     try {
-      const status = await API.batchTestStatus();
+      const status = await API.batchTestStatus(this._batchLogSeqs.batch_test || 0);
       this._renderBatchTestProgress(status);
+      this._appendBatchLog('batch-test-log', 'batch_test', status.logs, skipLogReplay);
       if (status.running) { setTimeout(() => this._pollBatchTestStatus(), 800); }
-      else if (status.done) { this._renderBatchTestResult(status.result); }
+      else { this._batchTestPolling = false; if (status.done) this._renderBatchTestResult(status.result); }
     } catch (e) {
       console.error('批量测试进度轮询失败:', e);
       setTimeout(() => this._pollBatchTestStatus(), 800);
@@ -2006,6 +2114,7 @@ const App = {
     const cur = document.getElementById('batch-test-current');
     if (cur) cur.textContent = '尚未开始';
     const res = document.getElementById('batch-test-result');
+    this._resetBatchLog('batch-test-log', 'batch_test');
     if (res) { res.style.display = 'none'; res.innerHTML = ''; }
   },
 
@@ -2060,7 +2169,122 @@ const App = {
     });
     document.getElementById('qm-keyword')?.addEventListener('input', () => this._refreshQuestionList());
 
+    // 表头全选/全不选
+    document.getElementById('qm-check-all')?.addEventListener('change', (e) => {
+      this._toggleQmAll(e.target.checked);
+    });
+
+    // 拖选：按住鼠标划过选框即可批量勾选/取消勾选
+    this._bindDragSelect(
+      document.getElementById('qm-tbody'),
+      'input.qm-check',
+      (cb, checked) => this._setQmCheck(cb, checked),
+    );
+
     this._refreshQuestionList();
+  },
+
+  // 选中状态：qid 集合（刷新后按可见列表裁剪）
+  _qmSelected: new Set(),
+
+  // 拖选公共状态：{mode:boolean, onSet:function}，mouseup 时清除
+  _dragSelecting: null,
+
+  /**
+   * 通用复选框拖选绑定（事件委托，绑定一次）
+   * @param {HTMLElement} container 事件委托容器（可被整体重渲染）
+   * @param {string} checkboxSelector 容器内复选框选择器
+   * @param {(cb: HTMLInputElement, checked: boolean)=>void} onSet 状态变更回调
+   * @param {(cb: HTMLInputElement)=>boolean} [isEnabled] 返回 false 则跳过该选框（如 disabled）
+   */
+  _bindDragSelect: function(container, checkboxSelector, onSet, isEnabled) {
+    if (!container || container.dataset.dragSelectBound) return;
+    container.dataset.dragSelectBound = '1';
+
+    container.addEventListener('mousedown', (e) => {
+      const cb = e.target.closest(checkboxSelector);
+      if (!cb || cb.disabled || (isEnabled && !isEnabled(cb))) return;
+      // 阻止原生点击与文本选择，统一走拖选状态机
+      e.preventDefault();
+      this._dragSelecting = { mode: !cb.checked, onSet };
+      onSet(cb, this._dragSelecting.mode);
+    });
+    container.addEventListener('mouseover', (e) => {
+      if (!this._dragSelecting || this._dragSelecting.onSet !== onSet) return;
+      const cb = e.target.closest(checkboxSelector);
+      if (!cb || cb.disabled || (isEnabled && !isEnabled(cb))) return;
+      onSet(cb, this._dragSelecting.mode);
+    });
+    // 全局 mouseup 结束拖选（防重绑定：统一走 window 一次性标记）
+    if (!window.__dragSelectMouseUpBound) {
+      window.__dragSelectMouseUpBound = true;
+      document.addEventListener('mouseup', () => { this._dragSelecting = null; });
+    }
+  },
+
+  _setQmCheck: function(cb, checked) {
+    cb.checked = checked;
+    const qid = cb.dataset.qid;
+    if (checked) this._qmSelected.add(qid);
+    else this._qmSelected.delete(qid);
+    this._updateQmSelInfo();
+  },
+
+  _updateQmSelInfo: function() {
+    const boxes = Array.from(document.querySelectorAll('#qm-tbody input.qm-check'));
+    const selCount = boxes.filter(b => b.checked).length;
+    const info = document.getElementById('qm-sel-info');
+    if (info) info.textContent = selCount > 0
+      ? `已选择 ${selCount} 题`
+      : '未选择（按住鼠标拖过选框可批量勾选）';
+    const btnDel = document.getElementById('qm-btn-batch-del');
+    if (btnDel) btnDel.disabled = selCount === 0;
+    const btnClr = document.getElementById('qm-btn-clear-sel');
+    if (btnClr) btnClr.disabled = selCount === 0;
+    const all = document.getElementById('qm-check-all');
+    if (all) {
+      all.checked = boxes.length > 0 && selCount === boxes.length;
+      all.indeterminate = selCount > 0 && selCount < boxes.length;
+    }
+  },
+
+  _toggleQmAll: function(checked) {
+    document.querySelectorAll('#qm-tbody input.qm-check').forEach(cb => {
+      this._setQmCheck(cb, checked);
+    });
+  },
+
+  _clearQmSelection: function() {
+    this._toggleQmAll(false);
+  },
+
+  _batchDeleteQuestions: async function() {
+    const ids = Array.from(document.querySelectorAll('#qm-tbody input.qm-check'))
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.qid);
+    if (!ids.length) return;
+    if (!confirm(`确认批量删除选中的 ${ids.length} 道题目？\n这些题的所有余票数据将被清除，且不可恢复。`)) return;
+
+    const btn = document.getElementById('qm-btn-batch-del');
+    if (btn) { btn.disabled = true; btn.textContent = '删除中...'; }
+
+    const failed = [];
+    for (const qid of ids) {
+      try {
+        const resp = await fetch(`/api/question/${encodeURIComponent(qid)}`, { method: 'DELETE' });
+        const result = await resp.json();
+        if (!result.success) failed.push(`${qid}: ${result.detail || '未知错误'}`);
+      } catch (e) {
+        failed.push(`${qid}: ${e.message}`);
+      }
+    }
+
+    this._qmSelected.clear();
+    if (btn) btn.textContent = '🗑 批量删除';
+    await this._refreshQuestionList();
+    if (failed.length) {
+      alert(`批量删除完成：成功 ${ids.length - failed.length} 题，失败 ${failed.length} 题\n` + failed.join('\n'));
+    }
   },
 
   _refreshQuestionList: async function() {
@@ -2081,17 +2305,24 @@ const App = {
       if (countEl) countEl.textContent = `（共 ${data.total || 0} 题）`;
 
       if (!data.questions || data.questions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray-4);padding:30px">暂无符合条件的题目</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-4);padding:30px">暂无符合条件的题目</td></tr>';
+        this._qmSelected.clear();
+        this._updateQmSelInfo();
         return;
       }
 
       const sorted = this._sortQuestionsByQid(data.questions);
+      // 选中集只保留当前可见列表中的题号
+      const visibleIds = new Set(sorted.map(q => q.question_id));
+      this._qmSelected = new Set([...this._qmSelected].filter(id => visibleIds.has(id)));
       let html = '';
       sorted.forEach(q => {
         const qtypeLabel = q.question_type ? this._questionTypeLabel(q.question_type) : (q.type || '-');
         const modeTag = (q.type && q.type !== q.question_type) ? ` <span style="color:${q.type === '选择性' ? '#7c3aed' : '#2563eb'};font-size:11px">(${q.type})</span>` : '';
         const ansPreview = q.answer ? q.answer.substring(0, 30) + (q.answer.length > 30 ? '...' : '') : '-';
+        const checked = this._qmSelected.has(q.question_id) ? ' checked' : '';
         html += `<tr>
+          <td style="text-align:center;user-select:none"><input type="checkbox" class="qm-check" data-qid="${q.question_id}"${checked} style="cursor:pointer;vertical-align:middle"></td>
           <td><strong>${q.question_id}</strong></td>
           <td>${qtypeLabel}${modeTag}</td>
           <td>${q.train_count}</td>
@@ -2104,6 +2335,7 @@ const App = {
         </tr>`;
       });
       tbody.innerHTML = html;
+      this._updateQmSelInfo();
     } catch (e) {
       console.error('加载题目列表失败', e);
     }
@@ -2139,6 +2371,7 @@ const App = {
       const resp = await fetch(`/api/question/${encodeURIComponent(qid)}`, { method: 'DELETE' });
       const result = await resp.json();
       if (result.success) {
+        this._qmSelected.delete(qid);
         this._refreshQuestionList();
       } else {
         alert(`删除失败: ${result.detail || '未知错误'}`);

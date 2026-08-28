@@ -310,9 +310,9 @@ const API = {
     return resp.json();
   },
 
-  /** 查询批量出题进度（单进度条状态） */
-  batchStatus: async () => {
-    const resp = await fetch('/api/batch/status');
+  /** 查询批量出题进度（单进度条状态 + 增量日志，afterSeq=已读日志游标） */
+  batchStatus: async (afterSeq = 0) => {
+    const resp = await fetch(`/api/batch/status?after_seq=${encodeURIComponent(afterSeq)}`);
     return resp.json();
   },
 
@@ -342,9 +342,9 @@ const API = {
     return resp.json();
   },
 
-  /** 查询批量自然语言化进度 */
-  batchNlStatus: async () => {
-    const resp = await fetch('/api/batch_nl/status');
+  /** 查询批量自然语言化进度（+ 增量日志，afterSeq=已读日志游标） */
+  batchNlStatus: async (afterSeq = 0) => {
+    const resp = await fetch(`/api/batch_nl/status?after_seq=${encodeURIComponent(afterSeq)}`);
     return resp.json();
   },
 
@@ -368,9 +368,9 @@ const API = {
     return resp.json();
   },
 
-  /** 查询批量测试进度 */
-  batchTestStatus: async () => {
-    const resp = await fetch('/api/batch_test/status');
+  /** 查询批量测试进度（+ 增量日志，afterSeq=已读日志游标） */
+  batchTestStatus: async (afterSeq = 0) => {
+    const resp = await fetch(`/api/batch_test/status?after_seq=${encodeURIComponent(afterSeq)}`);
     return resp.json();
   },
 };

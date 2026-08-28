@@ -8,9 +8,9 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/static/api.js?v=58"></script>
+    <script src="/static/api.js?v=59"></script>
     <script src="/static/components.js?v=58"></script>
-    <script src="/static/app.js?v=58"></script>
+    <script src="/static/app.js?v=62"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -409,6 +409,13 @@
             <div style="background:var(--gray-2);border-radius:6px;height:10px;margin-top:4px"><div id="batch-total-bar" style="width:0%;height:10px;border-radius:6px;background:#2563eb;transition:width .3s"></div></div>
           </div>
           <div id="batch-current-task" style="color:var(--gray-4)">尚未开始</div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span><strong>📜 执行日志</strong></span>
+              <a href="/api/batch/logs?lines=500" target="_blank" style="color:var(--gray-4);font-size:11px">打开后台日志（logs/batch_tools.log）</a>
+            </div>
+            <div id="batch-gen-log" style="height:180px;overflow-y:auto;background:#fafafa;border:1px solid var(--gray-2);border-radius:6px;padding:6px 8px;font-family:Consolas,monospace;font-size:11px;line-height:1.7;white-space:pre-wrap;word-break:break-all;margin-top:4px"><div style="color:var(--gray-4)">暂无日志（启动批量出题后实时输出）</div></div>
+          </div>
         </div>
       </div>
 
@@ -463,17 +470,30 @@
               </div>
             </div>
           </div>
-          <div>
-            <div style="display:flex;justify-content:space-between"><span><strong>进度</strong></span><span id="batch-nl-count">0 / 0</span></div>
-            <div style="background:var(--gray-2);border-radius:6px;height:10px;margin-top:4px"><div id="batch-nl-bar" style="width:0%;height:10px;border-radius:6px;background:#0891b2;transition:width .3s"></div></div>
-            <div id="batch-nl-current" style="color:var(--gray-4);margin-top:4px">尚未开始</div>
-          </div>
         </div>
       </div>
     </div>
 
-    <!-- 右栏：勾选表格 + 结果 + 说明 -->
+    <!-- 右栏：进度 / 勾选表格 / 结果 / 说明 -->
     <div class="flex-1" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card">
+        <div class="card-header">📊 批量进度（自然语言化）</div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
+          <div>
+            <div style="display:flex;justify-content:space-between"><span><strong>总进度</strong></span><span id="batch-nl-count">0 / 0</span></div>
+            <div style="background:var(--gray-2);border-radius:6px;height:10px;margin-top:4px"><div id="batch-nl-bar" style="width:0%;height:10px;border-radius:6px;background:#0891b2;transition:width .3s"></div></div>
+          </div>
+          <div id="batch-nl-current" style="color:var(--gray-4)">尚未开始</div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span><strong>📜 执行日志</strong></span>
+              <a href="/api/batch/logs?lines=500" target="_blank" style="color:var(--gray-4);font-size:11px">打开后台日志（logs/batch_tools.log）</a>
+            </div>
+            <div id="batch-nl-log" style="height:180px;overflow-y:auto;background:#fafafa;border:1px solid var(--gray-2);border-radius:6px;padding:6px 8px;font-family:Consolas,monospace;font-size:11px;line-height:1.7;white-space:pre-wrap;word-break:break-all;margin-top:4px"><div style="color:var(--gray-4)">暂无日志（启动批量自然语言化后实时输出）</div></div>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">🗣️ 批量自然语言化 · 勾选题目</div>
         <div id="batch-nl-table" style="max-height:440px;overflow-y:auto;font-size:var(--font-size-small)"><div style="text-align:center;color:var(--gray-4);padding:16px">点击左侧「扫描缺失自然语言的题目」列出可勾选题目</div></div>
@@ -524,17 +544,30 @@
               </div>
             </div>
           </div>
-          <div>
-            <div style="display:flex;justify-content:space-between"><span><strong>进度</strong></span><span id="batch-test-count">0 / 0</span></div>
-            <div style="background:var(--gray-2);border-radius:6px;height:10px;margin-top:4px"><div id="batch-test-bar" style="width:0%;height:10px;border-radius:6px;background:#dc2626;transition:width .3s"></div></div>
-            <div id="batch-test-current" style="color:var(--gray-4);margin-top:4px">尚未开始</div>
-          </div>
         </div>
       </div>
     </div>
 
-    <!-- 右栏：勾选表格 + 结果 + 说明 -->
+    <!-- 右栏：进度 / 勾选表格 / 结果 / 说明 -->
     <div class="flex-1" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card">
+        <div class="card-header">📊 批量进度（批量测试）</div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
+          <div>
+            <div style="display:flex;justify-content:space-between"><span><strong>总进度</strong></span><span id="batch-test-count">0 / 0</span></div>
+            <div style="background:var(--gray-2);border-radius:6px;height:10px;margin-top:4px"><div id="batch-test-bar" style="width:0%;height:10px;border-radius:6px;background:#dc2626;transition:width .3s"></div></div>
+          </div>
+          <div id="batch-test-current" style="color:var(--gray-4)">尚未开始</div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span><strong>📜 执行日志</strong></span>
+              <a href="/api/batch/logs?lines=500" target="_blank" style="color:var(--gray-4);font-size:11px">打开后台日志（logs/batch_tools.log）</a>
+            </div>
+            <div id="batch-test-log" style="height:180px;overflow-y:auto;background:#fafafa;border:1px solid var(--gray-2);border-radius:6px;padding:6px 8px;font-family:Consolas,monospace;font-size:11px;line-height:1.7;white-space:pre-wrap;word-break:break-all;margin-top:4px"><div style="color:var(--gray-4)">暂无日志（启动批量测试后实时输出）</div></div>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">🧪 批量测试 · 勾选题目</div>
         <div id="batch-test-table" style="max-height:440px;overflow-y:auto;font-size:var(--font-size-small)"><div style="text-align:center;color:var(--gray-4);padding:16px">填写模型编号后点击左侧「扫描可测试题目」列出可勾选题目</div></div>
@@ -632,10 +665,18 @@
     <div class="flex-1">
       <div class="card">
         <div class="card-header">📄 题目列表 <span id="qm-count" style="font-weight:400;font-size:var(--font-size-small);color:var(--gray-4)"></span></div>
-        <div style="padding:6px 0 8px"><button class="btn btn-secondary btn-sm" onclick="App._refreshQuestionList()">🔄 刷新列表</button></div>
+        <div style="padding:6px 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" onclick="App._refreshQuestionList()">🔄 刷新列表</button>
+          <span id="qm-sel-info" style="font-size:var(--font-size-small);color:var(--gray-4)">未选择（按住鼠标拖过选框可批量勾选）</span>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" id="qm-btn-clear-sel" onclick="App._clearQmSelection()" disabled>清除选择</button>
+            <button class="btn btn-danger btn-sm" id="qm-btn-batch-del" onclick="App._batchDeleteQuestions()" disabled>🗑 批量删除</button>
+          </div>
+        </div>
         <div id="qm-table-wrapper" style="overflow-x:auto">
           <table class="table" style="font-size:var(--font-size-small);width:100%">
             <thead><tr>
+              <th style="width:36px;text-align:center"><input type="checkbox" id="qm-check-all" title="全选/全不选" style="cursor:pointer;vertical-align:middle"></th>
               <th>题号</th><th>题型</th><th>车次数</th><th>状态</th><th>标准答案</th><th>操作</th>
             </tr></thead>
             <tbody id="qm-tbody"></tbody>
