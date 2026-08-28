@@ -45,7 +45,6 @@ benchmark_travelplan/
 │   └── report/             # 统计报告
 ├── static/                 # 前端 JS/CSS
 ├── templates/index.html    # 前端页面（SPA）
-├── tools/                  # OpenAI Tools 定义
 ├── statistics/             # 统计模块
 └── docs/                   # 系统说明文档（generator/scripts/tester/verifier/stats）
 ```

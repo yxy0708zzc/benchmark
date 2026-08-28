@@ -45,7 +45,6 @@ LOGS_TEST_DIR = os.path.join(LOGS_DIR, "test")
 LOGS_RESULT_DIR = os.path.join(LOGS_DIR, "result")
 LOGS_REPORT_DIR = os.path.join(LOGS_DIR, "report")
 TEMPLATES_DIR = os.path.join(PROJECT_ROOT, "templates")
-TOOLS_DIR = os.path.join(PROJECT_ROOT, "tools")
 STATISTICS_DIR = os.path.join(PROJECT_ROOT, "statistics")
 
 # ============================================================
@@ -114,7 +113,7 @@ def ensure_directories():
     dirs = [
         DATA_DIR, QUESTION_DIR,
         LOGS_DIR, LOGS_TEST_DIR, LOGS_RESULT_DIR, LOGS_REPORT_DIR,
-        TEMPLATES_DIR, TOOLS_DIR, STATISTICS_DIR,
+        TEMPLATES_DIR, STATISTICS_DIR,
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)

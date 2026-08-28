@@ -46,9 +46,9 @@
 
 ---
 
-## 四、工具集（`tools/`）
+## 四、工具集（`server.py` 内置定义）
 
-被测模型可调用以下 **7 个 OpenAI 工具**：
+被测模型可调用以下 **7 个 OpenAI 工具**（工具定义已直接写在 `server.py` 中，无独立 tools 模块）：
 
 | 工具 | 说明 |
 |---|---|
@@ -125,4 +125,4 @@ while 轮数 < max_iterations:
 
 ---
 
-*文档版本：2026-08-10 · 对应实现：server.py（/api/test/chat、/api/test/chat/stream、/api/test/complete、execute_tool_handler、_parse_ai_final_plan）、prompts.py（SYSTEM_PROMPT）、tools/（7 个 OpenAI 工具）、static/app.js（对话 UI）*
+*文档版本：2026-08-28 · 对应实现：server.py（/api/test/chat、/api/test/chat/stream、/api/test/complete、execute_tool_handler、_parse_ai_final_plan、7 个 OpenAI 工具定义）、prompts.py（SYSTEM_PROMPT）、static/app.js（对话 UI）*
