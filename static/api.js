@@ -130,34 +130,17 @@ const API = {
     return resp.json();
   },
 
-  /** 标记题目完成 */
-  completeQuestion: async (questionId) => {
-    const resp = await fetch('/api/question/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question_id: questionId }),
-    });
-    return resp.json();
-  },
-
   /** 检查题目是否存在 */
   questionExists: async (questionId) => {
     const resp = await fetch(`/api/question/${encodeURIComponent(questionId)}/exists`);
     return resp.json();
   },
 
-  /** 获取题目列表 */
-  getQuestionList: async (options = '') => {
+  /** 获取题目列表（status 概念已移除，出题保存即完成） */
+  getQuestionList: async (options = {}) => {
     const params = new URLSearchParams();
-    // 兼容旧用法：传入字符串表示 status_filter
-    if (typeof options === 'string') {
-      if (options) params.set('status_filter', options);
-    } else {
-      if (options.status) params.set('status_filter', options.status);
-      if (options.source) params.set('source', options.source);
-      if (options.type) params.set('type', options.type);
-      if (options.keyword) params.set('keyword', options.keyword);
-    }
+    if (options.type) params.set('type', options.type);
+    if (options.keyword) params.set('keyword', options.keyword);
     const resp = await fetch(`/api/question/list?${params}`);
     return resp.json();
   },
@@ -249,6 +232,32 @@ const API = {
   /** 获取测评结果列表 */
   getEvalResults: async () => {
     const resp = await fetch('/api/eval/results');
+    return resp.json();
+  },
+
+  // ============================================================
+  // 测评管理接口
+  // ============================================================
+
+  /** 测评管理：结果列表（支持 model/question_id/verdict/keyword 筛选） */
+  evalManageList: async (query = '') => {
+    const resp = await fetch(`/api/eval/manage/list${query ? '?' + query : ''}`);
+    return resp.json();
+  },
+
+  /** 测评管理：单条详情（结果 + 测试记录含 trace 轨迹 + 题目元数据） */
+  evalManageDetail: async (filename) => {
+    const resp = await fetch(`/api/eval/manage/detail?filename=${encodeURIComponent(filename)}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+  },
+
+  /** 测评管理：删除单条结果 */
+  evalManageDelete: async (filename) => {
+    const resp = await fetch(`/api/eval/manage/${encodeURIComponent(filename)}`, { method: 'DELETE' });
     return resp.json();
   },
 

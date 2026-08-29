@@ -197,11 +197,10 @@ python server.py
 | `/api/auto_generate/clear` | POST | 清除预览缓存 |
 | `/api/auto_generate/swap` | POST | 换方案（换乘/混合；不变首车 T，存在性配对同步换） |
 | `/api/auto_generate/previews` | GET | 查看预览缓存 |
-| `/api/question/list` | GET | 题目列表（支持 `status`/`type`/`keyword` 筛选） |
+| `/api/question/list` | GET | 题目列表（支持 `type`/`keyword` 筛选；含 `tested_models`；status 概念已移除，出题保存即完成） |
 | `/api/question/init` | POST | 初始化题目车次（含同车关联号） |
 | `/api/question/{qid}/exists` | GET | 检查题目是否存在 |
 | `/api/question/{qid}/trains` | GET | 获取题目已加载车次 |
-| `/api/question/complete` | POST | 标记题目完成 |
 | `/api/question/{qid}/train/{train_num}` | DELETE | 从题目删除车次 |
 | `/api/question/{qid}` | DELETE | 删除题目 |
 | `/api/update_ticket` | POST | 实时更新余票 |
@@ -233,6 +232,9 @@ python server.py
 | `/api/eval/verify` | POST | 代码核查 |
 | `/api/eval/results` | GET | 测评结果列表 |
 | `/api/eval/complete` | POST | 保存测评结果 |
+| `/api/eval/manage/list` | GET | 测评管理：结果列表（`model`/`question_id`/`verdict`/`keyword` 筛选，含得分/问题数/token/耗时） |
+| `/api/eval/manage/detail` | GET | 测评管理：单条详情（结果+测试记录含 trace 对话轨迹+题目元数据） |
+| `/api/eval/manage/{filename}` | DELETE | 测评管理：删除单条结果 |
 | `/api/stats/summary` | GET | 统计汇总 |
 | `/api/stats/export/json` | GET | 导出 JSON 报告 |
 | `/api/stats/export/markdown` | GET | 导出 Markdown 报告 |

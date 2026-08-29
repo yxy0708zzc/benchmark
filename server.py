@@ -672,8 +672,8 @@ def api_update_ticket(req: UpdateTicketRequest):
             req.from_station_id, req.to_station_id,
             req.seat_type, req.tickets
         )
-        # 更新元数据修改时间
-        update_question_metadata(req.question_id, status="draft")
+        # 更新元数据修改时间（不再写 status：已完成/草稿概念已移除）
+        update_question_metadata(req.question_id)
         return {"success": True, "message": "余票已更新"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1953,7 +1953,6 @@ def _confirm_generated_question(question_id: str,
 
     meta_kwargs = {
         "question_id": question_id,
-        "status": "completed",
         "train_count": len(trains_list),
         "trains": trains_list,
         "source": "auto",
@@ -2028,7 +2027,6 @@ def _ground_truth_summary(gt) -> str:
 
 @app.get("/api/question/list")
 def api_question_list(
-    status_filter: Optional[str] = Query(None),
     source_filter: Optional[str] = Query(None, alias="source"),
     type_filter: Optional[str] = Query(None, alias="type"),
     keyword: Optional[str] = Query(None),
@@ -2050,8 +2048,6 @@ def api_question_list(
     seen = set()
     for qid, meta in metadata.items():
         seen.add(qid)
-        if status_filter and meta.get("status") != status_filter:
-            continue
         if source_filter and meta.get("source") != source_filter:
             continue
         if type_filter and meta.get("type") != type_filter:
@@ -2060,11 +2056,12 @@ def api_question_list(
             continue
         result.append({
             "question_id": qid,
-            "status": meta.get("status", "unknown"),
             "source": meta.get("source", ""),
             "type": meta.get("type", ""),
             "question_type": meta.get("question_type", ""),
             "train_count": meta.get("train_count", 0),
+            # 已测模型列表（批量测试成功后写入），题目管理展示用
+            "tested_models": meta.get("tested_models") or [],
             # 标准答案：优先旧 answer 文本字段；自动出题无该字段时用结构化标答 ground_truth 生成摘要
             "answer": meta.get("answer") or _ground_truth_summary(meta.get("ground_truth")),
             "question": meta.get("question", ""),
@@ -2137,9 +2134,9 @@ def api_question_init(req: InitQuestionRequest):
             if validate_train_exists(rw_conn, tn) and tn not in all_trains:
                 all_trains.append(tn)
 
-        # 记录已加载车次到元数据（合并到已有列表，不重置）
+        # 记录已加载车次到元数据（合并到已有列表，不重置；不再写 status）
         update_question_metadata(
-            req.question_id, status="draft",
+            req.question_id,
             trains=all_trains
         )
         msg = f"车次 {req.train_num} 已加入题目 {req.question_id}"
@@ -2185,13 +2182,9 @@ chat_sessions: Dict[str, List[Dict]] = {}
 chat_session_meta: Dict[str, Dict] = {}
 # 会话使用的模型名称
 chat_session_model: Dict[str, str] = {}
-# 会话工具调用日志（供测试完成落盘，统计 avg_tool_calls 用）
-chat_session_tool_calls: Dict[str, List[Dict]] = {}
+# 会话轨迹日志（harness 风格按轮次条目，供测试记录 trace 字段落盘；工具调用嵌套在各轮 tools 下，唯一对话源）
+chat_session_trace: Dict[str, List[Dict]] = {}
 api_keys: Dict[str, str] = {}
-
-
-class CompleteQuestionRequest(BaseModel):
-    question_id: str
 
 
 # --- DELETE /api/question/{question_id}/train/{train_num} 删除车次 ---
@@ -2213,24 +2206,6 @@ def api_question_delete_train(question_id: str, train_num: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         q_conn.close()
-
-
-# --- POST /api/question/complete 标记题目完成 ---
-@app.post("/api/question/complete")
-def api_question_complete(req: CompleteQuestionRequest):
-    """标记题目为 completed 状态，供测试器加载"""
-    db_path = get_question_db_path(req.question_id)
-    if not os.path.exists(db_path):
-        raise HTTPException(status_code=404, detail=f"题目 {req.question_id} 不存在，请先加载车次")
-
-    # 从 metadata 读取实际车次数，确保 train_count 正确
-    meta = get_question_metadata(req.question_id)
-    actual_train_count = len(meta.get("trains", []))
-    update_question_metadata(
-        req.question_id, status="completed",
-        train_count=actual_train_count
-    )
-    return {"success": True, "message": f"题目 {req.question_id} 已完成"}
 
 
 # --- DELETE /api/question/{question_id} 删除题目 ---
@@ -2337,6 +2312,11 @@ async def api_test_chat(req: ChatRequest):
     # 添加用户消息
     messages.append({"role": "user", "content": req.message})
 
+    # 轨迹记录：user 条目（供测试记录 trace 字段落盘）
+    chat_session_trace.setdefault(req.session_id, []).append({
+        "type": "user", "content": req.message,
+    })
+
     # 工具调用循环
     tool_calls_log = []
     token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -2412,12 +2392,26 @@ async def api_test_chat(req: ChatRequest):
                         "role": "assistant",
                         "content": final_content,
                     })
+                    # 轨迹记录：最终回复轮（含思考链，无工具）
+                    chat_session_trace.setdefault(req.session_id, []).append({
+                        "type": "assistant", "round": iteration,
+                        "reasoning": reasoning, "content": final_content,
+                        "tools": [],
+                    })
                     break
 
                 # 处理工具调用
                 assistant_msg = {"role": "assistant", "content": message.get("content", "")}
                 assistant_msg["tool_calls"] = []
                 messages.append(assistant_msg)
+
+                # 轨迹记录：本轮 assistant（含思考链），工具调用嵌套在本轮 tools 下（与前端轨迹视图同构）
+                trace_entry = {
+                    "type": "assistant", "round": iteration,
+                    "reasoning": reasoning, "content": message.get("content", ""),
+                    "tools": [],
+                }
+                chat_session_trace.setdefault(req.session_id, []).append(trace_entry)
 
                 for tc in tool_calls:
                     func_name = tc["function"]["name"]
@@ -2436,6 +2430,11 @@ async def api_test_chat(req: ChatRequest):
                         "tool_name": func_name,
                         "arguments": func_args,
                         "result": tool_result,
+                    })
+
+                    # 轨迹记录：工具嵌套进本轮条目
+                    trace_entry["tools"].append({
+                        "tool_name": func_name, "arguments": func_args, "result": tool_result,
                     })
 
                     messages.append({
@@ -2466,9 +2465,6 @@ async def api_test_chat(req: ChatRequest):
         meta["token_usage"]["completion_tokens"] += token_usage.get("completion_tokens", 0)
         meta["token_usage"]["total_tokens"] += token_usage.get("total_tokens", 0)
         meta["duration"] += duration
-
-        # 累计工具调用日志（供 api_test_complete 落盘）
-        chat_session_tool_calls[sid] = chat_session_tool_calls.get(sid, []) + tool_calls_log
 
         return {
             "reply": final_content,
@@ -2508,6 +2504,11 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
 
     # 添加用户消息
     messages.append({"role": "user", "content": req.message})
+
+    # 轨迹记录：user 条目（供测试记录 trace 字段落盘）
+    chat_session_trace.setdefault(req.session_id, []).append({
+        "type": "user", "content": req.message,
+    })
 
     # 累计 token 用量（仅计新增，每轮减去上轮已计的历史）
     token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -2639,6 +2640,14 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                         }
                         messages.append(assistant_msg)
 
+                        # 轨迹记录：本轮 assistant（含思考链），工具调用嵌套在本轮 tools 下（与前端轨迹视图同构）
+                        trace_entry = {
+                            "type": "assistant", "round": iteration,
+                            "reasoning": accumulated_reasoning, "content": accumulated_content,
+                            "tools": [],
+                        }
+                        chat_session_trace.setdefault(req.session_id, []).append(trace_entry)
+
                         for tc in tool_calls_list:
                             try:
                                 func_args = json.loads(tc["function"]["arguments"])
@@ -2648,11 +2657,9 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                             # 执行工具（传入题目 ID：并发批量测试时避免全局状态串题）
                             tool_result = await execute_tool_handler(tc["function"]["name"], func_args, req.question_id)
 
-                            # 累计工具调用日志（供 api_test_complete 落盘）
-                            chat_session_tool_calls.setdefault(req.session_id, []).append({
-                                "tool_name": tc["function"]["name"],
-                                "arguments": func_args,
-                                "result": tool_result,
+                            # 轨迹记录：工具嵌套进本轮条目
+                            trace_entry["tools"].append({
+                                "tool_name": tc["function"]["name"], "arguments": func_args, "result": tool_result,
                             })
 
                             # 发送 tool_result 事件，让前端展示工具返回结果
@@ -2713,6 +2720,13 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                         messages.append({
                             "role": "assistant",
                             "content": accumulated_content,
+                        })
+
+                        # 轨迹记录：最终回复轮（含思考链，无工具）
+                        chat_session_trace.setdefault(req.session_id, []).append({
+                            "type": "assistant", "round": iteration,
+                            "reasoning": accumulated_reasoning, "content": accumulated_content,
+                            "tools": [],
                         })
 
                         # 发送完成事件（使用全量累加器，包含所有轮次内容）
@@ -2822,8 +2836,8 @@ def api_test_complete(req: TestCompleteRequest):
     # 获取模型名称
     model_name = chat_session_model.get(req.session_id, "unknown")
 
-    # 获取会话工具调用日志
-    tool_calls = chat_session_tool_calls.get(req.session_id, [])
+    # 获取会话轨迹日志（harness 风格按轮次条目，含思考/输出/嵌套工具调用；唯一对话源）
+    trace = chat_session_trace.get(req.session_id, [])
 
     # 生成保存路径
     from config import LOGS_TEST_DIR
@@ -2841,18 +2855,19 @@ def api_test_complete(req: TestCompleteRequest):
     else:
         plan_status = "has_solution"  # 有方案
 
+    # 精简结构：trace 为唯一对话源（user / assistant轮(思考+输出+嵌套tools)），
+    # 不再冗余落盘 conversation 与平铺 tool_calls（二者均可由 trace 推导；system 提示词为代码常量不重复存）
     record = {
         "timestamp": datetime.now().isoformat(),
         "question_id": question_id,
         "model_name": model_name,
         "user_input": user_input,
-        "conversation": session,
         "final_answer": final_answer,
         "final_plan": final_plan,
         "plan_status": plan_status,
         "token_usage": token_usage,
         "duration": duration,
-        "tool_calls": tool_calls,
+        "trace": trace,
     }
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -2868,7 +2883,6 @@ def api_test_complete(req: TestCompleteRequest):
         "model_name": model_name,
         "final_plan": final_plan,
         "plan_status": plan_status,
-        "tool_calls": tool_calls,
     }
 
 
@@ -2885,8 +2899,8 @@ def api_test_reset(req: TestResetRequest):
         del chat_session_meta[session_id]
     if session_id in chat_session_model:
         del chat_session_model[session_id]
-    if session_id in chat_session_tool_calls:
-        del chat_session_tool_calls[session_id]
+    if session_id in chat_session_trace:
+        del chat_session_trace[session_id]
     return {"success": True, "message": "对话已重置"}
 
 
@@ -3153,6 +3167,145 @@ def api_eval_results():
                 except Exception:
                     results.append({"filename": f, "error": "读取失败"})
     return {"results": results, "total": len(results)}
+
+
+# ============================================================
+# 第四部分C：测评管理（浏览测评结果：按模型/题目筛选、详情、删除）
+# ============================================================
+
+@app.get("/api/eval/manage/list")
+def api_eval_manage_list(
+    model: str = Query("", alias="model"),
+    question_id: str = Query("", alias="question_id"),
+    verdict: str = Query("", alias="verdict"),
+    keyword: str = Query("", alias="keyword"),
+):
+    """列出测评结果（logs/result），支持按模型/题号/verdict/关键词筛选，供测评管理页浏览。"""
+    from config import LOGS_RESULT_DIR
+    from statistics.aggregator import _compute_score
+
+    model_f = (model or "").strip()
+    qid_f = (question_id or "").strip().lower()
+    verdict_f = (verdict or "").strip()
+    kw = (keyword or "").strip().lower()
+
+    items = []
+    models = set()
+    if os.path.isdir(LOGS_RESULT_DIR):
+        for f in sorted(os.listdir(LOGS_RESULT_DIR), reverse=True):
+            if not f.endswith(".json"):
+                continue
+            filepath = os.path.join(LOGS_RESULT_DIR, f)
+            try:
+                with open(filepath, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except Exception:
+                continue
+            m = data.get("model_name", "unknown")
+            models.add(m)
+            v = (data.get("verification") or {}).get("verdict", "unknown")
+            qid = data.get("question_id", "") or ""
+            if model_f and m != model_f:
+                continue
+            if qid_f and qid_f not in qid.lower():
+                continue
+            if verdict_f and v != verdict_f:
+                continue
+            if kw and kw not in f.lower() and kw not in qid.lower():
+                continue
+            ver = data.get("verification") or {}
+            ss = data.get("score_summary") or {}
+            items.append({
+                "filename": f,
+                "timestamp": data.get("timestamp", ""),
+                "question_id": qid,
+                "model_name": m,
+                "verdict": v,
+                "score": _compute_score(data),
+                "issue_count": ver.get("issue_count", 0),
+                "hallucination_count": ver.get("hallucination_count", 0),
+                "total_tokens": ss.get("total_tokens", 0),
+                "duration_seconds": ss.get("duration_seconds", 0),
+            })
+
+    total = len(items)
+    scores = [it["score"] for it in items]
+    verdict_counts: Dict[str, int] = {}
+    for it in items:
+        verdict_counts[it["verdict"]] = verdict_counts.get(it["verdict"], 0) + 1
+    return {
+        "results": items,
+        "total": total,
+        "models": sorted(models),
+        "summary": {
+            "total": total,
+            "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+            "verdict_counts": verdict_counts,
+        },
+    }
+
+
+@app.get("/api/eval/manage/detail")
+def api_eval_manage_detail(filename: str):
+    """加载单条测评结果详情：结果 + 联查测试记录（含 trace 轨迹）+ 题目元数据。"""
+    from config import LOGS_RESULT_DIR, LOGS_TEST_DIR
+    safe = os.path.basename(filename or "")
+    if not safe.endswith(".json"):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    filepath = os.path.join(LOGS_RESULT_DIR, safe)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"测评结果 {safe} 不存在")
+    with open(filepath, "r", encoding="utf-8") as fh:
+        result = json.load(fh)
+
+    # 联查测试记录（conversation / trace / final_plan / tool_calls）
+    test_record = None
+    tf = os.path.basename(result.get("test_file") or "")
+    if tf:
+        tp = os.path.join(LOGS_TEST_DIR, tf)
+        if os.path.exists(tp):
+            try:
+                with open(tp, "r", encoding="utf-8") as fh:
+                    test_record = json.load(fh)
+            except Exception:
+                test_record = None
+
+    # 题目元数据（题面 / 自然语言题面 / 标准答案摘要）
+    qid = result.get("question_id", "")
+    meta = {}
+    try:
+        meta = get_question_metadata(qid) or {}
+    except Exception:
+        meta = {}
+
+    return {
+        "result": result,
+        "test_record": test_record,
+        "question_meta": {
+            "question": meta.get("question", ""),
+            "nl_question": meta.get("nl_question", ""),
+            "type": meta.get("type", ""),
+            "question_type": meta.get("question_type", ""),
+            "answer": meta.get("answer") or _ground_truth_summary(meta.get("ground_truth")),
+        },
+    }
+
+
+@app.delete("/api/eval/manage/{filename}")
+def api_eval_manage_delete(filename: str):
+    """删除单条测评结果文件"""
+    from config import LOGS_RESULT_DIR
+    safe = os.path.basename(filename or "")
+    if not safe.endswith(".json"):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    filepath = os.path.join(LOGS_RESULT_DIR, safe)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"测评结果 {safe} 不存在")
+    try:
+        os.remove(filepath)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+    return {"success": True, "message": f"测评结果 {safe} 已删除"}
 
 
 # ============================================================
@@ -3663,6 +3816,9 @@ def api_batch_generate(req: BatchGenerateRequest):
     import threading
     _batch_log_clear("batch_generate")
     _batch_log("batch_generate", "收到批量出题请求，任务已启动")
+    # 同步置运行态：避免 worker 线程冷启动窗口内前端首轮询拿到 running=false 而提前退出轮询链
+    _batch_state.update({"running": True, "done": False, "current": "准备中...",
+                         "total": 0, "done_count": 0, "result": None})
     thread = threading.Thread(target=_run_batch, args=(req.model_dump(),), daemon=True)
     thread.start()
     return {"success": True, "message": "批量出题已启动，可轮询 /api/batch/status 查看进度"}
@@ -3852,6 +4008,10 @@ def api_batch_nl_generate(req: BatchNlGenerateRequest):
     import threading
     _batch_log_clear("batch_nl")
     _batch_log("batch_nl", f"收到批量自然语言化请求：{len(req.question_ids)} 题，任务已启动")
+    # 同步置运行态：_run_batch_nl 在置 running 前要导入 nl_question 模块 + ensure_env_fresh，
+    # 窗口可达数百毫秒，前端首轮询拿到 running=false 会提前退出轮询链（进度条/日志卡死的根因）
+    _nl_state.update({"running": True, "done": False, "current": "准备中...",
+                      "total": len(req.question_ids), "done_count": 0, "result": None})
     threading.Thread(target=_run_batch_nl, args=(list(req.question_ids),), daemon=True).start()
     return {"success": True, "message": "批量自然语言化已启动（逐题生成并写回 nl_question）"}
 
@@ -4012,6 +4172,9 @@ def api_batch_test_start(req: BatchTestStartRequest):
     concurrency = max(1, min(int(req.concurrency or 1), 8))
     _batch_log_clear("batch_test")
     _batch_log("batch_test", f"收到批量测试请求：模型 {model}，{len(req.question_ids)} 题，并发 {concurrency}，任务已启动")
+    # 同步置运行态（与批量 NL 同理，消除 worker 冷启动窗口内的轮询竞态）
+    _test_state.update({"running": True, "done": False, "current": "准备中...",
+                        "total": len(req.question_ids), "done_count": 0, "result": None})
     threading.Thread(target=_run_batch_test, args=(model, list(req.question_ids), max_iter, concurrency), daemon=True).start()
     return {"success": True, "message": f"批量测试已启动（并发 {concurrency}，仅对信息完备且该模型未测过的题目执行）"}
 
@@ -4158,6 +4321,9 @@ def api_batch_eval_start(req: Dict = Body(...)):
         raise HTTPException(status_code=400, detail="未选择任何测试记录（可先扫描测评记录）")
     _batch_log_clear("batch_eval")
     _batch_log("batch_eval", f"收到批量测评请求：{len(filenames)} 条记录，任务已启动")
+    # 同步置运行态（与其他批量任务同理）
+    _eval_state.update({"running": True, "done": False, "current": "准备中...",
+                        "total": len(filenames), "done_count": 0, "result": None})
     threading.Thread(target=_run_batch_eval, args=(filenames,), daemon=True).start()
     return {"success": True, "message": "批量测评已启动（逐条代码核查并保存结果）"}
 
@@ -4236,6 +4402,11 @@ def stats():
 
 @app.get("/eval", response_class=HTMLResponse)
 def eval_page():
+    return get_html("index.html")
+
+
+@app.get("/eval_manage", response_class=HTMLResponse)
+def eval_manage_page():
     return get_html("index.html")
 
 

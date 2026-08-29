@@ -455,7 +455,7 @@ def save_metadata(metadata: Dict):
         json.dump(metadata, f, ensure_ascii=False, indent=2)
 
 
-def update_question_metadata(question_id: str, status: str,
+def update_question_metadata(question_id: str,
                              train_count: int = None,
                              trains: list = None,
                              source: str = None,
@@ -475,11 +475,10 @@ def update_question_metadata(question_id: str, status: str,
                              criterion: str = None,
                              constraints: list = None,
                              tested_models: list = None):
-    """更新单条题目的元数据"""
+    """更新单条题目的元数据（status 字段已废弃，不再读写）"""
     metadata = load_metadata()
     if question_id in metadata:
         entry = metadata[question_id]
-        entry["status"] = status
         if train_count is not None:
             entry["train_count"] = train_count
         if source is not None:
@@ -526,7 +525,6 @@ def update_question_metadata(question_id: str, status: str,
             entry["train_count"] = len(entry["trains"])
     else:
         entry = {
-            "status": status,
             "train_count": train_count if train_count is not None else (len(trains) if trains else 0),
         }
         if source is not None:
@@ -576,12 +574,6 @@ def get_question_metadata(question_id: str) -> Dict:
     """获取单条题目的元数据，不存在返回空字典"""
     metadata = load_metadata()
     return metadata.get(question_id, {})
-
-
-def get_metadata_by_status(status: str = "completed") -> Dict:
-    """按状态筛选题目元数据"""
-    metadata = load_metadata()
-    return {k: v for k, v in metadata.items() if v.get("status") == status}
 
 
 # ============================================================

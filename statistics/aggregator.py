@@ -100,6 +100,36 @@ def _issue_type_counts(group: List[Dict]) -> Dict[str, int]:
     return counts
 
 
+def _record_brief(r: Dict, meta_all: Dict) -> Dict[str, Any]:
+    """单条测评结果摘要（模型管理逐题明细表 / 测评管理跳转用）"""
+    v = r.get("verification") or {}
+    ss = r.get("score_summary") or {}
+    qid = r.get("question_id", "") or ""
+    m = meta_all.get(qid) or {}
+    return {
+        "filename": r.get("_filename", ""),
+        "question_id": qid,
+        "type": m.get("type", ""),
+        "question_type": m.get("question_type", ""),
+        "verdict": v.get("verdict", "unknown"),
+        "score": _compute_score(r),
+        "issue_count": v.get("issue_count", 0),
+        "hallucination_count": v.get("hallucination_count", 0),
+        "total_tokens": ss.get("total_tokens", 0),
+        "duration_seconds": ss.get("duration_seconds", 0),
+        "timestamp": r.get("timestamp", ""),
+    }
+
+
+def _trace_tool_calls(test_data: Dict) -> int:
+    """从测试记录 trace 统计工具调用次数（工具嵌套在各轮 assistant.tools 下）"""
+    n = 0
+    for e in (test_data.get("trace") or []):
+        if isinstance(e, dict) and e.get("type") == "assistant":
+            n += len(e.get("tools") or [])
+    return n
+
+
 def _model_stats(group: List[Dict]) -> Dict[str, Any]:
     """计算一组测评结果的指标"""
     total = len(group)
@@ -114,7 +144,7 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
     scores = [_compute_score(r) for r in group]
     avg_score = sum(scores) / len(scores) if scores else 0
 
-    # 从测试记录中获取 token 消耗和工具调用次数
+    # 从测试记录中获取 token 消耗和工具调用次数（工具数由 trace 推导）
     total_tokens = 0
     total_duration = 0
     total_tool_calls = 0
@@ -127,7 +157,7 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
                 tu = test_data.get("token_usage", {})
                 total_tokens += tu.get("total_tokens", 0)
                 total_duration += test_data.get("duration", 0)
-                total_tool_calls += len(test_data.get("tool_calls", []))
+                total_tool_calls += _trace_tool_calls(test_data)
                 token_count += 1
 
     return {
@@ -178,11 +208,18 @@ def aggregate_results() -> Dict:
         model = r.get("model_name", "unknown")
         model_groups.setdefault(model, []).append(r)
 
+    # 题目类型映射（逐题明细展示用；读不到不影响统计）
+    try:
+        from database import load_metadata
+        meta_all = load_metadata() or {}
+    except Exception:
+        meta_all = {}
+
     # 各模型指标（含 token/耗时/工具调用）
     models_data = {}
     for model_name, group in model_groups.items():
         stats = _model_stats(group)
-        # 补 token / 耗时 / 工具调用
+        # 补 token / 耗时 / 工具调用（工具数由 trace 推导）
         total_tokens = 0
         total_duration = 0
         total_tool_calls = 0
@@ -195,12 +232,14 @@ def aggregate_results() -> Dict:
                     tu = test_data.get("token_usage", {})
                     total_tokens += tu.get("total_tokens", 0)
                     total_duration += test_data.get("duration", 0)
-                    total_tool_calls += len(test_data.get("tool_calls", []))
+                    total_tool_calls += _trace_tool_calls(test_data)
                     token_count += 1
         stats["avg_tokens"] = round(total_tokens / token_count, 1) if token_count else 0
         stats["avg_duration"] = round(total_duration / token_count, 2) if token_count else 0
         stats["avg_tool_calls"] = round(total_tool_calls / token_count, 1) if token_count else 0
         stats["issue_type_counts"] = _issue_type_counts(group)
+        # 逐题明细（新记录在前）：题号/verdict/得分/问题数/token/耗时/时间
+        stats["records"] = [_record_brief(r, meta_all) for r in reversed(group)]
         models_data[model_name] = stats
 
     # 全局汇总
