@@ -117,7 +117,7 @@ python server.py                             # 6. 启动服务
 
 | 命令 | 说明 |
 |---|---|
-| `python nl_question.py` | 默认读 `.env`（`NL_API_KEY`/`DEFAULT_MODEL`/`DEFAULT_BASE_URL`），无 key 才交互填写；跳过已有 `nl_question` 的题 |
+| `python nl_question.py` | 默认读 `.env`（`NL_API_KEY`/`NL_MODEL`→`DEFAULT_MODEL`/`NL_BASE_URL`→`DEFAULT_BASE_URL`），无 key 才交互填写；跳过已有 `nl_question` 的题 |
 | `python nl_question.py --api-key sk-xxx` | 直接传 API Key |
 | `python nl_question.py --model ... --base-url ...` | 指定模型与接口地址 |
 | `python nl_question.py --force` | 强制重新生成已有 `nl_question` 的题 |

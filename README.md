@@ -59,8 +59,12 @@ benchmark_travelplan/
 |------|--------|------|
 | `TEST_API_KEY` | 测试器（server.py 兜底） | 测试器调模型用的 API Key |
 | `NL_API_KEY` | nl_question.py | 题目自然语言化调模型用的 API Key |
-| `DEFAULT_MODEL` | 两者共用 | 默认模型（缺省 `deepseek-v4-flash`） |
-| `DEFAULT_BASE_URL` | 两者共用 | 默认 OpenAI 兼容接口地址（缺省 `https://api.deepseek.com`） |
+| `TEST_MODEL` | 测试器（可选） | 测试器专用模型名；未填回落 `DEFAULT_MODEL` |
+| `NL_MODEL` | nl_question.py（可选） | 自然语言化专用模型名；未填回落 `DEFAULT_MODEL` |
+| `TEST_BASE_URL` | 测试器（可选） | 测试器专用接口地址；未填回落 `DEFAULT_BASE_URL` |
+| `NL_BASE_URL` | nl_question.py（可选） | 自然语言化专用接口地址；未填回落 `DEFAULT_BASE_URL` |
+| `DEFAULT_MODEL` | 两者共用兜底 | 默认模型（缺省 `deepseek-v4-flash`） |
+| `DEFAULT_BASE_URL` | 两者共用兜底 | 默认 OpenAI 兼容接口地址（两个专用 URL 都未填时使用；缺省 `https://api.deepseek.com`） |
 
 - **优先级**：命令行显式参数 > `.env` > 内置默认值
 - 测试器前端发请求时不带 key/model/url（空串），由服务端读 `.env` 兜底
@@ -385,7 +389,7 @@ python price_collector.py --workers 4     # 4 线程并发（默认 1，建议 3
 > **配对一致性**：存在性题（`0_`/`1_`）按「基础题号 + 内容」分组（`0_34` 与 `1_34` 同组），**一份自然语言写回组内全部题目**，保证两者除干扰外完全一致；不同题号（如 34 与 35）即使内容相同也不合并；`--question` 指定任一变体时整组一起处理。
 
 ```bash
-# 默认读取 .env 的 NL_API_KEY / DEFAULT_MODEL / DEFAULT_BASE_URL（无 key 时才交互填写；跳过已有 nl_question 的题目）
+# 默认读取 .env 的 NL_API_KEY / NL_MODEL→DEFAULT_MODEL / NL_BASE_URL→DEFAULT_BASE_URL（无 key 时才交互填写；跳过已有 nl_question 的题目）
 python nl_question.py
 
 # 直接传 API Key（覆盖 .env）

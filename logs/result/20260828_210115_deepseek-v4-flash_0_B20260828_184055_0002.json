@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-08-28T21:01:15.709446",
+  "test_file": "20260828_192719_deepseek-v4-flash_0_B20260828_184055_0002.json",
+  "question_id": "0_B20260828_184055_0002",
+  "model_name": "deepseek-v4-flash",
+  "user_input": "从郑州东到荆门西，我们一共五口人，不讲究舒适，经济实惠的普通座就行，你综合给看看呗。",
+  "score_summary": {
+    "hallucination_count": 0,
+    "issue_count": 0,
+    "total_tokens": 59973,
+    "duration_seconds": 258.325655,
+    "tool_calls": []
+  },
+  "verification": {
+    "total_items": 2,
+    "correct_items": 2,
+    "issue_count": 0,
+    "hallucination_count": 0,
+    "price_issue_count": 0,
+    "invalid_plan_count": 0,
+    "route_mismatch_count": 0,
+    "ticket_shortage_count": 0,
+    "missing_ride_count": 0,
+    "question_mode": "存在性",
+    "verdict": "pass",
+    "results": [
+      {
+        "train_num": "G3649",
+        "from_station_id": "ZAF",
+        "to_station_id": "WHN",
+        "from_name": "郑州东",
+        "to_name": "武汉",
+        "ride_from_station_id": "ZAF",
+        "ride_to_station_id": "WHN",
+        "ride_from_name": "郑州东",
+        "ride_to_name": "武汉",
+        "seat_type": "class2",
+        "claimed": 5,
+        "actual": 6,
+        "match": true,
+        "price_claimed": 294.0,
+        "price_actual": 294.0,
+        "price_match": true
+      },
+      {
+        "train_num": "G3347",
+        "from_station_id": "WHN",
+        "to_station_id": "MXN",
+        "from_name": "武汉",
+        "to_name": "荆门西",
+        "ride_from_station_id": "WHN",
+        "ride_to_station_id": "MXN",
+        "ride_from_name": "武汉",
+        "ride_to_name": "荆门西",
+        "seat_type": "class2",
+        "claimed": 5,
+        "actual": 5,
+        "match": true,
+        "price_claimed": 193.0,
+        "price_actual": 193.0,
+        "price_match": true
+      }
+    ],
+    "issues": [],
+    "summary": "✅ 全部通过：共 2 条方案，均与数据库一致"
+  },
+  "human_confirmed": false,
+  "human_notes": "批量测评自动生成",
+  "status": "success"
+}

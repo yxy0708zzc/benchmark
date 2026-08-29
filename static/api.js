@@ -373,4 +373,26 @@ const API = {
     const resp = await fetch(`/api/batch_test/status?after_seq=${encodeURIComponent(afterSeq)}`);
     return resp.json();
   },
+
+  /** 扫描测试记录（供批量测评勾选） */
+  batchEvalScan: async () => {
+    const resp = await fetch('/api/batch_eval/scan', { method: 'POST' });
+    return resp.json();
+  },
+
+  /** 启动批量测评 */
+  batchEvalStart: async (payload) => {
+    const resp = await fetch('/api/batch_eval/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.json();
+  },
+
+  /** 查询批量测评进度（+ 增量日志） */
+  batchEvalStatus: async (afterSeq = 0) => {
+    const resp = await fetch(`/api/batch_eval/status?after_seq=${encodeURIComponent(afterSeq)}`);
+    return resp.json();
+  },
 };

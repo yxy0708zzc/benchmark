@@ -159,7 +159,8 @@ def build_prompt(entry: dict) -> str:
 
 
 def generate_nl(api_key: str, model: str, base_url: str, prompt: str) -> str:
-    """调用大模型生成自然语言"""
+    """调用大模型生成自然语言（温度读 config.NL_TEMPERATURE，在 config.py 中修改）"""
+    from config import NL_TEMPERATURE
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
         "Content-Type": "application/json",
@@ -168,7 +169,7 @@ def generate_nl(api_key: str, model: str, base_url: str, prompt: str) -> str:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 1.9,  # 提高多样性
+        "temperature": NL_TEMPERATURE,  # 提高多样性（注意各平台范围限制，如 MiMo [0, 1.5]）
     }
     resp = requests.post(url, json=payload, headers=headers, timeout=60)
     if resp.status_code != 200:
@@ -183,25 +184,30 @@ def generate_nl(api_key: str, model: str, base_url: str, prompt: str) -> str:
 
 
 def ask_config(args) -> dict:
-    """确定模型配置：优先级 命令行参数 > .env（NL_API_KEY / DEFAULT_MODEL / DEFAULT_BASE_URL）> 内置默认。
+    """确定模型配置：优先级 命令行参数 > .env（NL_API_KEY / NL_MODEL → DEFAULT_MODEL / NL_BASE_URL → DEFAULT_BASE_URL）。
 
-    仅当 .env 也没有 API Key 时才交互输入（否则直接读取本地存储，无需手动输入）。
+    模型名与接口地址不内置任何平台默认（不一定调用 deepseek）：任一缺失时交互补全或报错退出。
     """
     from config import ENV
-    model = (args.model or "").strip() or ENV.get("DEFAULT_MODEL", "") or "deepseek-v4-flash"
-    base_url = (args.base_url or "").strip() or ENV.get("DEFAULT_BASE_URL", "") or "https://api.deepseek.com"
+    model = (args.model or "").strip() or ENV.get("NL_MODEL", "") or ENV.get("DEFAULT_MODEL", "") or ""
+    base_url = (args.base_url or "").strip() or ENV.get("NL_BASE_URL", "") or ENV.get("DEFAULT_BASE_URL", "") or ""
     api_key = (args.api_key or "").strip() or ENV.get("NL_API_KEY", "") or ""
 
-    if not api_key:
+    if not api_key or not model or not base_url:
         print("=" * 60)
         print("  题目自然语言化工具")
         print("=" * 60)
-        print("请填写模型配置（直接回车用默认值；也可在 .env 填 NL_API_KEY 免输入）：")
-        model = input(f"  模型名称 [{model}]: ").strip() or model
-        base_url = input(f"  API Base URL [{base_url}]: ").strip() or base_url
-        api_key = input("  API Key: ").strip()
+        print("模型配置不完整（也可在 .env 填 NL_API_KEY / NL_MODEL / DEFAULT_BASE_URL 免输入）：")
+        if not model:
+            model = input("  模型名称: ").strip()
+        if not base_url:
+            base_url = input("  API Base URL: ").strip()
         if not api_key:
-            print("❌ 未提供 API Key（请在 .env 填写 NL_API_KEY，或用 --api-key 传入）")
+            api_key = input("  API Key: ").strip()
+        missing = [n for n, v in
+                   [("模型名称", model), ("API Base URL", base_url), ("API Key", api_key)] if not v]
+        if missing:
+            print(f"❌ 缺少配置：{'、'.join(missing)}（系统不默认指向任何平台）")
             sys.exit(1)
 
     return {"api_key": api_key, "model": model, "base_url": base_url}
@@ -248,7 +254,7 @@ def _group_existence(raw_targets):
 def main():
     parser = argparse.ArgumentParser(description="题目自然语言化工具")
     parser.add_argument("--api-key", type=str, default="", help="API Key（未填时读 .env 的 NL_API_KEY）")
-    parser.add_argument("--model", type=str, default="", help="模型名称（未填时读 .env 的 DEFAULT_MODEL）")
+    parser.add_argument("--model", type=str, default="", help="模型名称（未填时读 .env 的 NL_MODEL，再回落 DEFAULT_MODEL）")
     parser.add_argument("--base-url", type=str, default="", help="API Base URL（未填时读 .env 的 DEFAULT_BASE_URL）")
     parser.add_argument("--force", action="store_true", help="强制重新生成已保存 nl_question 的题目")
     parser.add_argument("--question", action="append", default=[],

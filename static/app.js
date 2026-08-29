@@ -37,6 +37,9 @@ const App = {
   _abortController: null,
   /** 聊天区是否自动滚动到底部（用户上翻时置 false） */
   _autoScroll: true,
+  /** 测试页轨迹视图：结构化消息序列 + 视图开关 */
+  _trace: [],
+  _traceView: false,
   /** 初始化应用 */
   init: function() {
     // 模型/API 配置统一来自服务端 .env（前端不再存 localStorage）
@@ -203,9 +206,21 @@ const App = {
 
   /** 更新模型连接状态显示（模型配置来自服务端 .env） */
   _updateModelStatusDisplay: function() {
-    document.querySelectorAll('.test-model-status').forEach(el => {
-      el.textContent = '● .env 配置';
-      el.style.color = '#22c55e';
+    // 顶栏显示 .env 解析后的测试模型名（TEST_MODEL → DEFAULT_MODEL），不含 key
+    fetch('/api/env/model').then(r => r.json()).then(j => {
+      const name = j.test_model || '.env 配置';
+      document.querySelectorAll('.test-model-status').forEach(el => {
+        el.textContent = `● ${name}`;
+        el.style.color = '#22c55e';
+      });
+      // 批量测试输入框默认填入同一模型名（避免手填错模型导致平台报"key 无效"）
+      const inp = document.getElementById('batch-test-model');
+      if (inp && !inp.value.trim() && j.test_model) inp.value = j.test_model;
+    }).catch(() => {
+      document.querySelectorAll('.test-model-status').forEach(el => {
+        el.textContent = '● .env 配置';
+        el.style.color = '#22c55e';
+      });
     });
   },
 
@@ -310,6 +325,12 @@ const App = {
     this._autoScroll = true;
     this._appendMessage('user', text);
 
+    // 轨迹数据：user 条目 + assistant 条目（tools 数组被下方 toolCallsList 引用，流式同步更新）
+    this._trace.push({ kind: 'user', content: text });
+    const traceAsst = { kind: 'assistant', content: '', reasoning: '', tools: [] };
+    this._trace.push(traceAsst);
+    if (this._traceView) this._renderTrace();
+
     // 禁用发送按钮
     const sendBtn = document.getElementById('btn-send');
     if (sendBtn) sendBtn.disabled = true;
@@ -322,7 +343,7 @@ const App = {
 
     let fullContent = '';
     let fullReasoning = '';
-    let toolCallsList = [];
+    let toolCallsList = traceAsst.tools;  // 引用轨迹条目的工具数组，流式同步
 
     /** 更新最后一条助手消息的显示内容（保留展开/折叠状态）
      *  plain=true：流式期间纯文本渲染；plain=false：完成后用 marked 渲染 Markdown */
@@ -355,6 +376,14 @@ const App = {
         container.insertAdjacentHTML('beforeend', html);
       }
       this._scrollChatToBottom();
+
+      // 轨迹视图同步（可见时节流重绘）
+      traceAsst.content = fullContent;
+      traceAsst.reasoning = fullReasoning;
+      if (this._traceView) {
+        if (this._traceRenderTimer) clearTimeout(this._traceRenderTimer);
+        this._traceRenderTimer = setTimeout(() => { if (this._traceView) this._renderTrace(); }, 300);
+      }
     };
 
     let doneCalled = false;
@@ -437,7 +466,7 @@ const App = {
 
               case 'error':
                 fullContent = '错误: ' + (evt.content || '未知错误');
-                toolCallsList = [];
+                toolCallsList.length = 0;
                 updateMsg(false, true);
                 doneCalled = true;
                 break;
@@ -454,7 +483,7 @@ const App = {
       }
       if (!doneCalled) {
         fullContent = `请求失败: ${e.message}`;
-        toolCallsList = [];
+        toolCallsList.length = 0;
         fullReasoning = '';
         updateMsg(false, true);
       }
@@ -471,6 +500,130 @@ const App = {
     const html = Components.renderMessage(role, content, toolCalls, reasoning);
     container.insertAdjacentHTML('beforeend', html);
     this._scrollChatToBottom();
+  },
+
+  /** 仅当用户接近底部时自动滚动到聊天区底部 */
+  _scrollChatToBottom: function() {
+    if (!this._autoScroll) return;
+    const container = document.getElementById('chat-messages');
+    if (container) container.scrollTop = container.scrollHeight;
+  },
+
+  // ============================================================
+  // 轨迹视图（harness 风格：消息/工具逐行排列，点击行右侧抽屉看详情）
+  // ============================================================
+  _escHtml: function(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  },
+
+  /** 单行摘要：去换行、截断 */
+  _traceSummary: function(text, n = 80) {
+    const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+    return s.length > n ? s.substring(0, n) + '…' : (s || '—');
+  },
+
+  /** 切换对话/轨迹视图 */
+  _switchChatView: function(mode) {
+    this._traceView = mode === 'trace';
+    const msgs = document.getElementById('chat-messages');
+    const trace = document.getElementById('chat-trace');
+    if (msgs) msgs.style.display = this._traceView ? 'none' : '';
+    if (trace) trace.style.display = this._traceView ? '' : 'none';
+    const bChat = document.getElementById('btn-view-chat');
+    const bTrace = document.getElementById('btn-view-trace');
+    if (bChat) bChat.style.opacity = this._traceView ? '.55' : '1';
+    if (bTrace) bTrace.style.opacity = this._traceView ? '1' : '.55';
+    if (this._traceView) this._renderTrace();
+  },
+
+  /** 全量重绘轨迹视图（行数少，成本低；每行可点击开详情抽屉） */
+  _renderTrace: function() {
+    const box = document.getElementById('chat-trace');
+    if (!box) return;
+    box.innerHTML = '';
+    const frag = document.createDocumentFragment();
+
+    const mkRow = (icon, badge, badgeColor, summary, clickAttr, indent) => {
+      const row = document.createElement('div');
+      row.setAttribute('onclick', clickAttr);
+      row.style.cssText = `display:flex;align-items:center;gap:8px;padding:5px 8px;margin:2px 0;border-radius:6px;cursor:pointer;` +
+        `border-left:3px solid ${badgeColor};background:#fafafa;user-select:none;${indent ? 'margin-left:22px;' : ''}`;
+      row.onmouseenter = () => { row.style.background = '#f0f0f0'; };
+      row.onmouseleave = () => { row.style.background = '#fafafa'; };
+      row.innerHTML = `<span style="font-size:14px">${icon}</span>` +
+        `<span style="flex-shrink:0;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff;background:${badgeColor}">${badge}</span>` +
+        `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-5)">${this._escHtml(summary)}</span>`;
+      return row;
+    };
+
+    this._trace.forEach((m, idx) => {
+      if (m.kind === 'user') {
+        frag.appendChild(mkRow('👤', 'USER', '#2563eb', this._traceSummary(m.content), `App._openTraceDetail('user',${idx})`, false));
+      } else {
+        const asstSummary = m.content ? this._traceSummary(m.content)
+          : (m.reasoning ? '💭 思考中…' : '⏳ 思考中...');
+        frag.appendChild(mkRow('🤖', 'ASSISTANT', '#16a34a', asstSummary, `App._openTraceDetail('assistant',${idx})`, false));
+        (m.tools || []).forEach((t, ti) => {
+          const status = t._pending ? '⏳ 执行中' : '✅';
+          const argsSummary = this._traceSummary(JSON.stringify(t.arguments ?? {}), 60);
+          frag.appendChild(mkRow('🔧', 'TOOL', '#d97706',
+            `${t.tool_name} ${status} · ${argsSummary}`,
+            `App._openTraceDetail('tool',${idx},${ti})`, true));
+        });
+      }
+    });
+
+    if (!this._trace.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:var(--gray-4);text-align:center;padding:24px';
+      empty.textContent = '暂无轨迹（发送消息后此处按 harness 轨迹方式逐行展示对话与工具调用）';
+      frag.appendChild(empty);
+    }
+    box.appendChild(frag);
+    box.scrollTop = box.scrollHeight;
+  },
+
+  /** 打开轨迹行详情抽屉 */
+  _openTraceDetail: function(kind, idx, toolIdx) {
+    const m = this._trace[idx];
+    if (!m) return;
+    const drawer = document.getElementById('trace-drawer');
+    const title = document.getElementById('trace-drawer-title');
+    const body = document.getElementById('trace-drawer-body');
+    if (!drawer || !title || !body) return;
+
+    const esc = this._escHtml;
+    const pre = (obj) => `<pre style="white-space:pre-wrap;word-break:break-all;background:#fafafa;border:1px solid var(--gray-2);border-radius:6px;padding:8px;font-family:Consolas,monospace;font-size:12px;margin:4px 0 10px">${esc(obj)}</pre>`;
+    const secTitle = (t) => `<div style="font-weight:600;margin:10px 0 2px">${t}</div>`;
+
+    if (kind === 'user') {
+      title.textContent = '👤 用户消息';
+      body.innerHTML = pre(m.content);
+    } else if (kind === 'assistant') {
+      title.textContent = '🤖 助手消息';
+      let html = '';
+      if (m.reasoning) html += secTitle('💭 思考链') + pre(m.reasoning);
+      html += secTitle('📝 回复内容');
+      try { html += `<div class="message-content">${marked.parse(m.content || '')}</div>`; }
+      catch (e) { html += pre(m.content); }
+      if ((m.tools || []).length) html += secTitle(`🔧 本轮工具调用（${m.tools.length}）`);
+      body.innerHTML = html;
+    } else {
+      const t = (m.tools || [])[toolIdx];
+      if (!t) return;
+      title.textContent = `🔧 工具调用：${t.tool_name}`;
+      body.innerHTML =
+        secTitle('状态') + (t._pending ? '⏳ 执行中' : '✅ 已完成') +
+        secTitle('输入参数') + pre(JSON.stringify(t.arguments ?? {}, null, 2)) +
+        secTitle('返回结果') + pre(JSON.stringify(t.result ?? {}, null, 2));
+    }
+    drawer.style.display = 'flex';
+  },
+
+  /** 关闭轨迹详情抽屉 */
+  _closeTraceDrawer: function() {
+    const drawer = document.getElementById('trace-drawer');
+    if (drawer) drawer.style.display = 'none';
   },
 
   /** 仅当用户接近底部时自动滚动到聊天区底部 */
@@ -533,6 +686,9 @@ const App = {
       await API.resetChat(this.sessionId);
       const container = document.getElementById('chat-messages');
       if (container) container.innerHTML = '';
+      // 轨迹同步清空
+      this._trace = [];
+      if (this._traceView) this._renderTrace();
     } catch (e) {
       console.error('重置对话失败:', e);
     }
@@ -1491,14 +1647,16 @@ const App = {
     const btnReport = document.getElementById('btn-batch-report');
     if (btnReport) btnReport.onclick = () => this._downloadBatchReport();
 
-    // 干扰密度滑块联动
-    const densitySlider = document.getElementById('batch-density');
-    const densityLabel = document.getElementById('batch-density-label');
-    if (densitySlider && densityLabel) {
-      densitySlider.oninput = function() {
-        densityLabel.textContent = parseFloat((this.value * 100).toFixed(3)) + '%';
-      };
-    }
+    // 干扰密度滑块联动（伪干扰=存在性 / 真干扰=选择性）
+    [['batch-density-fake', 'batch-density-fake-label'], ['batch-density-real', 'batch-density-real-label']].forEach(([sliderId, labelId]) => {
+      const slider = document.getElementById(sliderId);
+      const label = document.getElementById(labelId);
+      if (slider && label) {
+        slider.oninput = function() {
+          label.textContent = parseFloat((this.value * 100).toFixed(3)) + '%';
+        };
+      }
+    });
 
     // 座位等级比例实时校验（总和必须=100%）
     ['batch-seat-class0', 'batch-seat-class1', 'batch-seat-class2'].forEach(id => {
@@ -1547,6 +1705,12 @@ const App = {
     if (testAll) testAll.onclick = () => this._selectBatchTest(true);
     const testNone = document.getElementById('btn-batch-test-select-none');
     if (testNone) testNone.onclick = () => this._selectBatchTest(false);
+
+    // 模型编号留空时自动填 .env 的 TEST_MODEL（避免手填错模型名导致平台报"key 无效"）
+    fetch('/api/env/model').then(r => r.json()).then(j => {
+      const inp = document.getElementById('batch-test-model');
+      if (inp && !inp.value.trim() && j.test_model) inp.value = j.test_model;
+    }).catch(() => {});
 
     // 拖选：按住鼠标划过选框即可批量勾选/取消勾选（不可测的 disabled 项自动跳过）
     this._bindDragSelect(
@@ -1713,7 +1877,9 @@ const App = {
         class1: parseFloat(document.getElementById('batch-seat-class1')?.value || '0') || 0,
         class2: parseFloat(document.getElementById('batch-seat-class2')?.value || '0') || 0,
       },
-      interference_density: parseFloat(document.getElementById('batch-density')?.value || '0.02'),
+      interference_density: parseFloat(document.getElementById('batch-density-fake')?.value || '0.02'),
+      fake_interference_density: parseFloat(document.getElementById('batch-density-fake')?.value || '0.02'),
+      real_interference_density: parseFloat(document.getElementById('batch-density-real')?.value || '0.02'),
       max_retries: parseInt(document.getElementById('batch-max-retries')?.value || '40', 10) || 40,
     };
     // 注：批量自然语言化已独立成框（/api/batch_nl/*），不再内嵌于批量出题请求
@@ -1725,38 +1891,30 @@ const App = {
     try {
       const result = await API.batchGenerate(payload);
       if (!result.success) { alert(`批量出题启动失败: ${result.detail || '未知错误'}`); this._resetBatchProgress(); return; }
-      if (!this._batchGenPolling) this._pollBatchStatus();
+      this._pollBatchStatus();
     } catch (e) {
       alert(`批量出题启动失败: ${e.message}`);
       this._resetBatchProgress();
     }
   },
 
-  /** 轮询批量状态，更新单进度条与日志（skipLogReplay=true 仅同步游标不回放旧日志） */
-  _pollBatchStatus: async function(skipLogReplay) {
-    this._batchGenPolling = true;
-    try {
-      const status = await API.batchStatus(this._batchLogSeqs.batch_generate || 0);
-      this._renderBatchProgress(status);
-      this._appendBatchLog('batch-gen-log', 'batch_generate', status.logs, skipLogReplay);
-      if (status.running) {
-        setTimeout(() => this._pollBatchStatus(), 500);
-      } else {
-        this._batchGenPolling = false;
-        if (status.done) {
-          this._renderBatchResult(status.result);
-          // 任务在本页面会话中运行结束后，弹窗提示失败题目数
-          const failed = status.result?.summary?.failed;
-          if (this._batchGenWasRunning && typeof failed === 'number') {
-            alert(`批量出题结束\n失败题目数：${failed}`);
-          }
-          this._batchGenWasRunning = false;
+  /** 轮询批量状态，更新单进度条与日志（skipLogReplay/resumeMode 见 _startBatchPoll） */
+  _pollBatchStatus: function(skipLogReplay, resumeMode) {
+    this._startBatchPoll('batch_generate', (seq) => API.batchStatus(seq), 'batch-gen-log',
+      (status) => {
+        this._renderBatchProgress(status);
+        if (status.running) this._batchGenWasRunning = true;
+      },
+      (status) => {
+        this._renderBatchResult(status.result);
+        // 任务在本页面会话中运行结束后，弹窗提示失败题目数
+        const failed = status.result?.summary?.failed;
+        if (this._batchGenWasRunning && typeof failed === 'number') {
+          alert(`批量出题结束\n失败题目数：${failed}`);
         }
-      }
-    } catch (e) {
-      console.error('批量状态轮询失败:', e);
-      setTimeout(() => this._pollBatchStatus(), 500);
-    }
+        this._batchGenWasRunning = false;
+      },
+      { skipLogReplay, resumeMode });
   },
 
   /** 渲染单进度条 */
@@ -1775,13 +1933,59 @@ const App = {
   // 批量日志通用渲染（三个批量工具共用）
   // ============================================================
   // 各任务已读日志游标（seq），与服务端全局自增序号对应
-  _batchLogSeqs: { batch_generate: 0, batch_nl: 0, batch_test: 0 },
+  _batchLogSeqs: { batch_generate: 0, batch_nl: 0, batch_test: 0, batch_eval: 0 },
   // 各任务轮询进行中标志（防止多条轮询链并行）
   _batchGenPolling: false,
   _batchNlPolling: false,
   _batchTestPolling: false,
+  _batchEvalPolling: false,
   // 批量出题任务在本页面会话中处于运行态（结束时据此弹窗提示失败数）
   _batchGenWasRunning: false,
+  // 轮询令牌：每次启动新链自增，旧链发现令牌不符自动退出（根治"进页面后立刻启动任务"的竞态）
+  _batchPollTokens: { batch_generate: 0, batch_nl: 0, batch_test: 0, batch_eval: 0 },
+
+  /**
+   * 通用批量轮询启动器（含增量日志；新链启动自动作废旧链）
+   * @param job 任务名（batch_generate/batch_nl/batch_test/batch_eval）
+   * @param fetcher (afterSeq) => Promise<status>
+   * @param logId 日志容器 ID
+   * @param renderFn (status)=>void 进度渲染回调
+   * @param onDoneFn (status)=>void 任务完成回调（可空）
+   * @param opts {skipLogReplay, resumeMode}：resumeMode 时任务已结束则仅同步游标不渲染
+   */
+  _startBatchPoll: function(job, fetcher, logId, renderFn, onDoneFn, opts = {}) {
+    const flag = { batch_generate: '_batchGenPolling', batch_nl: '_batchNlPolling', batch_test: '_batchTestPolling', batch_eval: '_batchEvalPolling' }[job];
+    const interval = { batch_generate: 500, batch_nl: 600, batch_test: 800, batch_eval: 600 }[job];
+    this._batchPollTokens[job] = (this._batchPollTokens[job] || 0) + 1;
+    const token = this._batchPollTokens[job];
+    this[flag] = true;
+    const alive = () => this._batchPollTokens[job] === token;
+    const tick = async () => {
+      if (!alive()) return;
+      try {
+        const status = await fetcher(this._batchLogSeqs[job] || 0);
+        if (!alive()) return;
+        if (opts.resumeMode && !status.running) {
+          // 上一次任务已完成：刷新后不恢复旧进度条与结果，仅同步日志游标
+          this[flag] = false;
+          this._appendBatchLog(logId, job, status.logs, true);
+          return;
+        }
+        renderFn(status);
+        this._appendBatchLog(logId, job, status.logs, opts.skipLogReplay);
+        if (status.running) { setTimeout(tick, interval); }
+        else {
+          this[flag] = false;
+          if (status.done && onDoneFn) onDoneFn(status);
+        }
+      } catch (e) {
+        if (!alive()) return;
+        console.error(job + ' 进度轮询失败:', e);
+        setTimeout(tick, interval);
+      }
+    };
+    tick();
+  },
 
   /** 增量追加日志行并自动滚动到底部（textContent 渲染，防注入）
    *  syncOnly=true 时仅同步游标、不渲染（进入页面时避免回放旧日志，只显示新出现的） */
@@ -1816,15 +2020,42 @@ const App = {
     }
   },
 
-  /** 进入页面时恢复轮询：服务端任务仍在运行（如刷新页面后）则继续更新进度与日志。
+  /** 手动清空某批量面板：进度条、计数、当前任务、日志、结果卡（任务运行中不允许） */
+  _clearBatchPanel: function(job) {
+    const polling = { batch_generate: '_batchGenPolling', batch_nl: '_batchNlPolling', batch_test: '_batchTestPolling', batch_eval: '_batchEvalPolling' }[job];
+    if (this[polling]) { alert('任务正在运行中，请等待完成后再清空'); return; }
+    const map = {
+      batch_generate: { bar: 'batch-total-bar', count: 'batch-total-count', cur: 'batch-current-task', log: 'batch-gen-log', result: 'batch-result' },
+      batch_nl:       { bar: 'batch-nl-bar',      count: 'batch-nl-count',      cur: 'batch-nl-current',      log: 'batch-nl-log',      result: 'batch-nl-result' },
+      batch_test:     { bar: 'batch-test-bar',    count: 'batch-test-count',    cur: 'batch-test-current',    log: 'batch-test-log',    result: 'batch-test-result' },
+      batch_eval:     { bar: 'batch-eval-bar',    count: 'batch-eval-count',    cur: 'batch-eval-current',    log: 'batch-eval-log',    result: 'batch-eval-result' },
+    }[job];
+    if (!map) return;
+    const bar = document.getElementById(map.bar);
+    if (bar) bar.style.width = '0%';
+    const count = document.getElementById(map.count);
+    if (count) count.textContent = '0 / 0';
+    const cur = document.getElementById(map.cur);
+    if (cur) cur.textContent = '尚未开始';
+    const res = document.getElementById(map.result);
+    if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+    if (job === 'batch_generate') {
+      const btnReport = document.getElementById('btn-batch-report');
+      if (btnReport) btnReport.style.display = 'none';
+    }
+    this._resetBatchLog(map.log, job);
+  },
+
+  /** 进入页面时恢复轮询：仅当服务端任务仍在运行时恢复（刷新后不再恢复已完成的进度条/结果）。
    *  首次拉取仅同步日志游标（不回放旧日志，前端只显示之后新出现的日志） */
   _resumeBatchPolling: function(job) {
-    const flag = { batch_generate: '_batchGenPolling', batch_nl: '_batchNlPolling', batch_test: '_batchTestPolling' }[job];
+    const flag = { batch_generate: '_batchGenPolling', batch_nl: '_batchNlPolling', batch_test: '_batchTestPolling', batch_eval: '_batchEvalPolling' }[job];
     if (this[flag]) return;
     const start = {
-      batch_generate: () => this._pollBatchStatus(true),
-      batch_nl: () => this._pollBatchNlStatus(true),
-      batch_test: () => this._pollBatchTestStatus(true),
+      batch_generate: () => this._pollBatchStatus(true, true),
+      batch_nl: () => this._pollBatchNlStatus(true, true),
+      batch_test: () => this._pollBatchTestStatus(true, true),
+      batch_eval: () => this._pollBatchEvalStatus(true, true),
     }[job];
     if (start) start();
   },
@@ -1949,23 +2180,16 @@ const App = {
       const res = await API.batchNlGenerate({ question_ids: [...this.batchNlSelected] });
       if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
       this._resetBatchNlProgress();
-      if (!this._batchNlPolling) this._pollBatchNlStatus();
+      this._pollBatchNlStatus();
     } catch (e) { alert(`启动失败: ${e.message}`); }
   },
 
-  /** 轮询批量自然语言化进度（含增量日志；skipLogReplay=true 仅同步游标不回放旧日志） */
-  _pollBatchNlStatus: async function(skipLogReplay) {
-    this._batchNlPolling = true;
-    try {
-      const status = await API.batchNlStatus(this._batchLogSeqs.batch_nl || 0);
-      this._renderBatchNlProgress(status);
-      this._appendBatchLog('batch-nl-log', 'batch_nl', status.logs, skipLogReplay);
-      if (status.running) { setTimeout(() => this._pollBatchNlStatus(), 600); }
-      else { this._batchNlPolling = false; if (status.done) this._renderBatchNlResult(status.result); }
-    } catch (e) {
-      console.error('自然语言化进度轮询失败:', e);
-      setTimeout(() => this._pollBatchNlStatus(), 600);
-    }
+  /** 轮询批量自然语言化进度（含增量日志；skipLogReplay/resumeMode 见 _startBatchPoll） */
+  _pollBatchNlStatus: function(skipLogReplay, resumeMode) {
+    this._startBatchPoll('batch_nl', (seq) => API.batchNlStatus(seq), 'batch-nl-log',
+      (status) => this._renderBatchNlProgress(status),
+      (status) => { if (status.done) this._renderBatchNlResult(status.result); },
+      { skipLogReplay, resumeMode });
   },
 
   _resetBatchNlProgress: function() {
@@ -2083,27 +2307,21 @@ const App = {
     const model = document.getElementById('batch-test-model')?.value.trim();
     if (!model) { alert('请先填写测试模型编号（名称）'); return; }
     const maxIter = parseInt(document.getElementById('batch-test-max-iter')?.value || '30', 10) || 30;
+    const concurrency = parseInt(document.getElementById('batch-test-concurrency')?.value || '1', 10) || 1;
     try {
-      const res = await API.batchTestStart({ model, question_ids: [...this.batchTestSelected], max_iterations: maxIter });
+      const res = await API.batchTestStart({ model, question_ids: [...this.batchTestSelected], max_iterations: maxIter, concurrency });
       if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
       this._resetBatchTestProgress();
-      if (!this._batchTestPolling) this._pollBatchTestStatus();
+      this._pollBatchTestStatus();
     } catch (e) { alert(`启动失败: ${e.message}`); }
   },
 
-  /** 轮询批量测试进度（含增量日志；skipLogReplay=true 仅同步游标不回放旧日志） */
-  _pollBatchTestStatus: async function(skipLogReplay) {
-    this._batchTestPolling = true;
-    try {
-      const status = await API.batchTestStatus(this._batchLogSeqs.batch_test || 0);
-      this._renderBatchTestProgress(status);
-      this._appendBatchLog('batch-test-log', 'batch_test', status.logs, skipLogReplay);
-      if (status.running) { setTimeout(() => this._pollBatchTestStatus(), 800); }
-      else { this._batchTestPolling = false; if (status.done) this._renderBatchTestResult(status.result); }
-    } catch (e) {
-      console.error('批量测试进度轮询失败:', e);
-      setTimeout(() => this._pollBatchTestStatus(), 800);
-    }
+  /** 轮询批量测试进度（含增量日志；skipLogReplay/resumeMode 见 _startBatchPoll） */
+  _pollBatchTestStatus: function(skipLogReplay, resumeMode) {
+    this._startBatchPoll('batch_test', (seq) => API.batchTestStatus(seq), 'batch-test-log',
+      (status) => this._renderBatchTestProgress(status),
+      (status) => { if (status.done) this._renderBatchTestResult(status.result); },
+      { skipLogReplay, resumeMode });
   },
 
   _resetBatchTestProgress: function() {
@@ -2382,31 +2600,158 @@ const App = {
   },
 
   // ============================================================
-  // 测评面板初始化
+  // 批量测评（勾选测试记录 → 批量代码核查并保存结果）
   // ============================================================
   initEval: function() {
     // 如果已初始化，跳过
     if (document.querySelector('#page-eval')?.dataset.initialized) return;
     document.querySelector('#page-eval').dataset.initialized = '1';
 
-    // 加载测试记录列表
-    this._loadEvalRecords();
+    document.getElementById('btn-batch-eval-scan')?.addEventListener('click', () => this._scanBatchEval());
+    document.getElementById('btn-batch-eval-start')?.addEventListener('click', () => this._startBatchEval());
+    document.getElementById('btn-batch-eval-select-all')?.addEventListener('click', () => this._selectBatchEval(true));
+    document.getElementById('btn-batch-eval-select-none')?.addEventListener('click', () => this._selectBatchEval(false));
 
-    // 绑定按钮事件
-    document.getElementById('btn-eval-load').onclick = () => this._loadEvalRecord();
-    document.getElementById('btn-eval-verify').onclick = () => this._runEvalVerify();
-    document.getElementById('btn-eval-complete').onclick = () => this._saveEvalResult();
+    // 拖选：按住鼠标划过选框即可批量勾选/取消勾选
+    this._bindDragSelect(
+      document.getElementById('batch-eval-table'),
+      'input[data-eval-file]',
+      (cb, checked) => {
+        cb.checked = checked;
+        if (checked) this.batchEvalSelected.add(cb.dataset.evalFile);
+        else this.batchEvalSelected.delete(cb.dataset.evalFile);
+      },
+    );
 
-    // 绑定 Tab 切换
-    document.querySelectorAll('#page-eval .tab-btn').forEach(btn => {
-      btn.onclick = () => {
-        document.querySelectorAll('#page-eval .tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById('eval-verify-panel').style.display = btn.dataset.tab === 'verify' ? '' : 'none';
-        document.getElementById('eval-details-panel').style.display = btn.dataset.tab === 'details' ? '' : 'none';
-      };
-    });
+    // 服务端任务若仍在运行（如页面刷新后），自动恢复进度与日志轮询
+    this._resumeBatchPolling('batch_eval');
   },
+
+  batchEvalItems: [],   // 扫描结果 [{filename, question_id, model_name, ...}]
+  batchEvalSelected: new Set(),
+  _batchEvalPolling: false,
+
+  /** 扫描测试记录列表 */
+  _scanBatchEval: async function() {
+    try {
+      const res = await API.batchEvalScan();
+      if (!res.success) { alert(`扫描失败: ${res.detail || '未知错误'}`); return; }
+      this.batchEvalItems = res.items || [];
+      this._renderBatchEvalTable();
+    } catch (e) { alert(`扫描失败: ${e.message}`); }
+  },
+
+  /** 渲染批量测评勾选表（记录详情 + 勾选增删） */
+  _renderBatchEvalTable: function() {
+    const container = document.getElementById('batch-eval-table');
+    if (!container) return;
+    if (!this.batchEvalItems.length) {
+      container.innerHTML = '<div style="text-align:center;color:var(--gray-4);padding:16px">没有测试记录（请先在批量测试中生成记录）</div>';
+      return;
+    }
+    let html = '<table class="table" style="width:100%"><thead><tr><th></th><th>题号</th><th>模型</th><th>记录文件</th><th>时间</th><th>plan_status</th><th>已测评</th></tr></thead><tbody>';
+    this.batchEvalItems.forEach(item => {
+      const sel = this.batchEvalSelected.has(item.filename);
+      html += `<tr>
+        <td style="text-align:center;user-select:none"><input type="checkbox" data-eval-file="${item.filename}" ${sel ? 'checked' : ''} style="cursor:pointer;vertical-align:middle"></td>
+        <td><strong>${item.question_id || '-'}</strong></td>
+        <td>${item.model_name || '-'}</td>
+        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${item.filename}">${item.filename}</td>
+        <td>${(item.timestamp || '').replace('T', ' ').substring(0, 19)}</td>
+        <td>${item.plan_status || '-'}</td>
+        <td>${item.evaluated ? '<span style="color:var(--success-green)">✅ 是</span>' : '<span style="color:var(--gray-4)">否</span>'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  },
+
+  /** 批量测评全选/取消 */
+  _selectBatchEval: function(all) {
+    this.batchEvalSelected = all ? new Set(this.batchEvalItems.map(i => i.filename)) : new Set();
+    this._renderBatchEvalTable();
+  },
+
+  /** 开始批量测评 */
+  _startBatchEval: async function() {
+    if (!this.batchEvalSelected.size) { alert('未勾选任何测试记录'); return; }
+    try {
+      const res = await API.batchEvalStart({ records: [...this.batchEvalSelected] });
+      if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
+      this._resetBatchEvalProgress();
+      this._pollBatchEvalStatus();
+    } catch (e) { alert(`启动失败: ${e.message}`); }
+  },
+
+  /** 轮询批量测评进度（含增量日志；skipLogReplay/resumeMode 见 _startBatchPoll） */
+  _pollBatchEvalStatus: function(skipLogReplay, resumeMode) {
+    this._startBatchPoll('batch_eval', (seq) => API.batchEvalStatus(seq), 'batch-eval-log',
+      (status) => this._renderBatchEvalProgress(status),
+      (status) => { if (status.done) this._renderBatchEvalResult(status.result); },
+      { skipLogReplay, resumeMode });
+  },
+
+  _resetBatchEvalProgress: function() {
+    const bar = document.getElementById('batch-eval-bar');
+    if (bar) bar.style.width = '0%';
+    const count = document.getElementById('batch-eval-count');
+    if (count) count.textContent = `0 / ${this.batchEvalSelected.size}`;
+    const cur = document.getElementById('batch-eval-current');
+    if (cur) cur.textContent = '尚未开始';
+    const res = document.getElementById('batch-eval-result');
+    if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+    this._resetBatchLog('batch-eval-log', 'batch_eval');
+  },
+
+  _renderBatchEvalProgress: function(status) {
+    const bar = document.getElementById('batch-eval-bar');
+    if (bar) bar.style.width = status.total ? `${Math.round((status.done_count / status.total) * 100)}%` : '0%';
+    const count = document.getElementById('batch-eval-count');
+    if (count) count.textContent = `${status.done_count || 0} / ${status.total || 0}`;
+    const cur = document.getElementById('batch-eval-current');
+    if (cur) cur.textContent = status.current || '';
+  },
+
+  /** 渲染批量测评结果（verdict 分布 + 逐条明细） */
+  _renderBatchEvalResult: function(result) {
+    const container = document.getElementById('batch-eval-result');
+    if (!container) return;
+    container.style.display = 'block';
+    const s = result.summary || {};
+    const verdictLabel = {
+      'pass': '✅ 通过', 'hallucination': '❌ 有错误', 'no_plan': '⚠️ 无方案',
+      'empty_plan': '⚠️ 空方案', 'db_not_found': '❌ 题库缺失', 'error': '❌ 失败',
+    };
+    let html = '<div class="card"><div class="card-header">⚖️ 批量测评结果</div>';
+    html += `<div style="display:flex;gap:16px;padding:8px 0;font-size:var(--font-size-small);flex-wrap:wrap">
+      <div><strong>总数：</strong>${s.total || 0}</div>
+      <div style="color:var(--success-green)"><strong>成功：</strong>${s.success || 0}</div>
+      <div style="color:var(--error-red)"><strong>失败：</strong>${s.failed || 0}</div>`;
+    Object.entries(s.verdicts || {}).forEach(([v, c]) => {
+      html += `<div><strong>${verdictLabel[v] || v}：</strong>${c}</div>`;
+    });
+    html += `</div>`;
+    if (result.details && result.details.length) {
+      html += '<div style="max-height:280px;overflow-y:auto;font-size:var(--font-size-small)"><table class="table" style="width:100%"><thead><tr><th>题号</th><th>记录文件</th><th>verdict</th><th>结果文件</th><th>状态</th></tr></thead><tbody>';
+      result.details.forEach(d => {
+        html += `<tr>
+          <td>${d.question_id || '-'}</td>
+          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.filename}">${d.filename}</td>
+          <td>${verdictLabel[d.verdict] || d.verdict || '-'}</td>
+          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.result_file || ''}">${d.result_file || '—'}</td>
+          <td style="color:${d.ok ? 'var(--success-green)' : 'var(--error-red)'}">${d.ok ? '✅ 已保存' : `❌ ${d.error || '失败'}`}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  },
+
+  // ============================================================
+  // 旧版单条测评（页面已改批量模式，以下函数保留不再被页面调用）
+  // ============================================================
+  _loadEvalRecordsOLD: function() {},
 
   /** 加载测试记录列表 */
   _loadEvalRecords: async function() {

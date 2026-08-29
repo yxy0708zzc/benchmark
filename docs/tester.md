@@ -24,7 +24,7 @@
 
 **请求参数（ChatRequest）**：模型名称、API Key、API Base URL、消息内容、题目 ID、最大工具调用次数（`max_iterations`，默认 100）、会话 ID。
 
-> **API 配置来源**：前端不存 key（无设置弹窗）。请求可显式带 `model_name`/`api_key`/`api_base_url`；为空时服务端回落读取根目录 `.env` 的 `TEST_API_KEY`/`DEFAULT_MODEL`/`DEFAULT_BASE_URL`（再缺省用内置默认值），优先级：请求显式 > `.env` > 内置默认。
+> **API 配置来源**：前端不存 key（无设置弹窗）。请求可显式带 `model_name`/`api_key`/`api_base_url`；为空时服务端回落读取根目录 `.env` 的 `TEST_API_KEY`/`TEST_MODEL`（未填回落 `DEFAULT_MODEL`）/`DEFAULT_BASE_URL`（再缺省用内置默认值），优先级：请求显式 > `.env` > 内置默认。
 
 ---
 

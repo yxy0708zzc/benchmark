@@ -33,7 +33,8 @@ from pydantic import BaseModel
 from config import (
     API_CONFIG, QUESTION_CONFIG, ensure_directories,
     RAILWAY_DB_PATH, METADATA_PATH, LOGS_DIR,
-    get_question_db_path, TEMPLATES_DIR
+    get_question_db_path, TEMPLATES_DIR,
+    NL_TEMPERATURE, TEST_TEMPERATURE
 )
 from database import (
     get_railway_conn,
@@ -1999,6 +2000,32 @@ def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
 
 
 # --- GET /api/question/list 列出所有题目 ---
+def _ground_truth_summary(gt) -> str:
+    """结构化标答（ground_truth）→ 文本摘要，供题目管理「标准答案」列预览。
+
+    示例：G2689 淮安东→郑州东（乘 HAU→ZAF） class0×5；G3185 ...
+    购买区间与乘坐区间一致时不显示乘坐括号。
+    """
+    if not gt:
+        return ""
+    parts = []
+    for seg in gt:
+        if not isinstance(seg, dict):
+            continue
+        ride = ""
+        rf = seg.get("ride_from_station_id") or seg.get("ride_from") or ""
+        rt = seg.get("ride_to_station_id") or seg.get("ride_to") or ""
+        if rf and rt and (rf != seg.get("from_station_id") or rt != seg.get("to_station_id")):
+            ride = f"（乘 {rf}→{rt}）"
+        seat = seg.get("seat_type") or ""
+        tickets = seg.get("tickets")
+        parts.append(
+            f"{seg.get('train_num', '')} {seg.get('from', '')}→{seg.get('to', '')}{ride}"
+            + (f" {seat}×{tickets}" if tickets is not None else "")
+        )
+    return "；".join(parts)
+
+
 @app.get("/api/question/list")
 def api_question_list(
     status_filter: Optional[str] = Query(None),
@@ -2038,7 +2065,8 @@ def api_question_list(
             "type": meta.get("type", ""),
             "question_type": meta.get("question_type", ""),
             "train_count": meta.get("train_count", 0),
-            "answer": meta.get("answer", ""),
+            # 标准答案：优先旧 answer 文本字段；自动出题无该字段时用结构化标答 ground_truth 生成摘要
+            "answer": meta.get("answer") or _ground_truth_summary(meta.get("ground_truth")),
             "question": meta.get("question", ""),
             "nl_question": meta.get("nl_question", ""),
             "db_exists": qid in db_files,
@@ -2238,9 +2266,11 @@ def api_question_delete(question_id: str):
 
 class ChatRequest(BaseModel):
     message: str
-    model_name: str = "deepseek-chat"
+    # 默认一律空串：空值才会触发 _resolve_llm_config 回落 .env（TEST_MODEL/TEST_API_KEY/DEFAULT_BASE_URL）。
+    # 严禁写平台默认值（如 https://api.deepseek.com）——非空默认会挡住回落，导致用 A 平台 key 调 B 平台报 401。
+    model_name: str = ""
     api_key: str = ""
-    api_base_url: str = "https://api.deepseek.com"
+    api_base_url: str = ""
     question_id: str = ""
     session_id: str = "default"
     max_iterations: int = 100
@@ -2253,14 +2283,33 @@ class TestCompleteRequest(BaseModel):
 def _resolve_llm_config(req) -> tuple:
     """ChatRequest 未填 model/key/base_url 时，回落到 .env 的默认配置。
 
-    优先级：请求显式值 > .env（DEFAULT_MODEL / TEST_API_KEY / DEFAULT_BASE_URL）> 内置默认。
-    前端不再存 localStorage，连接配置统一由 .env 提供。
+    优先级：请求显式值 > .env（TEST_MODEL → DEFAULT_MODEL / TEST_API_KEY / DEFAULT_BASE_URL）。
+    模型名与接口地址不内置任何平台默认（不一定调用 deepseek）：未配置时直接 400 报错。
     """
-    from config import ENV
-    model = (req.model_name or "").strip() or ENV.get("DEFAULT_MODEL", "") or "deepseek-chat"
+    from config import ENV, ensure_env_fresh
+    ensure_env_fresh()  # .env 被修改后自动重载，避免进程继续用旧 key/旧模型名
+    model = (req.model_name or "").strip() or ENV.get("TEST_MODEL", "") or ENV.get("DEFAULT_MODEL", "") or ""
     key = (req.api_key or "").strip() or ENV.get("TEST_API_KEY", "") or ""
-    base_url = (req.api_base_url or "").strip() or ENV.get("DEFAULT_BASE_URL", "") or "https://api.deepseek.com"
+    base_url = (req.api_base_url or "").strip() or ENV.get("TEST_BASE_URL", "") or ENV.get("DEFAULT_BASE_URL", "") or ""
+    missing = [name for name, val in
+               [("模型名（TEST_MODEL / DEFAULT_MODEL）", model),
+                ("API Key（TEST_API_KEY）", key),
+                ("接口地址（TEST_BASE_URL / DEFAULT_BASE_URL）", base_url)] if not val]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f".env 模型配置缺失：{'、'.join(missing)}。请在根目录 .env 中填写（系统不默认指向任何平台）"
+        )
     return model, key, base_url
+
+
+# --- GET /api/env/model 返回 .env 中解析后的测试模型名（供前端顶栏/输入框显示，不含 key） ---
+@app.get("/api/env/model")
+def api_env_model():
+    from config import ENV, ensure_env_fresh
+    ensure_env_fresh()  # .env 被修改后自动重载
+    test_model = (ENV.get("TEST_MODEL") or ENV.get("DEFAULT_MODEL") or "").strip()
+    return {"test_model": test_model}
 
 
 @app.post("/api/test/chat")
@@ -2304,6 +2353,7 @@ async def api_test_chat(req: ChatRequest):
             "tools": TOOLS,
             "tool_choice": "auto",
             "stream": False,
+            "temperature": TEST_TEMPERATURE,  # 测试器对话温度（config.py）
         }
 
         headers = {
@@ -2377,8 +2427,8 @@ async def api_test_chat(req: ChatRequest):
                     except json.JSONDecodeError:
                         func_args = {}
 
-                    # 执行工具
-                    tool_result = await execute_tool_handler(func_name, func_args)
+                    # 执行工具（传入题目 ID：并发批量测试时避免全局状态串题）
+                    tool_result = await execute_tool_handler(func_name, func_args, req.question_id)
                     if batch_qid:
                         _batch_log("batch_test", f"{batch_qid} 第 {iteration} 轮执行工具 {func_name}")
 
@@ -2410,6 +2460,8 @@ async def api_test_chat(req: ChatRequest):
         if sid not in chat_session_meta:
             chat_session_meta[sid] = {"token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, "duration": 0}
         meta = chat_session_meta[sid]
+        if req.question_id:
+            meta["question_id"] = req.question_id
         meta["token_usage"]["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
         meta["token_usage"]["completion_tokens"] += token_usage.get("completion_tokens", 0)
         meta["token_usage"]["total_tokens"] += token_usage.get("total_tokens", 0)
@@ -2485,6 +2537,7 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                     "tools": TOOLS,
                     "tool_choice": "auto",
                     "stream": True,
+                    "temperature": TEST_TEMPERATURE,  # 测试器对话温度（config.py）
                 }
 
                 max_iterations = req.max_iterations
@@ -2592,8 +2645,8 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                             except (json.JSONDecodeError, TypeError):
                                 func_args = {}
 
-                            # 执行工具
-                            tool_result = await execute_tool_handler(tc["function"]["name"], func_args)
+                            # 执行工具（传入题目 ID：并发批量测试时避免全局状态串题）
+                            tool_result = await execute_tool_handler(tc["function"]["name"], func_args, req.question_id)
 
                             # 累计工具调用日志（供 api_test_complete 落盘）
                             chat_session_tool_calls.setdefault(req.session_id, []).append({
@@ -2753,15 +2806,18 @@ def api_test_complete(req: TestCompleteRequest):
             final_answer = msg["content"]
             break
 
-    try:
-        question_id = get_current_question()
-    except ValueError:
-        question_id = "unknown"
-
     # 获取会话累计的 token_usage 和 duration
     meta = chat_session_meta.get(req.session_id, {})
     token_usage = meta.get("token_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
     duration = meta.get("duration", 0)
+
+    # 题目 ID：优先取会话记录的（并发批量测试不依赖全局状态），兜底全局当前题目
+    question_id = meta.get("question_id")
+    if not question_id:
+        try:
+            question_id = get_current_question()
+        except ValueError:
+            question_id = "unknown"
 
     # 获取模型名称
     model_name = chat_session_model.get(req.session_id, "unknown")
@@ -2834,8 +2890,11 @@ def api_test_reset(req: TestResetRequest):
     return {"success": True, "message": "对话已重置"}
 
 
-async def execute_tool_handler(func_name: str, func_args: Dict) -> Any:
-    """执行工具函数"""
+async def execute_tool_handler(func_name: str, func_args: Dict, question_id: Optional[str] = None) -> Any:
+    """执行工具函数
+
+    question_id：当前题目 ID（余票查询用）。并发批量测试时按调用传入以避免全局状态串题；
+    传 None 时回落全局 get_current_question()（单会话手动测试兼容）。"""
     rw_conn = get_railway_conn()
     try:
         if func_name == "query_trains_between_stations":
@@ -2898,13 +2957,13 @@ async def execute_tool_handler(func_name: str, func_args: Dict) -> Any:
 
         elif func_name == "query_tickets":
             try:
-                question_id = get_current_question()
+                qid = question_id or get_current_question()
             except ValueError as e:
                 return {"error": str(e)}
 
-            db_path = get_question_db_path(question_id)
+            db_path = get_question_db_path(qid)
             if not os.path.exists(db_path):
-                return {"error": f"题目 {question_id} 不存在"}
+                return {"error": f"题目 {qid} 不存在"}
 
             q_conn = sqlite3.connect(db_path)
             try:
@@ -3277,7 +3336,7 @@ _batch_state: Dict[str, Any] = {
 # - 追加落盘 logs/batch_tools.log：供后台直接查看
 # ============================================================
 _batch_logs: Dict[str, List[Dict[str, Any]]] = {
-    "batch_generate": [], "batch_nl": [], "batch_test": [],
+    "batch_generate": [], "batch_nl": [], "batch_test": [], "batch_eval": [],
 }
 _batch_logs_lock = threading.Lock()
 _batch_log_seq = 0
@@ -3342,14 +3401,20 @@ def _generate_batch_nl(question_ids: List[str]) -> Dict[str, Any]:
     返回 {"generated": n, "failed": n, "skipped": n, "error": str|None}。
     """
     from nl_question import build_prompt, generate_nl
-    from config import ENV
+    from config import ENV, ensure_env_fresh
+    ensure_env_fresh()  # .env 被修改后自动重载
     api_key = (ENV.get("NL_API_KEY") or "").strip()
     if not api_key:
         return {"generated": 0, "failed": 0, "skipped": len(question_ids),
                 "error": "未配置 NL_API_KEY，批量自然语言化已跳过（题目本身已成功落盘）"}
-    model = (ENV.get("DEFAULT_MODEL") or "").strip() or "deepseek-v4-flash"
-    base_url = (ENV.get("DEFAULT_BASE_URL") or "").strip() or "https://api.deepseek.com"
-
+    model = (ENV.get("NL_MODEL") or ENV.get("DEFAULT_MODEL") or "").strip()
+    base_url = (ENV.get("NL_BASE_URL") or ENV.get("DEFAULT_BASE_URL") or "").strip()
+    if not model or not base_url:
+        miss = "、".join(n for n, v in
+                         [("NL_MODEL / DEFAULT_MODEL（模型名）", model),
+                          ("NL_BASE_URL / DEFAULT_BASE_URL（接口地址）", base_url)] if not v)
+        return {"generated": 0, "failed": 0, "skipped": len(question_ids),
+                "error": f"未配置 {miss}，批量自然语言化已跳过（系统不默认指向任何平台；题目本身已成功落盘）"}
     metadata = load_metadata()
     generated = failed = 0
     for qid in question_ids:
@@ -3377,7 +3442,9 @@ def _run_batch(payload: Dict[str, Any]) -> None:
         selective_rows = payload.get("selective") or []
         stations = payload.get("stations") or []
         seat_weights = payload.get("seat_weights") or {"class0": 20, "class1": 30, "class2": 50}
-        density = float(payload.get("interference_density") or 0.02)
+        # 干扰密度分开：伪干扰（存在性 1_ 有干扰）与真干扰（选择性 2_）；旧字段 interference_density 作为两者兜底
+        fake_density = float(payload.get("fake_interference_density") or payload.get("interference_density") or 0.02)
+        real_density = float(payload.get("real_interference_density") or payload.get("interference_density") or 0.02)
         max_retries = max(1, int(payload.get("max_retries") or 40))
         nl_enabled = bool(payload.get("nl_enabled", True))
 
@@ -3390,14 +3457,14 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             "result": None,
         })
         _batch_log("batch_generate",
-                   f"批量出题开始：共 {exists_total + sel_total} 题（存在性 {exists_total} + 选择性 {sel_total}），每题重试上限 {max_retries}")
+                   f"批量出题开始：共 {exists_total + sel_total} 题（存在性 {exists_total} + 选择性 {sel_total}），每题重试上限 {max_retries}，伪干扰密度 {fake_density:.1%}，真干扰密度 {real_density:.1%}")
 
         details: List[Dict] = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         seq = 0
 
-        def _build_request(question_type, transfers, segment_plans, mode, criterion, constraints):
-            """随机取站对（方向可倒置）、随机人数 3~6、按权重随机座位等级"""
+        def _build_request(question_type, transfers, segment_plans, mode, criterion, constraints, density):
+            """随机取站对（方向可倒置）、随机人数 3~6、按权重随机座位等级；干扰密度按题型传入"""
             nonlocal seq
             pair = random.choice(stations)
             from_st, to_st = (pair[0], pair[1]) if random.random() < 0.5 else (pair[1], pair[0])
@@ -3423,13 +3490,14 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 constraints=constraints,
             ), seq
 
-        def _generate_one(question_type, transfers, plans, mode, criterion, constraints, prefix, fake, with_if):
+        def _generate_one(question_type, transfers, plans, mode, criterion, constraints, prefix, fake, with_if, density):
             """重试 ≤ max_retries：每次重试都重新随机站对/方向/人数/座位（换站对提高成功率）；
+            干扰密度按题型传入（存在性=伪干扰密度，选择性=真干扰密度）；
             成功返回 (qid, 尝试次数, None, seq)，失败返回 (None, max_retries, 错误, 首次seq)"""
             last_err = ""
             first_sq = None
             for attempt in range(1, max_retries + 1):
-                req, sq = _build_request(question_type, transfers, plans, mode, criterion, constraints)
+                req, sq = _build_request(question_type, transfers, plans, mode, criterion, constraints, density)
                 if first_sq is None:
                     first_sq = sq
                 try:
@@ -3455,7 +3523,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             plans = row.get("segment_plans") or []
             for _ in range(int(row.get("has_interference") or 0)):
                 _batch_state["current"] = f"存在性（有干扰）：{row_label}"
-                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "1_", True, True)
+                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "1_", True, True, fake_density)
                 details.append({
                     "question_id": qid or f"1_B{timestamp}_{sq:04d}",
                     "row": f"{row_label}/有干扰",
@@ -3469,7 +3537,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 _batch_state["done_count"] += 1
             for _ in range(int(row.get("no_interference") or 0)):
                 _batch_state["current"] = f"存在性（无干扰）：{row_label}"
-                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "0_", False, False)
+                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "0_", False, False, fake_density)
                 details.append({
                     "question_id": qid or f"0_B{timestamp}_{sq:04d}",
                     "row": f"{row_label}/无干扰",
@@ -3491,7 +3559,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             for _ in range(int(row.get("count") or 0)):
                 _batch_state["current"] = f"选择性：{_CRITERION_CN.get(crit, crit)}({_BEHAVIOR_CN.get(beh, beh)})"
                 # 题型不在此处指定：_generate_one_variant 对选择性题按行为约束自动推导（保证有解）
-                qid, attempt, err, sq = _generate_one(None, 0, [], "selective", crit, constraints, "2_", False, True)
+                qid, attempt, err, sq = _generate_one(None, 0, [], "selective", crit, constraints, "2_", False, True, real_density)
                 details.append({
                     "question_id": qid or f"2_B{timestamp}_{sq:04d}",
                     "row": f"{_CRITERION_CN.get(crit, crit)}/{_BEHAVIOR_CN.get(beh, beh)}",
@@ -3575,7 +3643,9 @@ class BatchGenerateRequest(BaseModel):
     selective: List[Dict] = []
     stations: List[List[str]] = []
     seat_weights: Dict[str, float] = {}
-    interference_density: float = 0.02
+    interference_density: float = 0.02   # （兼容保留）未分字段时的兜底密度
+    fake_interference_density: float = 0.02   # 伪干扰密度（存在性 1_ 有干扰）
+    real_interference_density: float = 0.02   # 真干扰密度（选择性 2_）
     max_retries: int = 40
     # 批量落盘后是否自动生成自然语言并写回 metadata['nl_question']（需 .env NL_API_KEY）
     # 默认关闭：批量自然语言化由独立的批量语言框（/api/batch_nl/*）异步执行，与批量出题不混合
@@ -3677,7 +3747,8 @@ def _run_batch_nl(question_ids: List[str]) -> None:
     单题失败不影响其它题；缺 NL_API_KEY 时整批跳过。
     """
     from nl_question import build_prompt, generate_nl
-    from config import ENV
+    from config import ENV, ensure_env_fresh
+    ensure_env_fresh()  # .env 被修改后自动重载
     api_key = (ENV.get("NL_API_KEY") or "").strip()
     if not api_key:
         _batch_log("batch_nl", "未配置 NL_API_KEY，批量自然语言化整批跳过", "error")
@@ -3688,12 +3759,23 @@ def _run_batch_nl(question_ids: List[str]) -> None:
                        "details": [], "error": "未配置 NL_API_KEY，批量自然语言化已整批跳过"},
         })
         return
-    model = (ENV.get("DEFAULT_MODEL") or "").strip() or "deepseek-v4-flash"
-    base_url = (ENV.get("DEFAULT_BASE_URL") or "").strip() or "https://api.deepseek.com"
-
+    model = (ENV.get("NL_MODEL") or ENV.get("DEFAULT_MODEL") or "").strip()
+    base_url = (ENV.get("NL_BASE_URL") or ENV.get("DEFAULT_BASE_URL") or "").strip()
+    if not model or not base_url:
+        miss = "、".join(n for n, v in
+                         [("NL_MODEL / DEFAULT_MODEL（模型名）", model),
+                          ("NL_BASE_URL / DEFAULT_BASE_URL（接口地址）", base_url)] if not v)
+        _batch_log("batch_nl", f"未配置 {miss}，批量自然语言化整批跳过（系统不默认指向任何平台）", "error")
+        _nl_state.update({
+            "running": False, "done": True, "current": "",
+            "result": {"summary": {"total": len(question_ids), "generated": 0, "failed": 0,
+                                    "skipped": len(question_ids)},
+                       "details": [], "error": f"未配置 {miss}，批量自然语言化已整批跳过"},
+        })
+        return
     _nl_state.update({"running": True, "done": False, "current": "",
                       "total": len(question_ids), "done_count": 0, "result": None})
-    _batch_log("batch_nl", f"批量自然语言化开始：共 {len(question_ids)} 题（模型 {model}）")
+    _batch_log("batch_nl", f"批量自然语言化开始：共 {len(question_ids)} 题（模型 {model}，温度 {NL_TEMPERATURE}）")
     metadata = load_metadata()
     details = []
     generated = failed = 0
@@ -3799,62 +3881,73 @@ def _batch_test_model_testable(m: Dict, model: str) -> bool:
         and model not in (m.get("tested_models") or [])
 
 
-def _run_batch_test(model: str, question_ids: List[str], max_iterations: int) -> None:
-    """在线程中逐题测试：重置会话 → 用题目自然语言作为用户消息跑工具循环 → 保存测试记录；
-    成功后把模型名写入该题 metadata.tested_models（每个模型每题只测一次）。"""
+def _run_batch_test(model: str, question_ids: List[str], max_iterations: int, concurrency: int = 1) -> None:
+    """线程池并发测试：每题独立会话（session=batch_test_<qid>），题目上下文按调用传入（不依赖全局当前题目）；
+    成功后把模型名写入该题 metadata.tested_models（每个模型每题只测一次），最后统一落盘 metadata。"""
+    concurrency = max(1, min(int(concurrency or 1), 8))
     _test_state.update({"running": True, "done": False, "current": "",
                         "total": len(question_ids), "done_count": 0, "result": None})
-    _batch_log("batch_test", f"批量测试开始：模型 {model}，共 {len(question_ids)} 题，最大工具调用 {max_iterations}")
+    _batch_log("batch_test", f"批量测试开始：模型 {model}，共 {len(question_ids)} 题，最大工具调用 {max_iterations}，并发数 {concurrency}")
     metadata = load_metadata()
     details = []
-    ok_count = 0
-    for i, qid in enumerate(question_ids, 1):
+    state_lock = threading.Lock()
+
+    def _test_one(seq: int, qid: str) -> Dict:
+        """测试单题（worker 线程内执行），返回 detail 字典。"""
         entry = metadata.get(qid) or {}
-        _test_state["current"] = f"测试（{i}/{len(question_ids)}）：{qid}"
-        _batch_log("batch_test", f"（{i}/{len(question_ids)}）开始测试 {qid}")
+        _test_state["current"] = f"并发 {concurrency} · 已完成 {_test_state['done_count']}/{len(question_ids)} · 最近开始：{qid}"
+        _batch_log("batch_test", f"（{seq}/{len(question_ids)}）开始测试 {qid}")
         if not _batch_test_model_testable(entry, model):
-            details.append({"question_id": qid, "ok": False,
-                            "error": "题目信息不完备（缺 nl_question）或该模型已测试过，已跳过（去重）"})
             _batch_log("batch_test", f"{qid} 不可测（缺 nl_question 或该模型已测过），跳过", "warn")
-        else:
-            try:
-                session_id = f"batch_test_{qid}"
-                api_test_reset(TestResetRequest(session_id=session_id))
-                set_current_question(qid)
-                chat_r = asyncio.run(api_test_chat(ChatRequest(
-                    message=entry.get("nl_question", ""),
-                    model_name=model,
-                    question_id=qid,
-                    session_id=session_id,
-                    max_iterations=max_iterations,
-                )))
-                if chat_r.get("error"):
-                    raise RuntimeError(str(chat_r["error"]))
-                complete_r = api_test_complete(TestCompleteRequest(session_id=session_id))
-                if not complete_r.get("success"):
-                    raise RuntimeError(str(complete_r.get("error", "测试记录保存失败")))
-                tested = list(entry.get("tested_models") or [])
-                if model not in tested:
-                    tested.append(model)
-                entry["tested_models"] = tested
-                ok_count += 1
-                details.append({
-                    "question_id": qid, "ok": True, "error": None,
-                    "filename": complete_r.get("filename", ""),
-                    "plan_status": complete_r.get("plan_status", ""),
-                    "duration": round(complete_r.get("duration", 0), 1),
-                })
-                _batch_log("batch_test",
-                           f"{qid} 测试完成（plan_status={complete_r.get('plan_status', '')}，耗时 {round(complete_r.get('duration', 0), 1)}s）→ {complete_r.get('filename', '')}",
-                           "success")
-            except Exception as e:
-                details.append({"question_id": qid, "ok": False, "error": str(e)})
-                _batch_log("batch_test", f"{qid} 测试失败：{e}", "error")
-        _test_state["done_count"] += 1
+            return {"question_id": qid, "ok": False,
+                    "error": "题目信息不完备（缺 nl_question）或该模型已测试过，已跳过（去重）"}
+        try:
+            session_id = f"batch_test_{qid}"
+            api_test_reset(TestResetRequest(session_id=session_id))
+            chat_r = asyncio.run(api_test_chat(ChatRequest(
+                message=entry.get("nl_question", ""),
+                model_name=model,
+                question_id=qid,
+                session_id=session_id,
+                max_iterations=max_iterations,
+            )))
+            if chat_r.get("error"):
+                raise RuntimeError(str(chat_r["error"]))
+            complete_r = api_test_complete(TestCompleteRequest(session_id=session_id))
+            if not complete_r.get("success"):
+                raise RuntimeError(str(complete_r.get("error", "测试记录保存失败")))
+            tested = list(entry.get("tested_models") or [])
+            if model not in tested:
+                tested.append(model)
+            entry["tested_models"] = tested
+            _batch_log("batch_test",
+                       f"{qid} 测试完成（plan_status={complete_r.get('plan_status', '')}，耗时 {round(complete_r.get('duration', 0), 1)}s）→ {complete_r.get('filename', '')}",
+                       "success")
+            return {
+                "question_id": qid, "ok": True, "error": None,
+                "filename": complete_r.get("filename", ""),
+                "plan_status": complete_r.get("plan_status", ""),
+                "duration": round(complete_r.get("duration", 0), 1),
+            }
+        except Exception as e:
+            _batch_log("batch_test", f"{qid} 测试失败：{e}", "error")
+            return {"question_id": qid, "ok": False, "error": str(e)}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(_test_one, i, qid) for i, qid in enumerate(question_ids, 1)]
+        for fut in as_completed(futures):
+            detail = fut.result()
+            with state_lock:
+                details.append(detail)
+                _test_state["done_count"] += 1
     save_metadata(metadata)
+    ok_count = sum(1 for d in details if d["ok"])
+    details.sort(key=lambda d: question_ids.index(d["question_id"]))
     _test_state["result"] = {
         "summary": {"total": len(question_ids), "success": ok_count,
-                    "failed": len(details) - ok_count, "model": model},
+                    "failed": len(details) - ok_count, "model": model,
+                    "concurrency": concurrency},
         "details": details,
     }
     _batch_log("batch_test", f"批量测试完成：成功 {ok_count} / 失败 {len(details) - ok_count}（共 {len(question_ids)} 题）",
@@ -3870,6 +3963,7 @@ class BatchTestStartRequest(BaseModel):
     model: str = ""
     question_ids: List[str] = []
     max_iterations: int = 30
+    concurrency: int = 1
 
 
 @app.post("/api/batch_test/scan")
@@ -3915,10 +4009,11 @@ def api_batch_test_start(req: BatchTestStartRequest):
         raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描可测试题目）")
     import threading
     max_iter = max(1, min(int(req.max_iterations or 30), 100))
+    concurrency = max(1, min(int(req.concurrency or 1), 8))
     _batch_log_clear("batch_test")
-    _batch_log("batch_test", f"收到批量测试请求：模型 {model}，{len(req.question_ids)} 题，任务已启动")
-    threading.Thread(target=_run_batch_test, args=(model, list(req.question_ids), max_iter), daemon=True).start()
-    return {"success": True, "message": "批量测试已启动（仅对信息完备且该模型未测过的题目执行）"}
+    _batch_log("batch_test", f"收到批量测试请求：模型 {model}，{len(req.question_ids)} 题，并发 {concurrency}，任务已启动")
+    threading.Thread(target=_run_batch_test, args=(model, list(req.question_ids), max_iter, concurrency), daemon=True).start()
+    return {"success": True, "message": f"批量测试已启动（并发 {concurrency}，仅对信息完备且该模型未测过的题目执行）"}
 
 
 @app.get("/api/batch_test/status")
@@ -3928,6 +4023,152 @@ def api_batch_test_status(after_seq: int = 0):
     return {"running": s["running"], "done": s["done"], "current": s["current"],
             "total": s["total"], "done_count": s["done_count"], "result": s["result"],
             "logs": _batch_log_payload("batch_test", after_seq)}
+
+
+# ============================================================
+# 第五部分E：批量测评（勾选测试记录 → 批量代码核查并保存结果）
+# ============================================================
+
+_eval_state: Dict[str, Any] = {
+    "running": False, "done": False, "current": "",
+    "total": 0, "done_count": 0, "result": None,
+}
+
+
+def _list_evaluated_test_files() -> set:
+    """已测评的测试记录文件名集合（来自 logs/result 的 test_file 字段）。"""
+    from config import LOGS_RESULT_DIR
+    evaluated = set()
+    if os.path.exists(LOGS_RESULT_DIR):
+        for f in os.listdir(LOGS_RESULT_DIR):
+            if not f.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(LOGS_RESULT_DIR, f), "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                tf = data.get("test_file")
+                if tf:
+                    evaluated.add(tf)
+            except Exception:
+                continue
+    return evaluated
+
+
+def _run_batch_eval(filenames: List[str]) -> None:
+    """串行逐条测评：读测试记录 → 代码核查（verifier）→ 保存结果到 logs/result（结构同手动测评）。"""
+    from config import LOGS_TEST_DIR, LOGS_RESULT_DIR
+    _eval_state.update({"running": True, "done": False, "current": "",
+                        "total": len(filenames), "done_count": 0, "result": None})
+    _batch_log("batch_eval", f"批量测评开始：共 {len(filenames)} 条测试记录")
+    details = []
+    ok_count = 0
+    verdict_count: Dict[str, int] = {}
+    for i, fn in enumerate(filenames, 1):
+        _eval_state["current"] = f"测评（{i}/{len(filenames)}）：{fn}"
+        _batch_log("batch_eval", f"（{i}/{len(filenames)}）开始核查 {fn}")
+        filepath = os.path.join(LOGS_TEST_DIR, fn)
+        try:
+            if not os.path.exists(filepath):
+                raise FileNotFoundError(f"测试记录 {fn} 不存在")
+            with open(filepath, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            qid = data.get("question_id", "") or "unknown"
+            final_plan = data.get("final_plan") or []
+            verification = verify_final_plan(final_plan, qid)
+            verdict = verification.get("verdict", "unknown")
+            verdict_count[verdict] = verdict_count.get(verdict, 0) + 1
+            tu = data.get("token_usage") or {}
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_name = f"{timestamp}_{data.get('model_name', 'unknown')}_{qid}.json"
+            record = {
+                "timestamp": datetime.now().isoformat(),
+                "test_file": fn,
+                "question_id": qid,
+                "model_name": data.get("model_name", "unknown"),
+                "user_input": data.get("user_input", ""),
+                "score_summary": {
+                    "hallucination_count": verification.get("hallucination_count", 0),
+                    "issue_count": verification.get("issue_count", 0),
+                    "total_tokens": tu.get("total_tokens", 0),
+                    "duration_seconds": data.get("duration", 0),
+                    "tool_calls": [],
+                },
+                "verification": verification,
+                "human_confirmed": False,
+                "human_notes": "批量测评自动生成",
+                "status": "success",
+            }
+            with open(os.path.join(LOGS_RESULT_DIR, result_name), "w", encoding="utf-8") as fh:
+                json.dump(record, fh, ensure_ascii=False, indent=2)
+            ok_count += 1
+            details.append({"filename": fn, "question_id": qid, "ok": True, "error": None,
+                            "verdict": verdict, "result_file": result_name})
+            _batch_log("batch_eval", f"{fn} → {qid} 核查完成：verdict={verdict}，结果已保存 {result_name}", "success")
+        except Exception as e:
+            verdict_count["error"] = verdict_count.get("error", 0) + 1
+            details.append({"filename": fn, "question_id": "", "ok": False, "error": str(e),
+                            "verdict": "error", "result_file": ""})
+            _batch_log("batch_eval", f"{fn} 测评失败：{e}", "error")
+        _eval_state["done_count"] += 1
+    _eval_state["result"] = {
+        "summary": {"total": len(filenames), "success": ok_count,
+                    "failed": len(details) - ok_count, "verdicts": verdict_count},
+        "details": details,
+    }
+    _batch_log("batch_eval", f"批量测评完成：成功 {ok_count} / 失败 {len(details) - ok_count}，verdict 分布 {verdict_count}",
+               "success" if ok_count == len(details) else "warn")
+    _eval_state.update({"running": False, "done": True, "current": ""})
+
+
+@app.post("/api/batch_eval/scan")
+def api_batch_eval_scan():
+    """扫描测试记录列表（含题号/模型/时间/plan_status/是否已测评），供批量测评勾选。"""
+    from config import LOGS_TEST_DIR
+    evaluated = _list_evaluated_test_files()
+    items = []
+    if os.path.exists(LOGS_TEST_DIR):
+        for f in sorted(os.listdir(LOGS_TEST_DIR), reverse=True):
+            if not f.endswith(".json"):
+                continue
+            filepath = os.path.join(LOGS_TEST_DIR, f)
+            try:
+                with open(filepath, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                items.append({
+                    "filename": f,
+                    "timestamp": data.get("timestamp", ""),
+                    "question_id": data.get("question_id", ""),
+                    "model_name": data.get("model_name", ""),
+                    "plan_status": data.get("plan_status", ""),
+                    "duration": data.get("duration", 0),
+                    "evaluated": f in evaluated,
+                })
+            except Exception:
+                items.append({"filename": f, "error": "读取失败", "evaluated": False})
+    return {"success": True, "items": items, "total": len(items)}
+
+
+@app.post("/api/batch_eval/start")
+def api_batch_eval_start(req: Dict = Body(...)):
+    """启动批量测评：对勾选的测试记录逐条代码核查并保存结果。"""
+    filenames = [str(f) for f in (req.get("records") or []) if f]
+    if _eval_state.get("running"):
+        raise HTTPException(status_code=400, detail="已有批量测评任务运行中，请等待完成")
+    if not filenames:
+        raise HTTPException(status_code=400, detail="未选择任何测试记录（可先扫描测评记录）")
+    _batch_log_clear("batch_eval")
+    _batch_log("batch_eval", f"收到批量测评请求：{len(filenames)} 条记录，任务已启动")
+    threading.Thread(target=_run_batch_eval, args=(filenames,), daemon=True).start()
+    return {"success": True, "message": "批量测评已启动（逐条代码核查并保存结果）"}
+
+
+@app.get("/api/batch_eval/status")
+def api_batch_eval_status(after_seq: int = 0):
+    """返回批量测评进度（单进度条）+ 增量日志 + 结果。"""
+    s = _eval_state
+    return {"running": s["running"], "done": s["done"], "current": s["current"],
+            "total": s["total"], "done_count": s["done_count"], "result": s["result"],
+            "logs": _batch_log_payload("batch_eval", after_seq)}
 
 
 # ============================================================

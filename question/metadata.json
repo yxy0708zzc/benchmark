@@ -1,1 +1,563 @@
-{}
+{
+  "1_B20260828_225231_0004": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "question_type": "transfer",
+    "type": "存在性",
+    "question_mode": "existence",
+    "question": "黄山北到德州东",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 6,
+    "seat_type": "class1",
+    "interference_mode": "fake",
+    "ground_truth": [
+      {
+        "train_num": "G3056",
+        "from": "黄山北",
+        "to": "南京南",
+        "from_station_id": "NYH",
+        "to_station_id": "NKH",
+        "ride_from": "黄山北",
+        "ride_to": "南京南",
+        "ride_from_station_id": "NYH",
+        "ride_to_station_id": "NKH",
+        "tickets": 8,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      },
+      {
+        "train_num": "G810",
+        "from": "南京南",
+        "to": "德州东",
+        "from_station_id": "NKH",
+        "to_station_id": "DIP",
+        "ride_from": "南京南",
+        "ride_to": "德州东",
+        "ride_from_station_id": "NKH",
+        "ride_to_station_id": "DIP",
+        "tickets": 7,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "NYH",
+    "end_station_id": "DIP",
+    "criterion": "comprehensive",
+    "trains": [
+      "G3056",
+      "G810"
+    ],
+    "nl_question": "我带着家里一共六口人，打算从黄山北坐高铁去德州东。我们这趟出门啊，希望坐得宽敞些、舒服点，座位就安排那种宽宽大大的，价格嘛…在中间档位的就行。时间上不着急，早中晚都能接受，各方面都考虑看看吧。",
+    "tested_models": [
+      "mimo-v2.5"
+    ]
+  },
+  "1_B20260828_225231_0012": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "question_type": "short_buy",
+    "type": "存在性",
+    "question_mode": "existence",
+    "question": "杭州东到怀化南",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 6,
+    "seat_type": "class0",
+    "interference_mode": "fake",
+    "ground_truth": [
+      {
+        "train_num": "G1336",
+        "from": "杭州东",
+        "to": "南昌西",
+        "from_station_id": "HGH",
+        "to_station_id": "NXG",
+        "ride_from": "杭州东",
+        "ride_to": "怀化南",
+        "ride_from_station_id": "HGH",
+        "ride_to_station_id": "KAQ",
+        "tickets": 6,
+        "seat_type": "class0",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "HGH",
+    "end_station_id": "KAQ",
+    "criterion": "comprehensive",
+    "trains": [
+      "G1336"
+    ],
+    "nl_question": "我们总共六个人，想从杭州东去怀化南。路上时间挺长的，我们想躺一躺，看看有没有那种能躺的座位。价格和舒适度都考虑，综合看看怎么安排最好。"
+  },
+  "1_B20260828_225231_0014": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "question_type": "extra_front",
+    "type": "存在性",
+    "question_mode": "existence",
+    "question": "天津西到沈阳北",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 4,
+    "seat_type": "class2",
+    "interference_mode": "fake",
+    "ground_truth": [
+      {
+        "train_num": "G1264",
+        "from": "白洋淀",
+        "to": "沈阳北",
+        "from_station_id": "FWP",
+        "to_station_id": "SBT",
+        "ride_from": "天津西",
+        "ride_to": "沈阳北",
+        "ride_from_station_id": "TXP",
+        "ride_to_station_id": "SBT",
+        "tickets": 5,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "TXP",
+    "end_station_id": "SBT",
+    "criterion": "comprehensive",
+    "trains": [
+      "G1264"
+    ],
+    "nl_question": "哎，我得帮我们四个人买从天津西到沈阳北的票，座位找个便宜又实用的就行，综合考虑看看怎么划算。"
+  },
+  "2_B20260828_225231_0015": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "question_type": "transfer",
+    "type": "选择性",
+    "question_mode": "selective",
+    "question": "德州东到枣庄",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 3,
+    "seat_type": "class2",
+    "interference_mode": "real",
+    "ground_truth": [
+      {
+        "train_num": "G2554",
+        "from": "德州东",
+        "to": "廊坊",
+        "from_station_id": "DIP",
+        "to_station_id": "LJP",
+        "ride_from": "德州东",
+        "ride_to": "廊坊",
+        "ride_from_station_id": "DIP",
+        "ride_to_station_id": "LJP",
+        "tickets": 4,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      },
+      {
+        "train_num": "G2581",
+        "from": "廊坊",
+        "to": "枣庄",
+        "from_station_id": "LJP",
+        "to_station_id": "ZEK",
+        "ride_from": "廊坊",
+        "ride_to": "枣庄",
+        "ride_from_station_id": "LJP",
+        "ride_to_station_id": "ZEK",
+        "tickets": 3,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "DIP",
+    "end_station_id": "ZEK",
+    "criterion": "comprehensive",
+    "trains": [
+      "G2554",
+      "G2581"
+    ],
+    "nl_question": "我们三个从德州东到枣庄，想找个价格实惠、经济型的座位，综合考虑看看有没有合适的票？"
+  },
+  "2_B20260828_225231_0016": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "question_type": "short_buy",
+    "type": "选择性",
+    "question_mode": "selective",
+    "question": "郑州东到荆门西",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 4,
+    "seat_type": "class2",
+    "interference_mode": "real",
+    "ground_truth": [
+      {
+        "train_num": "G345",
+        "from": "郑州东",
+        "to": "南阳东",
+        "from_station_id": "ZAF",
+        "to_station_id": "NOF",
+        "ride_from": "郑州东",
+        "ride_to": "荆门西",
+        "ride_from_station_id": "ZAF",
+        "ride_to_station_id": "MXN",
+        "tickets": 6,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "ZAF",
+    "end_station_id": "MXN",
+    "criterion": "comprehensive",
+    "constraints": [
+      "no_transfer"
+    ],
+    "trains": [
+      "G345"
+    ],
+    "nl_question": "我想问一下，从郑州东到荆门西，一共四个人，能帮我看看有没有那种经济实惠的座位？别整换乘那套，就找直达的，综合考虑看看怎么安排比较合适。"
+  },
+  "2_B20260828_225231_0017": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "question_type": "transfer",
+    "type": "选择性",
+    "question_mode": "selective",
+    "question": "洛阳龙门到天水南",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 4,
+    "seat_type": "class0",
+    "interference_mode": "real",
+    "ground_truth": [
+      {
+        "train_num": "G1838",
+        "from": "洛阳龙门",
+        "to": "西安北",
+        "from_station_id": "LLF",
+        "to_station_id": "EAY",
+        "ride_from": "洛阳龙门",
+        "ride_to": "西安北",
+        "ride_from_station_id": "LLF",
+        "ride_to_station_id": "EAY",
+        "tickets": 5,
+        "seat_type": "class0",
+        "seg_type": "purchase"
+      },
+      {
+        "train_num": "G1979",
+        "from": "西安北",
+        "to": "天水南",
+        "from_station_id": "EAY",
+        "to_station_id": "TIJ",
+        "ride_from": "西安北",
+        "ride_to": "天水南",
+        "ride_from_station_id": "EAY",
+        "ride_to_station_id": "TIJ",
+        "tickets": 5,
+        "seat_type": "class0",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "LLF",
+    "end_station_id": "TIJ",
+    "criterion": "comprehensive",
+    "constraints": [
+      "no_short_buy_extra"
+    ],
+    "trains": [
+      "G1838",
+      "G1979"
+    ],
+    "nl_question": "帮帮忙，我们几个人想一块儿从洛阳龙门去天水南。路上时间不短，想舒舒服服的，最好能躺下的那种座位。四个人，综合考虑看看哪个方案合适？哦对了，票一次性买齐就好，别搞那些补票加座的麻烦事。"
+  },
+  "1_B20260829_190538_0001": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "question_type": "transfer",
+    "type": "存在性",
+    "question_mode": "existence",
+    "question": "荆门西到洛阳龙门",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 6,
+    "seat_type": "class1",
+    "interference_mode": "fake",
+    "ground_truth": [
+      {
+        "train_num": "G1154",
+        "from": "荆门西",
+        "to": "咸宁北",
+        "from_station_id": "MXN",
+        "to_station_id": "XRN",
+        "ride_from": "荆门西",
+        "ride_to": "咸宁北",
+        "ride_from_station_id": "MXN",
+        "ride_to_station_id": "XRN",
+        "tickets": 7,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      },
+      {
+        "train_num": "G915",
+        "from": "咸宁北",
+        "to": "洛阳龙门",
+        "from_station_id": "XRN",
+        "to_station_id": "LLF",
+        "ride_from": "咸宁北",
+        "ride_to": "洛阳龙门",
+        "ride_from_station_id": "XRN",
+        "ride_to_station_id": "LLF",
+        "tickets": 6,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "MXN",
+    "end_station_id": "LLF",
+    "criterion": "comprehensive",
+    "trains": [
+      "G1154",
+      "G915"
+    ],
+    "nl_question": "从荆门西到洛阳龙门，我们六个人想找个比普通座舒服些的座位，价钱适中就行，帮我综合考虑下有什么班次合适？"
+  },
+  "1_B20260829_190538_0003": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "question_type": "short_buy",
+    "type": "存在性",
+    "question_mode": "existence",
+    "question": "衡阳东到安阳东",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 5,
+    "seat_type": "class2",
+    "interference_mode": "fake",
+    "ground_truth": [
+      {
+        "train_num": "G1580",
+        "from": "衡阳东",
+        "to": "信阳东",
+        "from_station_id": "HVQ",
+        "to_station_id": "OYN",
+        "ride_from": "衡阳东",
+        "ride_to": "安阳东",
+        "ride_from_station_id": "HVQ",
+        "ride_to_station_id": "ADF",
+        "tickets": 7,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "HVQ",
+    "end_station_id": "ADF",
+    "criterion": "comprehensive",
+    "trains": [
+      "G1580"
+    ],
+    "nl_question": "我们五个人从衡阳东去安阳东，想看看综合下来哪趟车次最合适。座位的话，就普通经济实惠点的就行，大家也不挑剔。"
+  },
+  "1_B20260829_190538_0004": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "question_type": "extra_front",
+    "type": "存在性",
+    "question_mode": "existence",
+    "question": "洛阳龙门到开封北",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 6,
+    "seat_type": "class0",
+    "interference_mode": "fake",
+    "ground_truth": [
+      {
+        "train_num": "G2226",
+        "from": "西安北",
+        "to": "开封北",
+        "from_station_id": "EAY",
+        "to_station_id": "KBF",
+        "ride_from": "洛阳龙门",
+        "ride_to": "开封北",
+        "ride_from_station_id": "LLF",
+        "ride_to_station_id": "KBF",
+        "tickets": 7,
+        "seat_type": "class0",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "LLF",
+    "end_station_id": "KBF",
+    "criterion": "comprehensive",
+    "trains": [
+      "G2226"
+    ],
+    "nl_question": "我们一行六个人从洛阳龙门到开封北，想找个宽敞点能躺平的座位，综合看看性价比高的方案。"
+  },
+  "2_B20260829_190538_0005": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "question_type": "transfer",
+    "type": "选择性",
+    "question_mode": "selective",
+    "question": "德阳到开封北",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 4,
+    "seat_type": "class1",
+    "interference_mode": "real",
+    "ground_truth": [
+      {
+        "train_num": "G3286",
+        "from": "德阳",
+        "to": "洛阳龙门",
+        "from_station_id": "DYW",
+        "to_station_id": "LLF",
+        "ride_from": "德阳",
+        "ride_to": "洛阳龙门",
+        "ride_from_station_id": "DYW",
+        "ride_to_station_id": "LLF",
+        "tickets": 5,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      },
+      {
+        "train_num": "G2206",
+        "from": "洛阳龙门",
+        "to": "开封北",
+        "from_station_id": "LLF",
+        "to_station_id": "KBF",
+        "ride_from": "洛阳龙门",
+        "ride_to": "开封北",
+        "ride_from_station_id": "LLF",
+        "ride_to_station_id": "KBF",
+        "tickets": 5,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "DYW",
+    "end_station_id": "KBF",
+    "criterion": "comprehensive",
+    "trains": [
+      "G2206",
+      "G3286"
+    ],
+    "nl_question": "我们四个同事从德阳出发去开封北，路上想坐得舒服点，价格适中就行，综合考虑看看有没有合适的票？"
+  },
+  "2_B20260829_190538_0006": {
+    "status": "completed",
+    "train_count": 1,
+    "source": "auto",
+    "question_type": "short_buy",
+    "type": "选择性",
+    "question_mode": "selective",
+    "question": "衡阳东到安阳东",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 3,
+    "seat_type": "class2",
+    "interference_mode": "real",
+    "ground_truth": [
+      {
+        "train_num": "G1580",
+        "from": "衡阳东",
+        "to": "新乡东",
+        "from_station_id": "HVQ",
+        "to_station_id": "EGF",
+        "ride_from": "衡阳东",
+        "ride_to": "安阳东",
+        "ride_from_station_id": "HVQ",
+        "ride_to_station_id": "ADF",
+        "tickets": 3,
+        "seat_type": "class2",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "HVQ",
+    "end_station_id": "ADF",
+    "criterion": "comprehensive",
+    "constraints": [
+      "no_transfer"
+    ],
+    "trains": [
+      "G1580"
+    ],
+    "nl_question": "我们仨要从衡阳东去安阳东，想找个经济实惠的座儿，价格别太高，综合考虑一下性价比，千万别换乘，直接到的那种车有没有？"
+  },
+  "2_B20260829_190538_0007": {
+    "status": "completed",
+    "train_count": 2,
+    "source": "auto",
+    "question_type": "transfer",
+    "type": "选择性",
+    "question_mode": "selective",
+    "question": "廊坊到枣庄",
+    "interference": true,
+    "interference_density": 0.02,
+    "segment_plans": [],
+    "people_count": 5,
+    "seat_type": "class1",
+    "interference_mode": "real",
+    "ground_truth": [
+      {
+        "train_num": "G733",
+        "from": "廊坊",
+        "to": "济南西",
+        "from_station_id": "LJP",
+        "to_station_id": "JGK",
+        "ride_from": "廊坊",
+        "ride_to": "济南西",
+        "ride_from_station_id": "LJP",
+        "ride_to_station_id": "JGK",
+        "tickets": 5,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      },
+      {
+        "train_num": "G2575",
+        "from": "济南西",
+        "to": "枣庄",
+        "from_station_id": "JGK",
+        "to_station_id": "ZEK",
+        "ride_from": "济南西",
+        "ride_to": "枣庄",
+        "ride_from_station_id": "JGK",
+        "ride_to_station_id": "ZEK",
+        "tickets": 7,
+        "seat_type": "class1",
+        "seg_type": "purchase"
+      }
+    ],
+    "start_station_id": "LJP",
+    "end_station_id": "ZEK",
+    "criterion": "comprehensive",
+    "constraints": [
+      "no_short_buy_extra"
+    ],
+    "trains": [
+      "G2575",
+      "G733"
+    ],
+    "nl_question": "我们五个人从廊坊到枣庄，想找个比普通座舒服些的座位，比如那种宽敞又不太挤的。综合考虑下票价和时间，别整那些买短补长或者额外买票的麻烦事儿，直接全程安排好就行。"
+  }
+}

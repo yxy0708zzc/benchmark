@@ -8,9 +8,9 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/static/api.js?v=59"></script>
+    <script src="/static/api.js?v=60"></script>
     <script src="/static/components.js?v=58"></script>
-    <script src="/static/app.js?v=62"></script>
+    <script src="/static/app.js?v=69"></script>
 </head>
 <body>
   <!-- 顶栏 -->
@@ -35,8 +35,8 @@
     <a href="javascript:void(0)" class="nav-item" data-page="batch-question" onclick="App._switchToPage('batch-question')">批量出题</a>
     <a href="javascript:void(0)" class="nav-item" data-page="batch-nl-question" onclick="App._switchToPage('batch-nl-question')">批量自然语言化</a>
     <a href="javascript:void(0)" class="nav-item" data-page="batch-test-question" onclick="App._switchToPage('batch-test-question')">批量测试</a>
+    <a href="javascript:void(0)" class="nav-item" data-page="eval" onclick="App._switchToPage('eval')">批量测评</a>    
     <a href="javascript:void(0)" class="nav-item" data-page="question-manager" onclick="App._switchToPage('question-manager')">题目管理</a>
-    <a href="javascript:void(0)" class="nav-item" data-page="eval" onclick="App._switchToPage('eval')">测评</a>
     <a href="javascript:void(0)" class="nav-item" data-page="stats" onclick="App._switchToPage('stats')">统计</a>
   </nav>
 
@@ -79,14 +79,30 @@
     </div>
 
     <!-- 右栏：对话区域 -->
-    <div class="flex-1" style="display:flex;min-width:0;min-height:0;overflow:hidden">
+    <div class="flex-1" style="display:flex;min-width:0;min-height:0;overflow:hidden;position:relative">
       <div class="card flex-1" style="display:flex;flex-direction:column;min-height:0;min-width:0">
-        <div class="card-header">💬 对话</div>
+        <div class="card-header" style="display:flex;align-items:center;gap:8px">
+          <span>💬 对话</span>
+          <div style="margin-left:auto;display:flex;gap:4px">
+            <button class="btn btn-sm btn-secondary" id="btn-view-chat" onclick="App._switchChatView('chat')" title="普通对话视图">💬 对话</button>
+            <button class="btn btn-sm btn-secondary" id="btn-view-trace" onclick="App._switchChatView('trace')" title="轨迹视图：消息/工具逐行排列，点击行查看详情" style="opacity:.55">🧭 轨迹</button>
+          </div>
+        </div>
         <div id="chat-messages" style="padding:8px 0"></div>
+        <div id="chat-trace" style="display:none;padding:6px 4px;font-size:var(--font-size-small)"></div>
         <div style="display:flex;gap:8px;border-top:1px solid var(--gray-2);padding-top:12px;margin-top:12px;flex-shrink:0">
           <input class="input chat-input" id="chat-input" placeholder="输入购票需求，如：从北京南到上海虹桥，二等座，2张" style="flex:1">
           <button class="btn btn-primary" id="btn-send">发送</button>
         </div>
+      </div>
+
+      <!-- 轨迹详情抽屉（点击轨迹行从右侧弹出） -->
+      <div id="trace-drawer" style="display:none;position:absolute;top:0;right:0;bottom:0;width:460px;max-width:60%;background:#fff;border-left:1px solid var(--gray-2);box-shadow:-8px 0 24px rgba(0,0,0,.08);z-index:50;flex-direction:column">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--gray-2)">
+          <strong id="trace-drawer-title" style="font-size:var(--font-size-small)">详情</strong>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:2px 8px" onclick="App._closeTraceDrawer()">✕</button>
+        </div>
+        <div id="trace-drawer-body" style="flex:1;overflow-y:auto;padding:12px 14px;font-size:var(--font-size-small);line-height:1.7"></div>
       </div>
     </div>
   </div>
@@ -154,7 +170,7 @@
     </div>
   </div>
 
-  <!-- auto出题页 -->
+  <!-- 存在性问题出题页 -->
   <div id="page-auto-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
     <!-- 左栏：参数面板 -->
     <div class="sidebar" style="width:320px">
@@ -215,7 +231,7 @@
 
           <div id="auto-fake-interference-config">
             <label style="display:flex;align-items:center;gap:6px;font-weight:600">
-              <input type="checkbox" id="auto-fake-interference" checked> 加入伪干扰
+              <input type="checkbox" id="auto-fake-interference" checked> 伪干扰密度
             </label>
             <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
               <input type="range" id="auto-interference-density" min="0" max="0.05" step="0.001" value="0.02" style="flex:1">
@@ -293,7 +309,7 @@
           </div>
 
           <div style="border:1px solid var(--gray-2);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;background:#fafafa">
-            <label style="font-weight:600">🎯 评判标准（单选，必选一个，仅选择性题）</label>
+            <label style="font-weight:600">🎯 评判标准（单选，必选一个）</label>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="sel-criterion" id="sel-criterion-comprehensive" value="comprehensive" checked> 综合考虑（默认）</label>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="sel-criterion" id="sel-criterion-fastest" value="fastest"> 最快</label>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="sel-criterion" id="sel-criterion-cheapest" value="cheapest"> 最便宜</label>
@@ -302,13 +318,13 @@
           </div>
 
           <div style="border:1px solid var(--gray-2);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;background:#fafafa">
-            <label style="font-weight:600">⛔ 行为约束（可选，仅选择性题）</label>
+            <label style="font-weight:600">⛔ 行为约束（可选）</label>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="sel-const-no-transfer"> 不允许换乘</label>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="sel-const-no-short-buy-extra"> 不允许买短补长与额外购买</label>
           </div>
 
           <div>
-            <label style="font-weight:600">干扰密度:</label>
+            <label style="font-weight:600">车票密度:</label>
             <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
               <input type="range" id="sel-density" min="0" max="0.05" step="0.001" value="0.02" style="flex:1">
               <span id="sel-density-label" style="width:56px;text-align:right">2%</span>
@@ -326,7 +342,7 @@
         <div id="sel-preview-container" style="min-height:300px">
           <div style="text-align:center;color:var(--gray-4);padding:60px 20px">
             设置参数后点击"生成并预览"<br>
-            <span style="font-size:var(--font-size-small)">系统将自动生成合法解并添加随机干扰票</span>
+            <span style="font-size:var(--font-size-small)">系统将自动生成合法解并添加随机票</span>
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px">
@@ -338,7 +354,7 @@
     </div>
   </div>
 
-  <!-- 批量出题页（导航栏独立页） -->
+  <!-- 批量出题页 -->
   <div id="page-batch-question" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
     <!-- 左栏：输入（上传 / 参数 / 操作，间距宽松） -->
     <div class="sidebar" style="width:340px;flex-shrink:0">
@@ -366,24 +382,29 @@
               <div>
                 <label class="input-label">座位等级比例（总和必须=100%）</label>
                 <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap">
-                  <input type="number" class="input" id="batch-seat-class0" value="20" min="0" max="100" style="width:58px"> 特等
-                  <input type="number" class="input" id="batch-seat-class1" value="30" min="0" max="100" style="width:58px"> 一等
-                  <input type="number" class="input" id="batch-seat-class2" value="50" min="0" max="100" style="width:58px"> 二等
+                  <input type="number" class="input" id="batch-seat-class0" value="20" min="0" max="100" style="width:58px"> 特
+                  <input type="number" class="input" id="batch-seat-class1" value="30" min="0" max="100" style="width:58px"> 一
+                  <input type="number" class="input" id="batch-seat-class2" value="50" min="0" max="100" style="width:58px"> 二
                   <span id="batch-seat-total-label" style="color:var(--gray-4)">= 100%</span>
                 </div>
               </div>
               <div>
-                <label class="input-label">干扰密度</label>
+                <label class="input-label">伪干扰密度（存在性 1_）</label>
                 <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
-                  <input type="range" id="batch-density" min="0" max="0.05" step="0.001" value="0.02" style="flex:1">
-                  <span id="batch-density-label" style="width:52px;text-align:right">2%</span>
+                  <input type="range" id="batch-density-fake" min="0" max="0.05" step="0.001" value="0.02" style="flex:1">
+                  <span id="batch-density-fake-label" style="width:52px;text-align:right">2%</span>
+                </div>
+                <label class="input-label" style="margin-top:8px">车票密度（选择性 2_）</label>
+                <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
+                  <input type="range" id="batch-density-real" min="0" max="0.05" step="0.001" value="0.02" style="flex:1">
+                  <span id="batch-density-real-label" style="width:52px;text-align:right">2%</span>
                 </div>
               </div>
               <div>
                 <label class="input-label">每题重试上限</label>
                 <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
                   <input type="number" class="input" id="batch-max-retries" value="40" min="1" max="100" style="width:70px">
-                  <span style="color:var(--gray-4)">次（固定参数重试）</span>
+                  <span style="color:var(--gray-4)">次（每次重试重新随机站对/人数/座位）</span>
                 </div>
               </div>
             </div>
@@ -402,7 +423,10 @@
     <!-- 右栏：展示区（进度 / 分布表 / 站对表 / 结果 / 说明） -->
     <div class="flex-1" style="display:flex;flex-direction:column;gap:12px;min-width:0">
       <div class="card">
-        <div class="card-header">📊 批量进度（存在性 + 选择性 合计）</div>
+        <div class="card-header" style="display:flex;align-items:center;gap:8px">
+          <span>📊 批量进度（存在性 + 选择性 合计）</span>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:2px 10px" onclick="App._clearBatchPanel('batch_generate')">🧹 清空</button>
+        </div>
         <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
           <div>
             <div style="display:flex;justify-content:space-between"><span><strong>总进度</strong></span><span id="batch-total-count">0 / 0</span></div>
@@ -420,7 +444,7 @@
       </div>
 
       <div class="card">
-        <div class="card-header">📋 转换后的分布表（单元格可编辑）</div>
+        <div class="card-header">📋 转换后的分布表（可编辑）</div>
         <div style="max-height:440px;overflow-y:auto;font-size:var(--font-size-small)">
           <div id="batch-distribution-table">
             <div style="text-align:center;color:var(--gray-4);padding:20px">请先上传并解析 1.xlsx</div>
@@ -443,7 +467,7 @@
       <div class="card">
         <div class="card-header">📝 说明</div>
         <div style="color:var(--gray-5);font-size:var(--font-size-small);line-height:1.8">
-          ① 上传 1.xlsx（题目分布）与 2.xlsx（站对）后解析为可编辑表格；② 分布表与站对表分块上下排列、各自独立滚动（同高）；③ 点击左侧「开始批量出题」→ 上方进度条实时更新，完成后可下载失败回执（布局与 1.xlsx 同构，每格=该格失败题数）；④ 题号沿用 <code>前缀+时间戳+序号</code>（如 <code>2_20260812_102638_0001</code>）；选择性题型由行为约束自动推导（不允许换乘→买短补长；否则→换乘）；人数每题随机 3~6；多策略=一次换乘类混合（双策略=[直达+指定策略]，三策略=[策略A+策略B]）。
+          ① 上传 1.xlsx（题目分布）与 2.xlsx（站对）后解析为可编辑表格；<br>② 分布表与站对表分块上下排列、各自独立滚动（同高）；<br>③ 点击左侧「开始批量出题」→ 上方进度条实时更新，完成后可下载失败回执（布局与 1.xlsx 同构，每格=该格失败题数）；<br>④ 题号沿用 <code>前缀+时间戳+序号</code>（如 <code>2_20260812_102638_0001</code>）；选择性题型由行为约束自动推导（不允许换乘→买短补长；否则→换乘）；人数每题随机 3~6；多策略=一次换乘类混合（双策略=[直达+指定策略]，三策略=[策略A+策略B]）。
         </div>
       </div>
     </div>
@@ -457,7 +481,7 @@
         <div class="card-header">🗣️ 批量自然语言化</div>
         <div style="display:flex;flex-direction:column;gap:14px;font-size:var(--font-size-small)">
           <div style="color:var(--gray-5);border:1px solid var(--gray-2);border-radius:6px;padding:8px;background:#fafafa">
-            为缺失自然语言（<code>nl_question</code>）的题目批量生成自然语言问题（含评判标准/行为约束自然化），逐题写回 metadata，需 .env <code>NL_API_KEY</code>。
+            为缺失自然语言（<code>nl_question</code>）的题目批量生成自然语言问题（含评判标准/行为约束自然化），逐题写回 metadata，需 .env <code>NL_API_KEY</code>（模型名可用 <code>NL_MODEL</code> 单独指定，未填回落 <code>DEFAULT_MODEL</code>）。
           </div>
           <div>
             <div style="font-weight:600;margin-bottom:6px;color:var(--gray-5)">操作</div>
@@ -477,7 +501,10 @@
     <!-- 右栏：进度 / 勾选表格 / 结果 / 说明 -->
     <div class="flex-1" style="display:flex;flex-direction:column;gap:12px;min-width:0">
       <div class="card">
-        <div class="card-header">📊 批量进度（自然语言化）</div>
+        <div class="card-header" style="display:flex;align-items:center;gap:8px">
+          <span>📊 批量进度（自然语言化）</span>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:2px 10px" onclick="App._clearBatchPanel('batch_nl')">🧹 清空</button>
+        </div>
         <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
           <div>
             <div style="display:flex;justify-content:space-between"><span><strong>总进度</strong></span><span id="batch-nl-count">0 / 0</span></div>
@@ -504,7 +531,7 @@
       <div class="card">
         <div class="card-header">📝 说明</div>
         <div style="color:var(--gray-5);font-size:var(--font-size-small);line-height:1.8">
-          ① 点击「扫描缺失自然语言的题目」列出 metadata 中缺少 <code>nl_question</code> 的题目（有题目即可，不看是否已测试）；② 勾选后点击「开始生成自然语言」异步逐题生成并写回 <code>metadata.nl_question</code>（含评判标准/行为约束）；③ 需要 .env 配置 <code>NL_API_KEY</code>，未配置时整批跳过；④ 与批量出题互不影响，可独立运行。
+          ① 点击「扫描缺失自然语言的题目」列出 metadata 中缺少 <code>nl_question</code> 的题目（有题目即可，不看是否已测试）；<br>② 勾选后点击「开始生成自然语言」异步逐题生成并写回 <code>metadata.nl_question</code>（含评判标准/行为约束）；<br>③ 需要 .env 配置 <code>NL_API_KEY</code>，未配置时整批跳过；<br>④ 与批量出题互不影响，可独立运行。
         </div>
       </div>
     </div>
@@ -525,11 +552,15 @@
             <div style="display:flex;flex-direction:column;gap:10px">
               <div>
                 <label class="input-label">测试模型编号（API 模型名）</label>
-                <input class="input" id="batch-test-model" placeholder="deepseek-v4-pro / deepseek-v4-flash / deepseek-v4-flash-vision-exp" style="margin-top:4px">
+                <input class="input" id="batch-test-model" placeholder="须与 .env 平台的模型名一致（默认自动填 TEST_MODEL）" style="margin-top:4px">
               </div>
               <div>
                 <label class="input-label">最大工具调用</label>
                 <input type="number" class="input" id="batch-test-max-iter" value="30" min="1" max="100" style="width:70px;margin-top:4px">
+              </div>
+              <div>
+                <label class="input-label">并发数（1~8，1=串行）</label>
+                <input type="number" class="input" id="batch-test-concurrency" value="3" min="1" max="8" style="width:70px;margin-top:4px">
               </div>
             </div>
           </div>
@@ -551,7 +582,10 @@
     <!-- 右栏：进度 / 勾选表格 / 结果 / 说明 -->
     <div class="flex-1" style="display:flex;flex-direction:column;gap:12px;min-width:0">
       <div class="card">
-        <div class="card-header">📊 批量进度（批量测试）</div>
+        <div class="card-header" style="display:flex;align-items:center;gap:8px">
+          <span>📊 批量进度（批量测试）</span>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:2px 10px" onclick="App._clearBatchPanel('batch_test')">🧹 清空</button>
+        </div>
         <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
           <div>
             <div style="display:flex;justify-content:space-between"><span><strong>总进度</strong></span><span id="batch-test-count">0 / 0</span></div>
@@ -578,7 +612,7 @@
       <div class="card">
         <div class="card-header">📝 说明</div>
         <div style="color:var(--gray-5);font-size:var(--font-size-small);line-height:1.8">
-          ① 可测试条件 = 题目已落盘（question/*.db）+ 已有 <code>nl_question</code>（信息核查完备）+ 该模型未在该题 <code>tested_models</code> 中（每模型每题只测一次）；② 模型编号必须是 API 合法模型名（如 <code>deepseek-v4-pro</code>、<code>deepseek-v4-flash</code>、<code>deepseek-v4-flash-vision-exp</code>），同时写入 <code>tested_models</code> 作记录；③ 测试成功后写回 <code>tested_models</code>，再次扫描自动变「已测」。
+          ① 可测试条件 = 题目已落盘（question/*.db）+ 已有 <code>nl_question</code>（信息核查完备）+ 该模型未在该题 <code>tested_models</code> 中（每模型每题只测一次）；<br>② 模型编号必须是 API 平台的合法模型名（输入框默认自动填 .env 的 <code>TEST_MODEL</code>，如 <code>mimo-v2.5</code>；填错模型名时平台可能报"key 无效"），同时写入 <code>tested_models</code> 作记录；<br>③ 测试成功后写回 <code>tested_models</code>，再次扫描自动变「已测」。
         </div>
       </div>
     </div>
@@ -686,42 +720,65 @@
     </div>
   </div>
 
-  <!-- 测评页 -->
+  <!-- 批量测评页（导航栏独立页） -->
   <div id="page-eval" class="page-section" style="display:none;gap:24px;padding:var(--spacing-lg);min-height:calc(100vh - var(--topbar-height) - var(--navbar-height) - var(--footer-height))">
-    <!-- 左栏 -->
-    <div class="sidebar">
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">📋 测试记录</div>
-        <div id="eval-record-list" style="max-height:300px;overflow-y:auto"></div>
-        <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
-          <button class="btn btn-primary btn-sm" id="btn-eval-load">加载选中记录</button>
-          <button class="btn btn-secondary btn-sm" onclick="App._loadEvalRecords()">🔄 刷新列表</button>
-        </div>
-      </div>
+    <!-- 左栏：操作 -->
+    <div class="sidebar" style="width:340px;flex-shrink:0">
       <div class="card">
-        <div class="card-header">⚙️ 操作</div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <button class="btn btn-secondary btn-sm" id="btn-eval-verify">🔍 代码核查</button>
-          <button class="btn btn-success btn-sm" id="btn-eval-complete">💾 保存测评结果</button>
+        <div class="card-header">⚖️ 批量测评</div>
+        <div style="display:flex;flex-direction:column;gap:14px;font-size:var(--font-size-small)">
+          <div style="color:var(--gray-5);border:1px solid var(--gray-2);border-radius:6px;padding:8px;background:#fafafa">
+            勾选测试记录后批量执行代码核查（verifier）并保存测评结果到 <code>logs/result/</code>，供统计模块汇总。
+          </div>
+          <div>
+            <div style="font-weight:600;margin-bottom:6px;color:var(--gray-5)">操作</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn btn-secondary btn-sm" id="btn-batch-eval-scan">🔍 扫描测试记录</button>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn btn-primary btn-sm" id="btn-batch-eval-start" style="flex:1">⚖️ 开始批量测评</button>
+                <button class="btn btn-secondary btn-sm" id="btn-batch-eval-select-all">全选</button>
+                <button class="btn btn-secondary btn-sm" id="btn-batch-eval-select-none">取消</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 右栏：测评结果 -->
-    <div class="flex-1">
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header" style="display:flex;gap:12px;align-items:center">
-          <span>📊 测评结果</span>
-          <div style="display:flex;gap:4px;margin-left:auto">
-            <button class="btn btn-sm btn-secondary tab-btn active" data-tab="verify">代码核查</button>
-            <button class="btn btn-sm btn-secondary tab-btn" data-tab="details">测试详情</button>
+    <!-- 右栏：进度 / 勾选表格 / 结果 / 说明 -->
+    <div class="flex-1" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card">
+        <div class="card-header" style="display:flex;align-items:center;gap:8px">
+          <span>📊 批量进度（批量测评）</span>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:2px 10px" onclick="App._clearBatchPanel('batch_eval')">🧹 清空</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:var(--font-size-small)">
+          <div>
+            <div style="display:flex;justify-content:space-between"><span><strong>总进度</strong></span><span id="batch-eval-count">0 / 0</span></div>
+            <div style="background:var(--gray-2);border-radius:6px;height:10px;margin-top:4px"><div id="batch-eval-bar" style="width:0%;height:10px;border-radius:6px;background:#7c3aed;transition:width .3s"></div></div>
+          </div>
+          <div id="batch-eval-current" style="color:var(--gray-4)">尚未开始</div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span><strong>📜 执行日志</strong></span>
+              <a href="/api/batch/logs?lines=500" target="_blank" style="color:var(--gray-4);font-size:11px">打开后台日志（logs/batch_tools.log）</a>
+            </div>
+            <div id="batch-eval-log" style="height:180px;overflow-y:auto;background:#fafafa;border:1px solid var(--gray-2);border-radius:6px;padding:6px 8px;font-family:Consolas,monospace;font-size:11px;line-height:1.7;white-space:pre-wrap;word-break:break-all;margin-top:4px"><div style="color:var(--gray-4)">暂无日志（启动批量测评后实时输出）</div></div>
           </div>
         </div>
-        <div id="eval-verify-panel">
-          <div style="color:var(--gray-4);padding:20px;text-align:center">请先加载一条测试记录，然后点击"代码核查"</div>
-        </div>
-        <div id="eval-details-panel" style="display:none">
-          <div style="color:var(--gray-4);padding:20px;text-align:center">加载记录后显示 token 用量、耗时等详情</div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">⚖️ 批量测评 · 勾选测试记录</div>
+        <div id="batch-eval-table" style="max-height:440px;overflow-y:auto;font-size:var(--font-size-small)"><div style="text-align:center;color:var(--gray-4);padding:16px">点击左侧「扫描测试记录」列出可勾选的记录</div></div>
+        <div id="batch-eval-result" style="display:none"></div>
+      </div>
+
+      <!-- 说明：位于右侧展示框下方 -->
+      <div class="card">
+        <div class="card-header">📝 说明</div>
+        <div style="color:var(--gray-5);font-size:var(--font-size-small);line-height:1.8">
+          ① 点击「扫描测试记录」列出 <code>logs/test/</code> 下全部记录（题号/模型/时间/plan_status/是否已测评）；<br>② 勾选本次要测评的记录（支持按住鼠标拖过选框批量勾选），表格即为本批处理的题目详情；<br>③ 点击「开始批量测评」逐条代码核查并保存结果到 <code>logs/result/</code>（结构与手动测评一致，统计模块可直接汇总）；<br>④ 重复测评会生成新结果文件，不会覆盖旧文件。
         </div>
       </div>
     </div>
