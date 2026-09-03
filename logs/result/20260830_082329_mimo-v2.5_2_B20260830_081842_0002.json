@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-08-30T08:23:29.042222",
+  "test_file": "20260830_082216_mimo-v2.5_2_B20260830_081842_0002.json",
+  "question_id": "2_B20260830_081842_0002",
+  "model_name": "mimo-v2.5",
+  "user_input": "嘿，我想订从沧州西到淮安东的高铁票，我们三个朋友一块儿，找个经济实惠点的座位就行，综合考虑下性价比，帮看看有啥合适的？",
+  "score_summary": {
+    "hallucination_count": 0,
+    "issue_count": 0,
+    "total_tokens": 10697,
+    "duration_seconds": 96.797951,
+    "tool_calls": []
+  },
+  "verification": {
+    "total_items": 0,
+    "correct_items": 0,
+    "issue_count": 0,
+    "hallucination_count": 0,
+    "price_issue_count": 0,
+    "invalid_plan_count": 0,
+    "route_mismatch_count": 0,
+    "ticket_shortage_count": 0,
+    "missing_ride_count": 0,
+    "question_mode": "选择性",
+    "verdict": "no_plan",
+    "results": [],
+    "issues": [],
+    "summary": "⚠️ 未检测到可核查的购票段（final_plan 缺失或全为无效条目）"
+  },
+  "human_confirmed": false,
+  "human_notes": "批量测评自动生成",
+  "status": "success"
+}

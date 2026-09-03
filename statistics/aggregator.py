@@ -100,12 +100,21 @@ def _issue_type_counts(group: List[Dict]) -> Dict[str, int]:
     return counts
 
 
-def _record_brief(r: Dict, meta_all: Dict) -> Dict[str, Any]:
+def _record_brief(r: Dict, meta_all: Dict, test_data: Dict = None) -> Dict[str, Any]:
     """单条测评结果摘要（模型管理逐题明细表 / 测评管理跳转用）"""
     v = r.get("verification") or {}
     ss = r.get("score_summary") or {}
     qid = r.get("question_id", "") or ""
     m = meta_all.get(qid) or {}
+    # 调用计数：优先读测试记录显式字段，旧记录由 trace 推导
+    model_calls = tool_calls = None
+    if test_data:
+        model_calls = test_data.get("model_calls")
+        tool_calls = test_data.get("tool_calls")
+        if model_calls is None:
+            model_calls = _trace_model_calls(test_data)
+        if tool_calls is None:
+            tool_calls = _trace_tool_calls(test_data)
     return {
         "filename": r.get("_filename", ""),
         "question_id": qid,
@@ -117,8 +126,16 @@ def _record_brief(r: Dict, meta_all: Dict) -> Dict[str, Any]:
         "hallucination_count": v.get("hallucination_count", 0),
         "total_tokens": ss.get("total_tokens", 0),
         "duration_seconds": ss.get("duration_seconds", 0),
+        "model_calls": model_calls,
+        "tool_calls": tool_calls,
         "timestamp": r.get("timestamp", ""),
     }
+
+
+def _trace_model_calls(test_data: Dict) -> int:
+    """从测试记录 trace 统计模型调用次数（每个 assistant 轮 = 一次 LLM API 请求）"""
+    return sum(1 for e in (test_data.get("trace") or [])
+               if isinstance(e, dict) and e.get("type") == "assistant")
 
 
 def _trace_tool_calls(test_data: Dict) -> int:
@@ -144,10 +161,11 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
     scores = [_compute_score(r) for r in group]
     avg_score = sum(scores) / len(scores) if scores else 0
 
-    # 从测试记录中获取 token 消耗和工具调用次数（工具数由 trace 推导）
+    # 从测试记录中获取 token 消耗 / 模型调用 / 工具调用（均由 trace 推导）
     total_tokens = 0
     total_duration = 0
     total_tool_calls = 0
+    total_model_calls = 0
     token_count = 0
     for r in group:
         test_file = r.get("test_file", "")
@@ -158,6 +176,7 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
                 total_tokens += tu.get("total_tokens", 0)
                 total_duration += test_data.get("duration", 0)
                 total_tool_calls += _trace_tool_calls(test_data)
+                total_model_calls += _trace_model_calls(test_data)
                 token_count += 1
 
     return {
@@ -177,7 +196,8 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
         "avg_score": round(avg_score, 1),
         "avg_tokens": 0,
         "avg_duration": 0,
-        "avg_tool_calls": 0,
+        "avg_tool_calls": round(total_tool_calls / token_count, 1) if token_count else 0,
+        "avg_model_calls": round(total_model_calls / token_count, 1) if token_count else 0,
         "scores": scores,
     }
 
@@ -215,31 +235,42 @@ def aggregate_results() -> Dict:
     except Exception:
         meta_all = {}
 
-    # 各模型指标（含 token/耗时/工具调用）
+    # 各模型指标（含 token/耗时/模型调用/工具调用）
     models_data = {}
     for model_name, group in model_groups.items():
         stats = _model_stats(group)
-        # 补 token / 耗时 / 工具调用（工具数由 trace 推导）
+        # 补 token / 耗时 / 双计数（均由 trace 推导；同时缓存 test_data 供逐题明细复用）
         total_tokens = 0
         total_duration = 0
         total_tool_calls = 0
+        total_model_calls = 0
         token_count = 0
+        td_map: Dict[str, Dict] = {}
         for r in group:
             test_file = r.get("test_file", "")
             if test_file:
-                test_data = load_test_record(os.path.basename(test_file))
+                base = os.path.basename(test_file)
+                test_data = td_map.get(base)
+                if test_data is None:
+                    test_data = load_test_record(base)
+                    td_map[base] = test_data or {}
                 if test_data:
                     tu = test_data.get("token_usage", {})
                     total_tokens += tu.get("total_tokens", 0)
                     total_duration += test_data.get("duration", 0)
                     total_tool_calls += _trace_tool_calls(test_data)
+                    total_model_calls += _trace_model_calls(test_data)
                     token_count += 1
         stats["avg_tokens"] = round(total_tokens / token_count, 1) if token_count else 0
         stats["avg_duration"] = round(total_duration / token_count, 2) if token_count else 0
         stats["avg_tool_calls"] = round(total_tool_calls / token_count, 1) if token_count else 0
+        stats["avg_model_calls"] = round(total_model_calls / token_count, 1) if token_count else 0
         stats["issue_type_counts"] = _issue_type_counts(group)
-        # 逐题明细（新记录在前）：题号/verdict/得分/问题数/token/耗时/时间
-        stats["records"] = [_record_brief(r, meta_all) for r in reversed(group)]
+        # 逐题明细（新记录在前）：题号/verdict/得分/问题数/token/耗时/模型调用/工具调用/时间
+        stats["records"] = [
+            _record_brief(r, meta_all, td_map.get(os.path.basename(r.get("test_file", "") or "")))
+            for r in reversed(group)
+        ]
         models_data[model_name] = stats
 
     # 全局汇总

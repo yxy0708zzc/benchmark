@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-08-30T08:23:29.030139",
+  "test_file": "20260830_082318_mimo-v2.5_2_B20260830_081842_0005.json",
+  "question_id": "2_B20260830_081842_0005",
+  "model_name": "mimo-v2.5",
+  "user_input": "我们六个人打算从德阳到蚌埠南，想找个价格实惠、坐着还行的普通座位，综合考虑下最合适的车次。",
+  "score_summary": {
+    "hallucination_count": 0,
+    "issue_count": 0,
+    "total_tokens": 18218,
+    "duration_seconds": 158.874237,
+    "tool_calls": []
+  },
+  "verification": {
+    "total_items": 2,
+    "correct_items": 2,
+    "issue_count": 0,
+    "hallucination_count": 0,
+    "price_issue_count": 0,
+    "invalid_plan_count": 0,
+    "route_mismatch_count": 0,
+    "ticket_shortage_count": 0,
+    "missing_ride_count": 0,
+    "question_mode": "选择性",
+    "verdict": "pass",
+    "results": [
+      {
+        "train_num": "G1592",
+        "from_station_id": "DYW",
+        "to_station_id": "ZAF",
+        "from_name": "德阳",
+        "to_name": "郑州东",
+        "ride_from_station_id": "DYW",
+        "ride_to_station_id": "ZAF",
+        "ride_from_name": "德阳",
+        "ride_to_name": "郑州东",
+        "seat_type": "class2",
+        "claimed": 6,
+        "actual": 7,
+        "match": true,
+        "price_claimed": 572.0,
+        "price_actual": 572.0,
+        "price_match": true
+      },
+      {
+        "train_num": "G1950",
+        "from_station_id": "ZAF",
+        "to_station_id": "BMH",
+        "from_name": "郑州东",
+        "to_name": "蚌埠南",
+        "ride_from_station_id": "ZAF",
+        "ride_to_station_id": "BMH",
+        "ride_from_name": "郑州东",
+        "ride_to_name": "蚌埠南",
+        "seat_type": "class2",
+        "claimed": 6,
+        "actual": 7,
+        "match": true,
+        "price_claimed": 309.0,
+        "price_actual": 309.0,
+        "price_match": true
+      }
+    ],
+    "issues": [],
+    "summary": "✅ 全部通过：共 2 条方案，均与数据库一致"
+  },
+  "human_confirmed": false,
+  "human_notes": "批量测评自动生成",
+  "status": "success"
+}

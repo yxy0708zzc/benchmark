@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-08-30T08:23:29.033575",
+  "test_file": "20260830_082252_mimo-v2.5_2_B20260830_081842_0003.json",
+  "question_id": "2_B20260830_081842_0003",
+  "model_name": "mimo-v2.5",
+  "user_input": "帮我看看，有没有一趟高铁是从西安北到蚌埠南的？我们一大家子六口人要过去。最好能综合考虑一下，选个价格和坐着舒服度都适中的票，别太贵但也别太委屈自己。",
+  "score_summary": {
+    "hallucination_count": 0,
+    "issue_count": 0,
+    "total_tokens": 17320,
+    "duration_seconds": 133.001138,
+    "tool_calls": []
+  },
+  "verification": {
+    "total_items": 0,
+    "correct_items": 0,
+    "issue_count": 0,
+    "hallucination_count": 0,
+    "price_issue_count": 0,
+    "invalid_plan_count": 0,
+    "route_mismatch_count": 0,
+    "ticket_shortage_count": 0,
+    "missing_ride_count": 0,
+    "question_mode": "选择性",
+    "verdict": "no_plan",
+    "results": [],
+    "issues": [],
+    "summary": "⚠️ 未检测到可核查的购票段（final_plan 缺失或全为无效条目）"
+  },
+  "human_confirmed": false,
+  "human_notes": "批量测评自动生成",
+  "status": "success"
+}

@@ -2855,6 +2855,11 @@ def api_test_complete(req: TestCompleteRequest):
     else:
         plan_status = "has_solution"  # 有方案
 
+    # 调用计数：模型调用 = 对话轮数（每轮 assistant 对应一次 LLM API 请求）；
+    # 工具调用 = 各轮嵌套 tools 的总和（工具在哪个轮次被调用即计入哪轮）
+    model_calls = sum(1 for e in trace if isinstance(e, dict) and e.get("type") == "assistant")
+    tool_calls = sum(len(e.get("tools") or []) for e in trace if isinstance(e, dict) and e.get("type") == "assistant")
+
     # 精简结构：trace 为唯一对话源（user / assistant轮(思考+输出+嵌套tools)），
     # 不再冗余落盘 conversation 与平铺 tool_calls（二者均可由 trace 推导；system 提示词为代码常量不重复存）
     record = {
@@ -2867,6 +2872,8 @@ def api_test_complete(req: TestCompleteRequest):
         "plan_status": plan_status,
         "token_usage": token_usage,
         "duration": duration,
+        "model_calls": model_calls,
+        "tool_calls": tool_calls,
         "trace": trace,
     }
 
@@ -2883,6 +2890,8 @@ def api_test_complete(req: TestCompleteRequest):
         "model_name": model_name,
         "final_plan": final_plan,
         "plan_status": plan_status,
+        "model_calls": model_calls,
+        "tool_calls": tool_calls,
     }
 
 
@@ -3892,15 +3901,16 @@ def api_batch_report(report: Dict = Body(...)):
 
 _nl_state: Dict[str, Any] = {
     "running": False, "done": False, "current": "",
-    "total": 0, "done_count": 0, "result": None,
+    "total": 0, "done_count": 0, "result": None, "stop": False,
 }
 
 
-def _run_batch_nl(question_ids: List[str]) -> None:
-    """在线程中对勾选题目逐个生成自然语言并写回 metadata['nl_question']。
+def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
+    """线程池并发对勾选题目生成自然语言并写回 metadata['nl_question']（与批量测试同套并发模式）。
 
     复用 nl_question.py 的 build_prompt（含评判标准/行为约束自然化）与 generate_nl；
-    单题失败不影响其它题；缺 NL_API_KEY 时整批跳过。
+    并发数 1~20 可调（LLM 调用为 IO 密集，线程池即可）；单题失败不影响其它题；
+    缺 NL_API_KEY 时整批跳过；支持中途停止（剩余题目跳过，已生成的保留）。
     """
     from nl_question import build_prompt, generate_nl
     from config import ENV, ensure_env_fresh
@@ -3929,47 +3939,75 @@ def _run_batch_nl(question_ids: List[str]) -> None:
                        "details": [], "error": f"未配置 {miss}，批量自然语言化已整批跳过"},
         })
         return
+
+    concurrency = max(1, min(int(concurrency or 1), 20))
     _nl_state.update({"running": True, "done": False, "current": "",
                       "total": len(question_ids), "done_count": 0, "result": None})
-    _batch_log("batch_nl", f"批量自然语言化开始：共 {len(question_ids)} 题（模型 {model}，温度 {NL_TEMPERATURE}）")
+    _batch_log("batch_nl", f"批量自然语言化开始：共 {len(question_ids)} 题（模型 {model}，温度 {NL_TEMPERATURE}，并发 {concurrency}）")
     metadata = load_metadata()
+    metadata_lock = threading.Lock()   # 保护 metadata 字典读写 + save_metadata 全文件写（防并发写坏）
+    state_lock = threading.Lock()      # 保护 details/counts/done_count
     details = []
-    generated = failed = 0
-    for i, qid in enumerate(question_ids, 1):
-        entry = metadata.get(qid)
-        _nl_state["current"] = f"自然语言化（{i}/{len(question_ids)}）：{qid}"
-        _batch_log("batch_nl", f"（{i}/{len(question_ids)}）开始生成 {qid} 的自然语言")
-        if not entry or not entry.get("question"):
-            failed += 1
-            details.append({"question_id": qid, "ok": False, "error": "题目缺少 question 字段"})
-            _batch_log("batch_nl", f"{qid} 缺少 question 字段，跳过", "error")
-        else:
-            try:
-                nl = generate_nl(api_key, model, base_url, build_prompt(entry))
+    counts = {"generated": 0, "failed": 0, "skipped": 0}
+
+    def _nl_one(seq: int, qid: str) -> Dict:
+        """生成单题自然语言（worker 线程内执行）。"""
+        if _nl_state.get("stop"):
+            _batch_log("batch_nl", f"{qid} 已停止，跳过", "warn")
+            return {"question_id": qid, "skipped": True, "ok": False, "error": "已停止，跳过"}
+        with metadata_lock:
+            entry = metadata.get(qid)
+            if not entry or not entry.get("question"):
+                _batch_log("batch_nl", f"{qid} 缺少 question 字段，跳过", "error")
+                return {"question_id": qid, "ok": False, "error": "题目缺少 question 字段"}
+        _batch_log("batch_nl", f"（{seq}/{len(question_ids)}）开始生成 {qid} 的自然语言")
+        try:
+            # 慢操作（LLM 调用 + prompt 构建）在锁外执行，最大化并发
+            nl = generate_nl(api_key, model, base_url, build_prompt(entry))
+            with metadata_lock:
                 entry["nl_question"] = nl
-                generated += 1
-                details.append({"question_id": qid, "ok": True, "error": None})
                 # 每题成功立即落盘：进度实时可见，中断不丢已生成结果
+                # （save_metadata 为全文件写，必须串行化防并发写坏）
                 save_metadata(metadata)
-                _batch_log("batch_nl", f"{qid} 自然语言生成成功并已写回 metadata", "success")
-            except Exception as e:
-                failed += 1
-                details.append({"question_id": qid, "ok": False, "error": str(e)})
-                _batch_log("batch_nl", f"{qid} 自然语言生成失败：{e}", "error")
-        _nl_state["done_count"] += 1
+            _batch_log("batch_nl", f"{qid} 自然语言生成成功并已写回 metadata", "success")
+            return {"question_id": qid, "ok": True, "error": None}
+        except Exception as e:
+            _batch_log("batch_nl", f"{qid} 自然语言生成失败：{e}", "error")
+            return {"question_id": qid, "ok": False, "error": str(e)}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(_nl_one, i, qid) for i, qid in enumerate(question_ids, 1)]
+        for fut in as_completed(futures):
+            detail = fut.result()
+            with state_lock:
+                details.append(detail)
+                if detail.get("skipped"):
+                    counts["skipped"] += 1
+                elif detail.get("ok"):
+                    counts["generated"] += 1
+                else:
+                    counts["failed"] += 1
+                _nl_state["done_count"] += 1
+                _nl_state["current"] = (f"并发 {concurrency} · 已完成 {_nl_state['done_count']}/{len(question_ids)}"
+                                        + (" · 已请求停止，剩余跳过中" if _nl_state.get("stop") else ""))
     save_metadata(metadata)
+    stopped = bool(_nl_state.get("stop"))
     _nl_state["result"] = {
-        "summary": {"total": len(question_ids), "generated": generated, "failed": failed,
-                    "skipped": len(question_ids) - generated - failed},
+        "summary": {"total": len(question_ids), "generated": counts["generated"],
+                    "failed": counts["failed"], "skipped": counts["skipped"],
+                    "concurrency": concurrency, "stopped": stopped},
         "details": details, "error": None,
     }
-    _batch_log("batch_nl", f"批量自然语言化完成：成功 {generated} / 失败 {failed} / 跳过 {len(question_ids) - generated - failed}",
-               "success" if failed == 0 else "warn")
-    _nl_state.update({"running": False, "done": True, "current": ""})
+    _batch_log("batch_nl",
+               f"批量自然语言化完成{'（中途停止）' if stopped else ''}：成功 {counts['generated']} / 失败 {counts['failed']} / 跳过 {counts['skipped']}（共 {len(question_ids)} 题，并发 {concurrency}）",
+               "success" if counts["failed"] == 0 else "warn")
+    _nl_state.update({"running": False, "done": True, "current": "", "stop": False})
 
 
 class BatchNlGenerateRequest(BaseModel):
     question_ids: List[str] = []
+    concurrency: int = 5   # 并发请求数，1~20 可调
 
 
 @app.get("/api/batch_nl/scan")
@@ -4007,13 +4045,14 @@ def api_batch_nl_generate(req: BatchNlGenerateRequest):
         raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描缺失自然语言的题目）")
     import threading
     _batch_log_clear("batch_nl")
-    _batch_log("batch_nl", f"收到批量自然语言化请求：{len(req.question_ids)} 题，任务已启动")
     # 同步置运行态：_run_batch_nl 在置 running 前要导入 nl_question 模块 + ensure_env_fresh，
     # 窗口可达数百毫秒，前端首轮询拿到 running=false 会提前退出轮询链（进度条/日志卡死的根因）
+    concurrency = max(1, min(int(req.concurrency or 5), 20))
+    _batch_log("batch_nl", f"收到批量自然语言化请求：{len(req.question_ids)} 题，并发 {concurrency}，任务已启动")
     _nl_state.update({"running": True, "done": False, "current": "准备中...",
-                      "total": len(req.question_ids), "done_count": 0, "result": None})
-    threading.Thread(target=_run_batch_nl, args=(list(req.question_ids),), daemon=True).start()
-    return {"success": True, "message": "批量自然语言化已启动（逐题生成并写回 nl_question）"}
+                      "total": len(req.question_ids), "done_count": 0, "result": None, "stop": False})
+    threading.Thread(target=_run_batch_nl, args=(list(req.question_ids), concurrency), daemon=True).start()
+    return {"success": True, "message": f"批量自然语言化已启动（并发 {concurrency}，逐题生成并写回 nl_question）"}
 
 
 @app.get("/api/batch_nl/status")
@@ -4023,6 +4062,16 @@ def api_batch_nl_status(after_seq: int = 0):
     return {"running": s["running"], "done": s["done"], "current": s["current"],
             "total": s["total"], "done_count": s["done_count"], "result": s["result"],
             "logs": _batch_log_payload("batch_nl", after_seq)}
+
+
+@app.post("/api/batch_nl/stop")
+def api_batch_nl_stop():
+    """请求停止正在运行的批量自然语言化：剩余题目跳过（已生成的保留，进行中的请求完成后终止）。"""
+    if not _nl_state.get("running"):
+        return {"success": False, "message": "当前没有运行中的批量自然语言化任务"}
+    _nl_state["stop"] = True
+    _batch_log("batch_nl", "收到停止请求：剩余题目将跳过（进行中的请求完成后终止）", "warn")
+    return {"success": True, "message": "停止请求已发出，剩余题目将跳过（已生成的结果保留）"}
 
 
 # ============================================================
@@ -4081,7 +4130,7 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int, co
                 tested.append(model)
             entry["tested_models"] = tested
             _batch_log("batch_test",
-                       f"{qid} 测试完成（plan_status={complete_r.get('plan_status', '')}，耗时 {round(complete_r.get('duration', 0), 1)}s）→ {complete_r.get('filename', '')}",
+                       f"{qid} 测试完成（plan_status={complete_r.get('plan_status', '')}，模型调用 {complete_r.get('model_calls', '-')} 次，工具调用 {complete_r.get('tool_calls', '-')} 次，耗时 {round(complete_r.get('duration', 0), 1)}s）→ {complete_r.get('filename', '')}",
                        "success")
             return {
                 "question_id": qid, "ok": True, "error": None,

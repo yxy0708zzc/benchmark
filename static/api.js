@@ -357,6 +357,12 @@ const API = {
     return resp.json();
   },
 
+  /** 请求停止正在运行的批量自然语言化（剩余题目跳过，已生成的保留） */
+  batchNlStop: async () => {
+    const resp = await fetch('/api/batch_nl/stop', { method: 'POST' });
+    return resp.json();
+  },
+
   /** 扫描可测试题目（某模型未测过且信息完备） */
   batchTestScan: async (payload) => {
     const resp = await fetch('/api/batch_test/scan', {

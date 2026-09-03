@@ -685,6 +685,10 @@ const App = {
       const dur = result.duration || 0;
       summaryParts.push(`耗时: ${(typeof dur === 'number' ? dur.toFixed(1) : dur)}s`);
 
+      // 调用计数：模型调用 = LLM API 请求轮数；工具调用 = 各轮工具总和
+      if (result.model_calls != null) summaryParts.push(`模型调用: ${result.model_calls} 次`);
+      if (result.tool_calls != null) summaryParts.push(`工具调用: ${result.tool_calls} 次`);
+
       // 最终乘车方案
       const finalPlan = result.final_plan || [];
       let planStr = '';
@@ -1696,6 +1700,8 @@ const App = {
     if (nlScan) nlScan.onclick = () => this._scanBatchNl();
     const nlGen = document.getElementById('btn-batch-nl-generate');
     if (nlGen) nlGen.onclick = () => this._startBatchNl();
+    const nlStop = document.getElementById('btn-batch-nl-stop');
+    if (nlStop) nlStop.onclick = () => this._stopBatchNl();
     const nlAll = document.getElementById('btn-batch-nl-select-all');
     if (nlAll) nlAll.onclick = () => this._selectBatchNl(true);
     const nlNone = document.getElementById('btn-batch-nl-select-none');
@@ -2200,15 +2206,28 @@ const App = {
     this._renderBatchNlTable();
   },
 
-  /** 开始批量自然语言化 */
+  /** 开始批量自然语言化（并发 1~20 可调，复用批量测试的线程池模式） */
   _startBatchNl: async function() {
     if (!this.batchNlSelected.size) { alert('未勾选任何题目'); return; }
+    const concurrency = Math.max(1, Math.min(parseInt(document.getElementById('batch-nl-concurrency')?.value || '5', 10) || 5, 20));
     try {
-      const res = await API.batchNlGenerate({ question_ids: [...this.batchNlSelected] });
+      const res = await API.batchNlGenerate({ question_ids: [...this.batchNlSelected], concurrency });
       if (!res.success) { alert(`启动失败: ${res.detail || '未知错误'}`); return; }
       this._resetBatchNlProgress();
       this._pollBatchNlStatus();
     } catch (e) { alert(`启动失败: ${e.message}`); }
+  },
+
+  /** 停止正在运行的批量自然语言化（剩余题目跳过，已生成的保留） */
+  _stopBatchNl: async function() {
+    if (!this._batchNlPolling) { alert('当前没有运行中的批量自然语言化任务'); return; }
+    if (!confirm('确认停止批量自然语言化？\n进行中的请求完成后终止，剩余题目跳过（已生成的结果保留）。')) return;
+    try {
+      const res = await API.batchNlStop();
+      if (!res.success) { alert(res.message || '停止失败'); return; }
+      const box = document.getElementById('batch-nl-log');
+      if (box) this._appendBatchLog('batch-nl-log', 'batch_nl', { items: [{ t: new Date().toTimeString().substring(0, 8), level: 'warn', msg: '⏹ 已请求停止，剩余题目将跳过' }], last_seq: this._batchLogSeqs['batch_nl'] || 0 });
+    } catch (e) { alert(`停止失败: ${e.message}`); }
   },
 
   /** 轮询批量自然语言化进度（含增量日志；skipLogReplay/resumeMode 见 _startBatchPoll） */
@@ -2228,6 +2247,8 @@ const App = {
     if (cur) cur.textContent = '尚未开始';
     const res = document.getElementById('batch-nl-result');
     if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+    const stopBtn = document.getElementById('btn-batch-nl-stop');
+    if (stopBtn) stopBtn.style.display = 'none';
     this._resetBatchLog('batch-nl-log', 'batch_nl');
   },
 
@@ -2238,6 +2259,8 @@ const App = {
     if (count) count.textContent = `${status.done_count || 0} / ${status.total || 0}`;
     const cur = document.getElementById('batch-nl-current');
     if (cur) cur.textContent = status.current || '';
+    const stopBtn = document.getElementById('btn-batch-nl-stop');
+    if (stopBtn) stopBtn.style.display = status.running ? '' : 'none';
   },
 
   _renderBatchNlResult: function(result) {
@@ -2246,18 +2269,21 @@ const App = {
     container.style.display = 'block';
     const s = result.summary || {};
     let html = '<div class="card"><div class="card-header">📋 批量自然语言化结果</div>';
-    html += `<div style="display:flex;gap:16px;padding:8px 0;font-size:var(--font-size-small)">
+    html += `<div style="display:flex;gap:16px;padding:8px 0;font-size:var(--font-size-small);flex-wrap:wrap">
       <div><strong>总数：</strong>${s.total}</div>
       <div style="color:var(--success-green)"><strong>生成成功：</strong>${s.generated}</div>
       <div style="color:var(--error-red)"><strong>失败：</strong>${s.failed}</div>
       <div style="color:var(--gray-4)"><strong>跳过：</strong>${s.skipped}</div>
+      ${s.concurrency ? `<div style="color:#0891b2"><strong>并发：</strong>${s.concurrency}</div>` : ''}
     </div>`;
+    if (s.stopped) html += `<div style="color:#d97706;font-size:var(--font-size-small);padding-bottom:6px">⏹ 任务被手动停止：剩余题目已跳过，已生成的结果保留</div>`;
     if (result.error) html += `<div style="color:var(--error-red);font-size:var(--font-size-small);padding-bottom:6px">${result.error}</div>`;
     if (result.details && result.details.length) {
       html += '<div style="max-height:220px;overflow-y:auto;font-size:var(--font-size-small)"><table class="table" style="width:100%"><thead><tr><th>题号</th><th>结果</th></tr></thead><tbody>';
       result.details.forEach(d => {
+        const outcome = d.ok ? '✅ 已生成' : (d.error === '已停止，跳过' ? '⏹ 已停止，跳过' : `❌ ${d.error || '失败'}`);
         html += `<tr><td>${d.question_id}</td>
-          <td style="color:${d.ok ? 'var(--success-green)' : 'var(--error-red)'}">${d.ok ? '✅ 已生成' : `❌ ${d.error || '失败'}`}</td></tr>`;
+          <td style="color:${d.ok ? 'var(--success-green)' : (d.error === '已停止，跳过' ? '#d97706' : 'var(--error-red)')}">${outcome}</td></tr>`;
       });
       html += '</tbody></table></div>';
     }
@@ -3035,7 +3061,7 @@ const App = {
   _closeEvalDrawer: function() {
     const d = document.getElementById('eval-drawer');
     if (!d) return;
-    d.style.right = '-560px';
+    d.style.right = '-720px';
     setTimeout(() => { d.style.display = 'none'; }, 260);
   },
 
@@ -3051,7 +3077,10 @@ const App = {
     // 对话轨迹：测试记录的 trace（按轮次嵌套，唯一对话源）
     const trace = (tr && Array.isArray(tr.trace)) ? tr.trace : [];
     const traceRounds = trace.filter(e => e.type === 'assistant').length;
-    const toolCount = trace.reduce((n, e) => n + (e.type === 'assistant' && Array.isArray(e.tools) ? e.tools.length : 0), 0);
+    // 双计数：优先读测试记录显式字段，旧记录由 trace 推导
+    // 模型调用 = assistant 轮数（每轮一次 LLM API 请求）；工具调用 = 各轮嵌套 tools 总和
+    const modelCalls = (tr && tr.model_calls != null) ? tr.model_calls : traceRounds;
+    const toolCount = (tr && tr.tool_calls != null) ? tr.tool_calls : trace.reduce((n, e) => n + (e.type === 'assistant' && Array.isArray(e.tools) ? e.tools.length : 0), 0);
     const planStatus = (tr && tr.plan_status) || '-';
     const dur = ss.duration_seconds != null ? Math.round(ss.duration_seconds) : (tr && tr.duration ? Math.round(tr.duration) : '-');
     const tokens = ss.total_tokens || (tr && tr.token_usage && tr.token_usage.total_tokens) || 0;
@@ -3070,7 +3099,8 @@ const App = {
         <div>时间：${(r.timestamp || '').replace('T', ' ').substring(0, 19)}</div>
         <div>Token：${tokens}</div>
         <div>耗时：${dur}s</div>
-        <div>工具调用：${toolCount} 次</div>
+        <div>🤖 模型调用：<strong>${modelCalls}</strong> 次</div>
+        <div>🔧 工具调用：<strong>${toolCount}</strong> 次</div>
         <div>plan_status：${this._escHtml(planStatus)}</div>
       </div>
     </div>`;
@@ -3120,14 +3150,26 @@ const App = {
       html += '</tbody></table></div></div>';
     }
 
-    // 问题清单
+    // 问题清单：按 verifier 核查体系分组展示（中文名（代码）— 判定详情，与 docs/verifier.md 一致）
     const issues = ver.issues || [];
     if (issues.length) {
-      html += `<div style="margin-bottom:12px">
-        <div style="font-weight:600;margin-bottom:4px">⚠️ 问题清单（${issues.length}）</div>
-        <div style="max-height:180px;overflow-y:auto;border:1px solid var(--gray-2);border-radius:8px;padding:8px 10px;background:#fffbeb;display:flex;flex-direction:column;gap:6px">`;
+      const groups = {};
       issues.forEach(it => {
-        html += `<div><span class="tag" style="background:#fee2e2;color:var(--error-red)">${this._escHtml(it.type)}</span> ${this._escHtml(it.detail || '')}</div>`;
+        const meta = this._ISSUE_META[it.type] || { label: it.type || '未知问题', group: '其他' };
+        (groups[meta.group] = groups[meta.group] || []).push({ it, meta });
+      });
+      const groupOrder = [...this._ISSUE_GROUPS, '其他'].filter(g => groups[g]);
+      html += `<div style="margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:4px">⚠️ 问题清单（${issues.length} 项）</div>
+        <div style="max-height:300px;overflow-y:auto;border:1px solid var(--gray-2);border-radius:8px;padding:8px 10px;background:#fffbeb">`;
+      groupOrder.forEach(g => {
+        html += `<div style="font-size:11px;font-weight:700;color:#92400e;margin:4px 0 3px;border-bottom:1px dashed #fcd34d;padding-bottom:2px">${this._escHtml(g)}（${groups[g].length}）</div>`;
+        groups[g].forEach(({ it, meta }) => {
+          html += `<div style="margin-bottom:3px;line-height:1.6">
+            <span class="tag" style="background:#fee2e2;color:var(--error-red)">${this._escHtml(meta.label)}（${this._escHtml(it.type || '')}）</span>
+            ${it.detail ? `<span style="color:var(--gray-6)">${this._escHtml(it.detail)}</span>` : ''}
+          </div>`;
+        });
       });
       html += '</div></div>';
     }
@@ -3586,21 +3628,36 @@ const App = {
     this._mmRender();
   },
 
+  /** verifier 判定问题中文名映射（与 docs/verifier.md 一致；group 用于问题清单分组展示） */
+  _ISSUE_META: {
+    'route_mismatch': { label: '路线不符标答', group: '路线与标答不符' },
+    'route_mismatch_train': { label: '车次不符', group: '路线与标答不符' },
+    'route_mismatch_route': { label: '购买区间不符', group: '路线与标答不符' },
+    'route_mismatch_seat': { label: '座位不符', group: '路线与标答不符' },
+    'route_mismatch_ride': { label: '乘坐区间不符', group: '路线与标答不符' },
+    'hallucination': { label: '余票不符', group: '余票与票价' },
+    'price_wrong': { label: '票价不符', group: '余票与票价' },
+    'price_missing': { label: '票价缺失', group: '余票与票价' },
+    'ticket_shortage': { label: '票数不足', group: '余票与票价' },
+    'route_discontinuity': { label: '乘坐不连续', group: '全程可达' },
+    'transfer_time_conflict': { label: '换乘时间冲突', group: '全程可达' },
+    'start_not_covered': { label: '未连接出发站', group: '全程可达' },
+    'end_not_covered': { label: '未连接到达站', group: '全程可达' },
+    'route_invalid': { label: '区间无效', group: '全程可达' },
+    'no_route': { label: '无法构成全程', group: '全程可达' },
+    'no_transfer_violated': { label: '违反不允许换乘', group: '行为约束' },
+    'no_short_buy_violated': { label: '违反不允许买短补长', group: '行为约束' },
+    'no_extra_violated': { label: '违反不允许额外购买', group: '行为约束' },
+    'missing_ride': { label: '缺乘坐区间', group: '格式与缺失' },
+    'invalid_seat': { label: '无效座位', group: '格式与缺失' },
+    'invalid_plan_item': { label: '无效条目', group: '格式与缺失' },
+  },
+  _ISSUE_GROUPS: ['路线与标答不符', '余票与票价', '全程可达', '行为约束', '格式与缺失'],
+
   /** 问题类型 → 中文名 */
   _mmIssueLabel: function(t) {
-    const map = {
-      'hallucination': '余票不符', 'price_wrong': '票价不符', 'route_mismatch': '路线不符标答',
-      'route_mismatch_train': '车次不符', 'route_mismatch_route': '购买区间不符',
-      'route_mismatch_seat': '座位不符', 'route_mismatch_ride': '乘坐区间不符',
-      'route_invalid': '区间无效', 'route_discontinuity': '乘坐不连续',
-      'transfer_time_conflict': '换乘时间冲突', 'start_not_covered': '未连接出发站',
-      'end_not_covered': '未连接到达站', 'no_route': '无法构成全程',
-      'no_transfer_violated': '违反不允许换乘', 'no_short_buy_violated': '违反不允买短补长',
-      'no_extra_violated': '违反不允额外购买',
-      'ticket_shortage': '票数不足', 'price_missing': '票价缺失',
-      'missing_ride': '缺乘坐区间', 'invalid_seat': '无效座位', 'invalid_plan_item': '无效条目',
-    };
-    return map[t] || t;
+    const m = this._ISSUE_META[t];
+    return m ? m.label : t;
   },
 
   _mmStatCard: function(value, label, color) {
@@ -3670,7 +3727,7 @@ const App = {
     const names = Object.keys(models);
     html += '<div class="card" style="margin-bottom:12px"><div class="card-header">📋 模型对比明细</div><div style="overflow-x:auto">';
     if (names.length) {
-      html += '<table class="table"><thead><tr><th>模型</th><th>测试数</th><th>通过率</th><th>错误率</th><th>未规划/空</th><th>平均分</th><th>平均Token</th><th>平均耗时</th><th>平均工具调用</th></tr></thead><tbody>';
+      html += '<table class="table"><thead><tr><th>模型</th><th>测试数</th><th>通过率</th><th>错误率</th><th>未规划/空</th><th>平均分</th><th>平均Token</th><th>平均耗时</th><th>平均模型调用</th><th>平均工具调用</th></tr></thead><tbody>';
       names.forEach(name => {
         const s = models[name];
         html += `<tr style="cursor:pointer" onclick="App._mmSelect('${this._escAttr(name)}')">
@@ -3682,6 +3739,7 @@ const App = {
           <td><strong>${s.avg_score}</strong></td>
           <td>${s.avg_tokens}</td>
           <td>${s.avg_duration}s</td>
+          <td>${s.avg_model_calls ?? '-'}</td>
           <td>${s.avg_tool_calls}</td>
         </tr>`;
       });
@@ -3710,14 +3768,15 @@ const App = {
     </div>`;
 
     // 指标卡
-    html += `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px">
+    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">
       ${this._mmStatCard(s.avg_score, '平均分')}
       ${this._mmStatCard(s.pass_rate + '%', '通过率', 'var(--success-green)')}
       ${this._mmStatCard(s.error_rate + '%', '错误率', 'var(--error-red)')}
       ${this._mmStatCard((s.no_plan_count || 0) + (s.empty_count || 0), '未规划/空方案')}
       ${this._mmStatCard(s.avg_tokens, '平均 Token')}
       ${this._mmStatCard(s.avg_duration + 's', '平均耗时')}
-      ${this._mmStatCard(s.avg_tool_calls, '平均工具调用')}
+      ${this._mmStatCard(s.avg_model_calls ?? '-', '平均模型调用', '#2563eb')}
+      ${this._mmStatCard(s.avg_tool_calls, '平均工具调用', '#d97706')}
       ${this._mmStatCard(s.completion_rate + '%', '完成率')}
     </div>`;
 
@@ -3744,7 +3803,7 @@ const App = {
     // 逐题明细表
     html += `<div class="card"><div class="card-header">📋 逐题明细（${records.length} 条）</div><div style="overflow-x:auto;max-height:420px;overflow-y:auto">`;
     if (records.length) {
-      html += '<table class="table" style="font-size:var(--font-size-small)"><thead><tr><th>题号</th><th>类型</th><th>判定</th><th>得分</th><th>问题/幻觉</th><th>Token</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+      html += '<table class="table" style="font-size:var(--font-size-small)"><thead><tr><th>题号</th><th>类型</th><th>判定</th><th>得分</th><th>问题/幻觉</th><th>模型/工具调用</th><th>Token</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr></thead><tbody>';
       records.forEach(it => {
         const ts = (it.timestamp || '').replace('T', ' ').substring(0, 19);
         html += `<tr>
@@ -3753,6 +3812,7 @@ const App = {
           <td>${this._evalVerdictBadge(it.verdict)}</td>
           <td><strong>${it.score}</strong></td>
           <td>${it.issue_count}${it.hallucination_count ? ` <span style="color:var(--error-red)">(${it.hallucination_count})</span>` : ''}</td>
+          <td>${it.model_calls ?? '-'} / ${it.tool_calls ?? '-'}</td>
           <td>${it.total_tokens}</td>
           <td>${it.duration_seconds != null ? Math.round(it.duration_seconds) : '-'}</td>
           <td style="color:var(--gray-4)">${ts}</td>

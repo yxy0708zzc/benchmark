@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-08-30T08:23:29.036581",
+  "test_file": "20260830_082238_mimo-v2.5_2_B20260830_081842_0004.json",
+  "question_id": "2_B20260830_081842_0004",
+  "model_name": "mimo-v2.5",
+  "user_input": "从宿迁到汉中，我们五个人想出发，座位就选那种经济实惠的，别太折腾，综合考虑看看有什么合适的安排吧。",
+  "score_summary": {
+    "hallucination_count": 0,
+    "issue_count": 0,
+    "total_tokens": 11489,
+    "duration_seconds": 118.760097,
+    "tool_calls": []
+  },
+  "verification": {
+    "total_items": 0,
+    "correct_items": 0,
+    "issue_count": 0,
+    "hallucination_count": 0,
+    "price_issue_count": 0,
+    "invalid_plan_count": 0,
+    "route_mismatch_count": 0,
+    "ticket_shortage_count": 0,
+    "missing_ride_count": 0,
+    "question_mode": "选择性",
+    "verdict": "no_plan",
+    "results": [],
+    "issues": [],
+    "summary": "⚠️ 未检测到可核查的购票段（final_plan 缺失或全为无效条目）"
+  },
+  "human_confirmed": false,
+  "human_notes": "批量测评自动生成",
+  "status": "success"
+}

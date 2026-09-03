@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-08-30T08:23:29.039488",
+  "test_file": "20260830_082229_mimo-v2.5_2_B20260830_081842_0001.json",
+  "question_id": "2_B20260830_081842_0001",
+  "model_name": "mimo-v2.5",
+  "user_input": "哎，我们六个人从新乡东去株洲西，想找个比普通座舒服些的座位，大概一等座那种级别，综合考虑一下，看看有没有合适的票？",
+  "score_summary": {
+    "hallucination_count": 0,
+    "issue_count": 0,
+    "total_tokens": 15348,
+    "duration_seconds": 109.566847,
+    "tool_calls": []
+  },
+  "verification": {
+    "total_items": 0,
+    "correct_items": 0,
+    "issue_count": 0,
+    "hallucination_count": 0,
+    "price_issue_count": 0,
+    "invalid_plan_count": 0,
+    "route_mismatch_count": 0,
+    "ticket_shortage_count": 0,
+    "missing_ride_count": 0,
+    "question_mode": "选择性",
+    "verdict": "no_plan",
+    "results": [],
+    "issues": [],
+    "summary": "⚠️ 未检测到可核查的购票段（final_plan 缺失或全为无效条目）"
+  },
+  "human_confirmed": false,
+  "human_notes": "批量测评自动生成",
+  "status": "success"
+}
