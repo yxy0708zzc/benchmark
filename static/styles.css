@@ -744,3 +744,91 @@ input[type="range"]::-webkit-slider-thumb {
   height: 16px;
   accent-color: var(--brand-blue);
 }
+
+/* ============================================================
+   深色模式（追加层，不修改任何既有规则）
+   开关：html.dark-mode；持久化：localStorage["bm-theme"]
+   说明：--white 兼作彩色按钮文字色，故不翻转，改为按组件覆盖表面色；
+        内联硬编码颜色用 [style*=...] 选择器 + !important 重映射
+   ============================================================ */
+html.dark-mode {
+  color-scheme: dark;
+}
+
+html.dark-mode body {
+  --gray-0: #12151B;            /* 页面底色 */
+  --gray-1: #1A1E26;            /* 浅表面/输入框 */
+  --gray-2: #2A2F3A;            /* 边框 */
+  --gray-3: #3D434F;
+  --gray-4: #8B909A;            /* 弱文字 */
+  --gray-5: #C6CAD2;            /* 正文 */
+  --gray-6: #E8EAEF;            /* 标题 */
+  --brand-blue: #5B8DFF;
+  --brand-blue-hover: #7BA3FF;
+  --brand-blue-light: #1C2A4A;
+  --shadow-hover: 0 2px 8px rgba(0,0,0,.4);
+  --shadow-float: 0 4px 20px rgba(0,0,0,.5);
+  --shadow-modal: 0 12px 48px rgba(0,0,0,.6);
+  transition: background-color .25s ease, color .25s ease;
+}
+
+/* 原本 var(--white) 背景的表面组件 → 深色表面 */
+html.dark-mode .topbar,
+html.dark-mode .navbar,
+html.dark-mode .footer,
+html.dark-mode .card,
+html.dark-mode .stat-card,
+html.dark-mode .modal,
+html.dark-mode .matrix-table .editable-cell,
+html.dark-mode .input,
+html.dark-mode .select,
+html.dark-mode textarea {
+  background-color: #171A21;
+}
+
+/* btn-secondary（白底蓝字）→ 深底亮字 */
+html.dark-mode .btn-secondary {
+  background: #1E232C;
+  color: #7BA3FF;
+  border-color: #2A2F3A;
+}
+html.dark-mode .btn-secondary:hover {
+  background: #242A35;
+}
+
+/* ---- 内联硬编码背景重映射（顺序敏感：#fff 必须在 #fffbeb 等长串之前） ---- */
+html.dark-mode [style*="background:#fff"] { background: #171A21 !important; }
+
+/* 右侧抽屉：JS 修改 display/right 后浏览器会重序列化整个 style 属性（#fff → rgb(255,255,255)），
+   属性子串选择器失配 → 直接按 ID 覆盖，并兼容序列化后的 rgb 形式 */
+html.dark-mode #eval-drawer,
+html.dark-mode #trace-drawer {
+  background: #171A21 !important;
+  box-shadow: -8px 0 24px rgba(0,0,0,.5) !important;
+}
+html.dark-mode [style*="background: rgb(255, 255, 255)"],
+html.dark-mode [style*="background:rgb(255, 255, 255)"] { background: #171A21 !important; }
+html.dark-mode [style*="background:#fffbeb"] { background: #332916 !important; }
+html.dark-mode [style*="background:#fefce8"] { background: #332916 !important; }
+html.dark-mode [style*="background:#fef2f2"] { background: #332024 !important; }
+html.dark-mode [style*="background:#fee2e2"] { background: #3A2226 !important; }
+html.dark-mode [style*="background:#fafafa"] { background: #1A1E26 !important; }
+html.dark-mode [style*="background:#f3f4f6"] { background: #22262E !important; }
+html.dark-mode [style*="background:#f5f3ff"] { background: #26203A !important; }
+html.dark-mode [style*="background:#eff6ff"] { background: #1B2433 !important; }
+html.dark-mode [style*="background:#eef2ff"] { background: #1B2433 !important; }
+html.dark-mode [style*="background:#ecfdf5"] { background: #14271E !important; }
+html.dark-mode [style*="background:#f0fdf4"] { background: #14271E !important; }
+
+/* ---- 内联硬编码文字色重映射（暗底上提亮） ---- */
+html.dark-mode [style*="color:#4f46e5"] { color: #9BA3FF !important; }
+html.dark-mode [style*="color:#059669"] { color: #34D399 !important; }
+html.dark-mode [style*="color:#16a34a"] { color: #3DD68C !important; }
+html.dark-mode [style*="color:#dc2626"] { color: #F2555A !important; }
+html.dark-mode [style*="color:#d97706"] { color: #F0A93C !important; }
+html.dark-mode [style*="color:#ca8a04"] { color: #E5C04B !important; }
+html.dark-mode [style*="color:#92400e"] { color: #FCD34D !important; }
+html.dark-mode [style*="color:#6b7280"] { color: #9CA3AF !important; }
+html.dark-mode [style*="color:#7c3aed"] { color: #A78BFA !important; }
+html.dark-mode [style*="color:#2563eb"] { color: #6B95FF !important; }
+html.dark-mode [style*="color:#0891b2"] { color: #2CC5D6 !important; }

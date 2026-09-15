@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 主应用逻辑模块
  * 处理导航、全局状态、各页面初始化
  */
@@ -53,8 +53,6 @@ const App = {
     const pageMap = {
       '/': 'test',
       '/index.html': 'test',
-      '/auto_question': 'auto-question',
-      '/selective_question': 'selective-question',
       '/batch_question': 'batch-question',
       '/batch_nl_question': 'batch-nl-question',
       '/batch_test_question': 'batch-test-question',
@@ -97,8 +95,6 @@ const App = {
       const urlMap = {
         'test': '/',
         'edit-question': '/edit_question',
-        'auto-question': '/auto_question',
-        'selective-question': '/selective_question',
         'batch-question': '/batch_question',
         'batch-nl-question': '/batch_nl_question',
         'batch-test-question': '/batch_test_question',
@@ -120,12 +116,6 @@ const App = {
           break;
         case 'edit-question':
           this.initEditQuestion();
-          break;
-        case 'auto-question':
-          this.initAutoQuestion();
-          break;
-        case 'selective-question':
-          this.initSelectiveQuestion();
           break;
         case 'batch-question':
           this.initBatchQuestion();
@@ -760,7 +750,7 @@ const App = {
       sorted.forEach(q => {
         const opt = document.createElement('option');
         opt.value = q.question_id;
-        opt.textContent = `${q.question_id} (${q.status})`;
+        opt.textContent = q.question_id;  // status 概念已移除，不再拼接状态后缀
         // 如果之前已选中某个题目且该题仍存在，恢复选中
         if (this.currentQuestionId && q.question_id === this.currentQuestionId) {
           opt.selected = true;
@@ -1107,550 +1097,6 @@ const App = {
   // ============================================================
   // auto出题器初始化
   // ============================================================
-  initAutoQuestion: function() {
-    // 每次进入该页：需求人数随机 3~6
-    this._randomPeopleInto('auto-people-count');
-    const generateBtn = document.getElementById('btn-generate');
-    if (generateBtn) {
-      generateBtn.onclick = () => this._onAutoGenerate();
-    }
-
-    const confirmBtn = document.getElementById('btn-confirm-generate');
-    if (confirmBtn) {
-      confirmBtn.onclick = () => this._confirmAutoGenerate();
-    }
-
-    const regenerateBtn = document.getElementById('btn-regenerate');
-    if (regenerateBtn) {
-      regenerateBtn.onclick = () => this._reAutoGenerate();
-    }
-
-    const swapBtn = document.getElementById('btn-swap');
-    if (swapBtn) {
-      swapBtn.onclick = () => this._swapAutoSolution();
-    }
-
-    // 题型切换时显示/隐藏混合配置
-    const typeSelect = document.getElementById('question-type');
-    if (typeSelect) {
-      typeSelect.onchange = function() {
-        const mixedConfig = document.getElementById('mixed-config');
-        if (mixedConfig) {
-          const show = this.value === 'mixed';
-          mixedConfig.style.display = show ? 'block' : 'none';
-          if (show) App._renderSegmentPlans('auto');
-        }
-      };
-    }
-
-    // 换乘次数变化时重新渲染段方案
-    document.addEventListener('change', function(e) {
-      if (e.target.id === 'auto-mixed-transfers') {
-        App._renderSegmentPlans('auto');
-      }
-    });
-
-    // 出发站/到达站输入框回车触发生成
-    ['auto-from-station', 'auto-to-station'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            document.getElementById('btn-generate')?.click();
-          }
-        });
-      }
-    });
-
-    // 伪干扰密度滑块联动
-    const aiDensitySlider = document.getElementById('auto-interference-density');
-    const aiDensityLabel = document.getElementById('auto-interference-density-label');
-    if (aiDensitySlider && aiDensityLabel) {
-      aiDensitySlider.oninput = function() {
-        aiDensityLabel.textContent = parseFloat((this.value * 100).toFixed(3)) + '%';
-      };
-    }
-    // 伪干扰开关：关闭时淡化密度配置
-    const aiCheckbox = document.getElementById('auto-fake-interference');
-    if (aiCheckbox) {
-      aiCheckbox.onchange = function() {
-        const cfg = document.getElementById('auto-fake-interference-config');
-        if (cfg) cfg.style.opacity = this.checked ? '1' : '0.4';
-      };
-    }
-  },
-
-  /** 渲染混合题段方案下拉框 */
-  _renderSegmentPlans: function(prefix) {
-    const transfers = parseInt(document.getElementById(prefix + '-mixed-transfers')?.value || '1', 10);
-    const container = document.getElementById(prefix + '-mixed-segment-plans');
-    if (!container) return;
-    const plans = ['direct', 'short_buy', 'extra_front', 'extra_rear'];
-    const labels = {direct: '直达', short_buy: '买短补长', extra_front: '额外(前)', extra_rear: '额外(后)'};
-    let html = '';
-    for (let i = 0; i <= transfers; i++) {
-      html += `<div><label style="font-weight:500;font-size:12px">段 ${i+1} 方案:</label>
-        <select class="select" id="${prefix}-seg-${i}" style="margin-left:8px">`;
-      plans.forEach(p => {
-        html += `<option value="${p}">${labels[p]}</option>`;
-      });
-      html += '</select></div>';
-    }
-    container.innerHTML = html;
-  },
-
-  /** auto出题 */
-  _onAutoGenerate: async function() {
-    const form = {
-      question_type: document.getElementById('question-type')?.value || 'direct',
-      mode: 'existence',
-      from_station_id: document.getElementById('auto-from-station')?.value.trim(),
-      to_station_id: document.getElementById('auto-to-station')?.value.trim(),
-      people_count: parseInt(document.getElementById('auto-people-count')?.value || '2', 10),
-      seat_type: document.getElementById('auto-seat-type')?.value || 'class2',
-      random_tickets: document.getElementById('auto-fake-interference')?.checked ?? true,
-      fake_interference: document.getElementById('auto-fake-interference')?.checked ?? true,
-      interference_density: parseFloat(document.getElementById('auto-interference-density')?.value || '0.02'),
-      custom_qid: document.getElementById('output-qid')?.value.trim() || '',
-    };
-
-    // 题目名必填
-    if (!form.custom_qid) {
-      alert('请填写题目名');
-      return;
-    }
-
-    // 混合题型
-    if (form.question_type === 'mixed') {
-      form.transfers = parseInt(document.getElementById('auto-mixed-transfers')?.value || '1', 10);
-      form.segment_plans = [];
-      for (let i = 0; i <= form.transfers; i++) {
-        const sel = document.getElementById('auto-seg-' + i);
-        form.segment_plans.push(sel ? sel.value : 'direct');
-      }
-      if (form.transfers < 1) {
-        alert('换乘数至少为 1');
-        return;
-      }
-    }
-
-    if (!form.from_station_id || !form.to_station_id) {
-      alert('请填写出发站和到达站电报码');
-      return;
-    }
-
-    const previewContainer = document.getElementById('preview-container');
-    if (previewContainer) {
-      previewContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-4)">正在生成...</div>';
-    }
-
-    try {
-      const result = await API.autoGenerate(form);
-      if (result.success) {
-        this._showAutoPreview(result);
-      } else {
-        alert(`生成失败: ${result.detail || '未知错误'}`);
-        if (previewContainer) previewContainer.innerHTML = '';
-      }
-    } catch (e) {
-      alert(`生成失败: ${e.message}`);
-      if (previewContainer) previewContainer.innerHTML = '';
-    }
-  },
-
-  /** 显示 auto 出题预览（存在性自动出两份：0_无伪干扰 / 1_有伪干扰） */
-  _showAutoPreview: function(data) {
-    const container = document.getElementById('preview-container');
-    if (!container) return;
-
-    const questions = data.questions || [];
-    if (questions.length === 0) return;
-
-    // 每份题渲染一张卡片
-    const cardsHtml = questions.map(q => {
-      const preview = q.preview || {};
-      const qid = q.question_id || '';
-      const isFake = qid.startsWith('1_');
-      const modeLabel = isFake ? '有伪干扰' : '无伪干扰';
-      const modeColor = isFake ? '#7c3aed' : '#2563eb';
-
-      let pathsHtml = '';
-      if (preview.solution_segments && preview.solution_segments.length > 0) {
-        preview.solution_segments.forEach(seg => {
-          pathsHtml += `<div>✅ ${seg.train_num}: ${seg.from}→${seg.to} (${seg.tickets}张 ${seg.seat_type})</div>`;
-        });
-      }
-      const pathDesc = preview.path_description || '';
-
-      return `
-      <div class="card">
-        <div class="card-header">${qid} <span class="tag" style="background:#f5f3ff;color:${modeColor};border-radius:8px">${modeLabel}</span></div>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div><strong>题型：</strong>${preview.question_type}</div>
-          <div><strong>需求人数：</strong>${document.getElementById('auto-people-count')?.value || '2'} 人</div>
-          <div><strong>答案票等级：</strong>${document.getElementById('auto-seat-type')?.value || 'class2'}</div>
-          <div><strong>目标区间：</strong>${preview.target_section}</div>
-          <div><strong>路径描述：</strong>${pathDesc}</div>
-          <div><strong>合法路径（有票段）：</strong></div>
-          <div style="padding-left:20px">${pathsHtml || '<div style="color:var(--gray-4)">无</div>'}</div>
-          <div style="color:var(--success-green);font-weight:600">✅ 有合法解</div>
-        </div>
-      </div>`;
-    }).join('<div style="height:12px"></div>');
-
-    container.innerHTML = cardsHtml;
-
-    // 显示确认按钮和重新出题按钮（存所有题名，确认时循环保存）
-    const confirmBtn = document.getElementById('btn-confirm-generate');
-    if (confirmBtn) {
-      confirmBtn.style.display = 'inline-flex';
-      confirmBtn.dataset.questionIds = questions.map(q => q.question_id).join(',');
-      confirmBtn.dataset.questionType = (questions[0].preview || {}).question_type || '';
-      confirmBtn.dataset.answer = (questions[0].preview || {}).path_description || '';
-    }
-    const reBtn = document.getElementById('btn-regenerate');
-    if (reBtn) {
-      reBtn.style.display = 'inline-flex';
-      reBtn.dataset.questionIds = questions.map(q => q.question_id).join(',');
-    }
-    const swapBtn = document.getElementById('btn-swap');
-    if (swapBtn) {
-      const qtype = (questions[0].preview || {}).question_type;
-      const isSwapable = qtype === 'transfer' || qtype === 'mixed';
-      swapBtn.style.display = isSwapable ? 'inline-flex' : 'none';
-      if (isSwapable) swapBtn.dataset.questionIds = questions.map(q => q.question_id).join(',');
-    }
-  },
-
-  /** 确认生成 */
-  _confirmAutoGenerate: async function() {
-    const confirmBtn = document.getElementById('btn-confirm-generate');
-    if (!confirmBtn || !confirmBtn.dataset.questionIds) return;
-
-    // 存在性一次出两份（0_无伪干扰 / 1_有伪干扰），循环确认保存
-    const questionIds = (confirmBtn.dataset.questionIds || '').split(',').filter(Boolean);
-    for (const questionId of questionIds) {
-      try {
-        const result = await API.confirmAutoGenerate({
-          question_id: questionId,
-          question_type: confirmBtn.dataset.questionType || '',
-          answer: confirmBtn.dataset.answer || '',
-        });
-        if (!result.success) {
-          alert(`确认失败: ${result.detail || '未知错误'}`);
-          return;
-        }
-      } catch (e) {
-        alert(`确认失败: ${e.message}`);
-        return;
-      }
-    }
-    // 全部保存成功，清空预览，回到输入状态
-    confirmBtn.style.display = 'none';
-    const reBtn = document.getElementById('btn-regenerate');
-    if (reBtn) reBtn.style.display = 'none';
-    const swapBtn = document.getElementById('btn-swap');
-    if (swapBtn) swapBtn.style.display = 'none';
-    const container = document.getElementById('preview-container');
-    if (container) container.innerHTML = '';
-  },
-
-  /** 重新出题：保留表单输入，清除上次预览缓存并重新生成 */
-  _reAutoGenerate: async function() {
-    // 重新出题时需求人数随机 3~6
-    this._randomPeopleInto('auto-people-count');
-    const reBtn = document.getElementById('btn-regenerate');
-    const questionIds = (reBtn?.dataset.questionIds || reBtn?.dataset.questionId || '').split(',').filter(Boolean);
-    // 清除后端预览缓存（存在性一次可能有多份）
-    for (const questionId of questionIds) {
-      try {
-        await API.clearAutoGenerate(questionId);
-      } catch (e) {
-        console.error('清除预览缓存失败:', e);
-      }
-    }
-    // 重置预览区域（保留表单输入不变）
-    const container = document.getElementById('preview-container');
-    if (container) {
-      container.innerHTML = '<div style="text-align:center;color:var(--gray-4);padding:60px 20px">正在重新出题...</div>';
-    }
-    const confirmBtn = document.getElementById('btn-confirm-generate');
-    if (confirmBtn) confirmBtn.style.display = 'none';
-    if (reBtn) reBtn.style.display = 'none';
-    const swapBtn = document.getElementById('btn-swap');
-    if (swapBtn) swapBtn.style.display = 'none';
-    // 用现有表单参数重新生成
-    await this._onAutoGenerate();
-  },
-
-  /** 换方案（存在性）：不变第一程车，换中间站/换乘车次；0_/1_ 同步换 */
-  _swapAutoSolution: async function() {
-    const swapBtn = document.getElementById('btn-swap');
-    const questionIds = (swapBtn?.dataset.questionIds || swapBtn?.dataset.questionId || '').split(',').filter(Boolean);
-    if (!questionIds.length) return;
-    const qid = questionIds[0]; // 0_ 与 1_ 同车，后端会同步两者
-    try {
-      const res = await API.swapAutoGenerate(qid);
-      if (!res.success) { alert(`换方案失败: ${res.detail || '未知错误'}`); return; }
-      this._showAutoPreview({ questions: res.questions });
-    } catch (e) { alert(`换方案失败: ${e.message}`); }
-  },
-
-  // ============================================================
-  // 选择性问题出题初始化
-  // ============================================================
-  initSelectiveQuestion: function() {
-    // 每次进入该页：需求人数随机 3~6
-    this._randomPeopleInto('sel-people-count');
-    const generateBtn = document.getElementById('btn-sel-generate');
-    if (generateBtn) {
-      generateBtn.onclick = () => this._onSelectiveGenerate();
-    }
-
-    const confirmBtn = document.getElementById('btn-sel-confirm');
-    if (confirmBtn) {
-      confirmBtn.onclick = () => this._confirmSelectiveGenerate();
-    }
-
-    const regenerateBtn = document.getElementById('btn-sel-regenerate');
-    if (regenerateBtn) {
-      regenerateBtn.onclick = () => this._reSelectiveGenerate();
-    }
-
-    const swapBtn = document.getElementById('btn-sel-swap');
-    if (swapBtn) {
-      swapBtn.onclick = () => this._swapSelectiveSolution();
-    }
-
-    // 干扰密度滑块联动
-    const densitySlider = document.getElementById('sel-density');
-    const densityLabel = document.getElementById('sel-density-label');
-    if (densitySlider && densityLabel) {
-      densitySlider.oninput = function() {
-        densityLabel.textContent = parseFloat((this.value * 100).toFixed(3)) + '%';
-      };
-    }
-
-    // 选择性题题型由后端按行为约束自动推导（不允许换乘→买短补长；否则→换乘），前端不再需要题型选择
-
-    // 回车触发
-    ['sel-from-station', 'sel-to-station'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            document.getElementById('btn-sel-generate')?.click();
-          }
-        });
-      }
-    });
-  },
-
-  /** 收集选择性表单勾选的行为约束（新约束键：不允许换乘 / 不允许买短补长与额外购买） */
-  _selectedConstraints: function() {
-    const out = [];
-    if (document.getElementById('sel-const-no-transfer')?.checked) out.push('no_transfer');
-    if (document.getElementById('sel-const-no-short-buy-extra')?.checked) out.push('no_short_buy_extra');
-    return out;
-  },
-
-  /** 收集选择性表单的评判标准（单选必选，默认综合） */
-  _selectedCriterion: function() {
-    const checked = document.querySelector('input[name="sel-criterion"]:checked');
-    return checked ? checked.value : 'comprehensive';
-  },
-
-  /** 人数随机 3~6：进入页面 / 重新出题时写入对应人数输入框（仍可手动修改） */
-  _randomPeopleInto: function(elementId) {
-    const el = document.getElementById(elementId);
-    if (el) {
-      el.value = Math.floor(Math.random() * 4) + 3; // 3 ~ 6
-    }
-  },
-
-  /** 选择性出题 */
-  _onSelectiveGenerate: async function() {
-    const form = {
-      mode: 'selective',
-      from_station_id: document.getElementById('sel-from-station')?.value.trim(),
-      to_station_id: document.getElementById('sel-to-station')?.value.trim(),
-      random_tickets: true,
-      fake_interference: false,
-      interference_density: parseFloat(document.getElementById('sel-density')?.value || '0.02'),
-      people_count: parseInt(document.getElementById('sel-people-count')?.value || '2', 10),
-      seat_type: document.getElementById('sel-seat-type')?.value || 'class2',
-      criterion: this._selectedCriterion(),
-      custom_qid: document.getElementById('sel-output-qid')?.value.trim() || '',
-      constraints: this._selectedConstraints(),
-    };
-
-    // 题目名必填
-    if (!form.custom_qid) {
-      alert('请填写题目名');
-      return;
-    }
-
-    if (!form.from_station_id || !form.to_station_id) {
-      alert('请填写出发站和到达站');
-      return;
-    }
-
-    const previewContainer = document.getElementById('sel-preview-container');
-    if (previewContainer) {
-      previewContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-4)">正在生成...</div>';
-    }
-
-    try {
-      const result = await API.autoGenerate(form);
-      if (result.success) {
-        this._showSelectivePreview(result);
-      } else {
-        alert(`生成失败: ${result.detail || '未知错误'}`);
-        if (previewContainer) previewContainer.innerHTML = '';
-      }
-    } catch (e) {
-      alert(`生成失败: ${e.message}`);
-      if (previewContainer) previewContainer.innerHTML = '';
-    }
-  },
-
-  /** 显示选择性问题预览（选择性出一份，前缀 2_） */
-  _showSelectivePreview: function(data) {
-    const container = document.getElementById('sel-preview-container');
-    if (!container) return;
-
-    const questions = data.questions || [];
-    const first = questions[0] || {};
-    const preview = first.preview || {};
-    const qid = first.question_id || '';
-    const density = document.getElementById('sel-density')?.value || '0.02';
-
-    let pathsHtml = '';
-    if (preview.solution_segments && preview.solution_segments.length > 0) {
-      preview.solution_segments.forEach(seg => {
-        pathsHtml += `<div>✅ ${seg.train_num}: ${seg.from}→${seg.to} (${seg.tickets}张 ${seg.seat_type})</div>`;
-      });
-    }
-
-    const pathDesc = preview.path_description || '';
-
-    container.innerHTML = `
-      <div class="card">
-        <div class="card-header">预览：即将生成题目</div>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div><strong>题目名：</strong>${qid}</div>
-          <div><strong>题型：</strong>${preview.question_type}</div>
-          <div><strong>需求人数：</strong>${document.getElementById('sel-people-count')?.value || '2'} 人</div>
-          <div><strong>答案票等级：</strong>${document.getElementById('sel-seat-type')?.value || 'class2'}</div>
-          <div><strong>干扰密度：</strong>${Math.round(parseFloat(density) * 100)}%</div>
-          <div><strong>评判标准：</strong>${CRITERION_LABELS[preview.criterion] || preview.criterion || '综合考虑'}</div>
-          <div><strong>行为约束：</strong>${(preview.constraints && preview.constraints.length) ? preview.constraints.map(c => CONSTRAINT_LABELS[c] || c).join('、') : '无'}</div>
-          <div><strong>目标区间：</strong>${preview.target_section}</div>
-          <div><strong>路径描述：</strong>${pathDesc}</div>
-          <div><strong>合法解（有票段）：</strong></div>
-          <div style="padding-left:20px">${pathsHtml || '<div style="color:var(--gray-4)">无</div>'}</div>
-          <div style="color:var(--success-green);font-weight:600">✅ 有合法解</div>
-        </div>
-      </div>
-    `;
-
-    const confirmBtn = document.getElementById('btn-sel-confirm');
-    if (confirmBtn) {
-      confirmBtn.style.display = 'inline-flex';
-      confirmBtn.dataset.questionId = qid;
-      confirmBtn.dataset.questionType = preview.question_type || '';
-      confirmBtn.dataset.answer = preview.path_description || '';
-      confirmBtn.dataset.interference = 'true';
-      confirmBtn.dataset.density = document.getElementById('sel-density')?.value || '0.02';
-    }
-    const reBtn = document.getElementById('btn-sel-regenerate');
-    if (reBtn) {
-      reBtn.style.display = 'inline-flex';
-      reBtn.dataset.questionId = qid;
-    }
-    const swapBtn = document.getElementById('btn-sel-swap');
-    if (swapBtn) {
-      const qtype = preview.question_type;
-      const isSwapable = qtype === 'transfer' || qtype === 'mixed';
-      swapBtn.style.display = isSwapable ? 'inline-flex' : 'none';
-      if (isSwapable) swapBtn.dataset.questionId = qid;
-    }
-  },
-
-  /** 确认生成选择性题目 */
-  _confirmSelectiveGenerate: async function() {
-    const confirmBtn = document.getElementById('btn-sel-confirm');
-    if (!confirmBtn || !confirmBtn.dataset.questionId) return;
-
-    const questionId = confirmBtn.dataset.questionId;
-    try {
-      const result = await API.confirmAutoGenerate({
-        question_id: questionId,
-        question_type: confirmBtn.dataset.questionType || '',
-        answer: confirmBtn.dataset.answer || '',
-        interference: confirmBtn.dataset.interference === 'true',
-        interference_density: parseFloat(confirmBtn.dataset.density || '0'),
-      });
-      if (result.success) {
-        // 清空预览，回到输入状态
-        confirmBtn.style.display = 'none';
-        const reBtn = document.getElementById('btn-sel-regenerate');
-        if (reBtn) reBtn.style.display = 'none';
-        const swapBtn = document.getElementById('btn-sel-swap');
-        if (swapBtn) swapBtn.style.display = 'none';
-        const container = document.getElementById('sel-preview-container');
-        if (container) container.innerHTML = '';
-      } else {
-        alert(`确认失败: ${result.detail || '未知错误'}`);
-      }
-    } catch (e) {
-      alert(`确认失败: ${e.message}`);
-    }
-  },
-
-  /** 重新出题（选择性）：保留表单输入，清除上次预览缓存并重新生成 */
-  _reSelectiveGenerate: async function() {
-    // 重新出题时需求人数随机 3~6
-    this._randomPeopleInto('sel-people-count');
-    const reBtn = document.getElementById('btn-sel-regenerate');
-    const questionIds = (reBtn?.dataset.questionIds || reBtn?.dataset.questionId || '').split(',').filter(Boolean);
-    // 清除后端预览缓存
-    for (const questionId of questionIds) {
-      try {
-        await API.clearAutoGenerate(questionId);
-      } catch (e) {
-        console.error('清除预览缓存失败:', e);
-      }
-    }
-    // 重置预览区域（保留表单输入不变）
-    const container = document.getElementById('sel-preview-container');
-    if (container) {
-      container.innerHTML = '<div style="text-align:center;color:var(--gray-4);padding:60px 20px">正在重新出题...</div>';
-    }
-    const confirmBtn = document.getElementById('btn-sel-confirm');
-    if (confirmBtn) confirmBtn.style.display = 'none';
-    if (reBtn) reBtn.style.display = 'none';
-    const swapBtn = document.getElementById('btn-sel-swap');
-    if (swapBtn) swapBtn.style.display = 'none';
-    // 用现有表单参数重新生成
-    await this._onSelectiveGenerate();
-  },
-
-  /** 换方案（选择性）：不变第一程车，换中间站/换乘车次 */
-  _swapSelectiveSolution: async function() {
-    const swapBtn = document.getElementById('btn-sel-swap');
-    const qid = swapBtn?.dataset.questionId || '';
-    if (!qid) return;
-    try {
-      const res = await API.swapAutoGenerate(qid);
-      if (!res.success) { alert(`换方案失败: ${res.detail || '未知错误'}`); return; }
-      this._showSelectivePreview({ questions: res.questions });
-    } catch (e) { alert(`换方案失败: ${e.message}`); }
-  },
-
-  // ============================================================
   // 批量出题
   // ============================================================
   batchDistribution: null,   // 解析后的分布表 [{category,name,has_interference,no_interference,question_type,transfers,segment_plans}]
@@ -1672,8 +1118,8 @@ const App = {
     const btnReport = document.getElementById('btn-batch-report');
     if (btnReport) btnReport.onclick = () => this._downloadBatchReport();
 
-    // 干扰密度滑块联动（伪干扰=存在性 / 真干扰=选择性）
-    [['batch-density-fake', 'batch-density-fake-label'], ['batch-density-real', 'batch-density-real-label']].forEach(([sliderId, labelId]) => {
+    // 密度滑块联动（干扰=存在性 1_ / 随机票=选择性 2_）
+    [['batch-density-interference', 'batch-density-interference-label'], ['batch-density-random', 'batch-density-random-label']].forEach(([sliderId, labelId]) => {
       const slider = document.getElementById(sliderId);
       const label = document.getElementById(labelId);
       if (slider && label) {
@@ -1904,9 +1350,8 @@ const App = {
         class1: parseFloat(document.getElementById('batch-seat-class1')?.value || '0') || 0,
         class2: parseFloat(document.getElementById('batch-seat-class2')?.value || '0') || 0,
       },
-      interference_density: parseFloat(document.getElementById('batch-density-fake')?.value || '0.02'),
-      fake_interference_density: parseFloat(document.getElementById('batch-density-fake')?.value || '0.02'),
-      real_interference_density: parseFloat(document.getElementById('batch-density-real')?.value || '0.02'),
+      interference_density: parseFloat(document.getElementById('batch-density-interference')?.value || '0.02'),
+      random_tickets_density: parseFloat(document.getElementById('batch-density-random')?.value || '0.02'),
       max_retries: parseInt(document.getElementById('batch-max-retries')?.value || '40', 10) || 40,
     };
     // 注：批量自然语言化已独立成框（/api/batch_nl/*），不再内嵌于批量出题请求
@@ -2602,7 +2047,7 @@ const App = {
       sorted.forEach(q => {
         const qtypeLabel = q.question_type ? this._questionTypeLabel(q.question_type) : (q.type || '-');
         const modeTag = (q.type && q.type !== q.question_type) ? ` <span style="color:${q.type === '选择性' ? '#7c3aed' : '#2563eb'};font-size:11px">(${q.type})</span>` : '';
-        const ansPreview = q.answer ? q.answer.substring(0, 30) + (q.answer.length > 30 ? '...' : '-') : '-';
+        const ansPreview = q.answer ? q.answer.substring(0, 30) + (q.answer.length > 30 ? '...' : '') : '-';
         const tested = q.tested_models || [];
         const testedHtml = tested.length
           ? tested.map(m => `<span class="tag tag-secondary" style="margin:1px 3px 1px 0;display:inline-block">${this._escHtml(m)}</span>`).join('')

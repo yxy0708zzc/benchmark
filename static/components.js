@@ -96,7 +96,7 @@ const Components = {
   _handleMatrixChange: async function(input, questionId, trainNum, seatType) {
     let value = parseInt(input.value) || 0;
     if (value < 0) value = 0;
-    if (value > 30) value = 30;
+    if (value > 1000) value = 1000;  // 与后端 QUESTION_CONFIG.ticket_max_value 一致
     input.value = value;
 
     const fromId = input.dataset.from;
@@ -125,6 +125,13 @@ const Components = {
     }
   },
 
+  /** HTML 转义（防模型输出/站名含 HTML 时注入） */
+  _esc: function(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
   /**
    * 渲染工具调用折叠卡片
    */
@@ -135,18 +142,19 @@ const Components = {
     const result = typeof toolCall.result === 'string'
       ? toolCall.result
       : JSON.stringify(toolCall.result, null, 2);
+    const esc = this._esc;
 
     return `
       <div class="tool-call-card">
         <div class="tool-call-header" onclick="Components._toggleToolCall(this)">
-          <span>🔧 [${index}] ${toolCall.tool_name}</span>
-          <span>${toolCall.arguments?.from_station_id ? toolCall.arguments.from_station_id + '→' : ''}${toolCall.arguments?.to_station_id || toolCall.arguments?.train_num || toolCall.arguments?.station_id || toolCall.arguments?.keyword || ''}</span>
+          <span>🔧 [${index}] ${esc(toolCall.tool_name)}</span>
+          <span>${toolCall.arguments?.from_station_id ? esc(toolCall.arguments.from_station_id) + '→' : ''}${esc(toolCall.arguments?.to_station_id || toolCall.arguments?.train_num || toolCall.arguments?.station_id || toolCall.arguments?.keyword || '')}</span>
         </div>
         <div class="tool-call-body">
           <div><strong>参数:</strong></div>
-          <pre>${args}</pre>
+          <pre>${esc(args)}</pre>
           <div><strong>结果:</strong></div>
-          <pre>${result}</pre>
+          <pre>${esc(result)}</pre>
         </div>
       </div>
     `;

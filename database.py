@@ -11,6 +11,7 @@
 import sqlite3
 import json
 import os
+import threading
 from typing import List, Tuple, Optional, Dict
 from datetime import datetime
 
@@ -153,8 +154,10 @@ def get_crawled_price_trains(conn: sqlite3.Connection) -> set:
 
 
 def get_prices_conn() -> sqlite3.Connection:
-    """获取票价数据库连接"""
-    return sqlite3.connect(PRICES_DB_PATH)
+    """获取票价数据库连接（提高 busy_timeout，缓解并发写时 database is locked）"""
+    conn = sqlite3.connect(PRICES_DB_PATH, timeout=30)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    return conn
 
 
 def get_railway_conn() -> sqlite3.Connection:
@@ -268,13 +271,15 @@ def get_station_trains(conn: sqlite3.Connection, station_id: str) -> Optional[Di
 TICKET_TABLES = ["class0", "class1", "class2"]
 
 
-def create_question_db(question_id: str) -> str:
+def create_question_db(question_id: str, path: str = None) -> str:
     """
-    创建题目数据库，包含 class0 / class1 / class2 三张余票表
+    创建题目数据库，包含 class0 / class1 / class2 三张余票表。
+    path: 目标文件完整路径；缺省为 question/{question_id}.db。
+    支持 .tmp 临时路径（出题先写临时文件、自检通过后原子改名落盘）。
     返回数据库文件路径
     """
     ensure_directories()
-    db_path = get_question_db_path(question_id)
+    db_path = path or get_question_db_path(question_id)
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
 
@@ -438,21 +443,80 @@ def get_train_tickets_filtered(conn: sqlite3.Connection, train_num: str,
 
 # ============================================================
 # 元数据管理（metadata.json）
+# 全部读写通过进程级可重入锁串行化：批量任务与 API 并发调用时
+# 不会出现“旧快照整体覆盖”丢更新（BUG#3 修复的一部分）。
 # ============================================================
 
-def load_metadata() -> Dict:
-    """加载题目元数据，若文件不存在则返回空字典"""
+_METADATA_LOCK = threading.RLock()
+
+
+def _metadata_load_unlocked() -> Dict:
+    """加载题目元数据（不加锁，内部用），若文件不存在则返回空字典。
+    用 utf-8-sig 读取，兼容带 BOM 的文件（Windows 工具写入）。"""
     if not os.path.exists(METADATA_PATH):
         return {}
-    with open(METADATA_PATH, "r", encoding="utf-8") as f:
+    with open(METADATA_PATH, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
-def save_metadata(metadata: Dict):
-    """保存题目元数据"""
+def _metadata_save_unlocked(metadata: Dict):
+    """保存题目元数据（不加锁，内部用）"""
     ensure_directories()
     with open(METADATA_PATH, "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+
+def load_metadata() -> Dict:
+    """加载题目元数据（锁内读），若文件不存在则返回空字典"""
+    with _METADATA_LOCK:
+        return _metadata_load_unlocked()
+
+
+def save_metadata(metadata: Dict):
+    """保存题目元数据（锁内写）。注意：请传入刚从 load_metadata() 取得的最新数据，
+    避免用陈旧快照整体覆盖他人更新。"""
+    with _METADATA_LOCK:
+        _metadata_save_unlocked(metadata)
+
+
+# ------------------------------------------------------------
+# 题目流水线 state（按模型记录，BUG#3 修复）
+# metadata[qid]["state"] = ["<model>:tested", "<model>:evaluated", ...]
+# - 只记成功：测试/测评失败不写入，可重试；成功后同模型不可重测（去重依据）
+# - 出题/自然语言两个题级节点不进 state：题目存在=出题完成，nl_question 非空=自然语言完成
+# ------------------------------------------------------------
+
+def get_question_model_state(entry: Dict, model: str) -> Optional[str]:
+    """返回某模型在该题上的状态（tested/evaluated），无则 None"""
+    for s in (entry.get("state") or []):
+        if isinstance(s, str) and ":" in s:
+            m, _, st = s.rpartition(":")
+            if m == model:
+                return st or ""
+    return None
+
+
+def get_question_tested_models(entry: Dict) -> List[str]:
+    """从 state 列表推导该题已测模型列表（有 model:* 项即已测），排序返回"""
+    out = set()
+    for s in (entry.get("state") or []):
+        if isinstance(s, str) and ":" in s:
+            out.add(s.rsplit(":", 1)[0])
+    return sorted(out)
+
+
+def set_question_model_state(question_id: str, model: str, state: str):
+    """设置/升级某模型在该题上的状态项（锁内读改写，幂等）。题目不存在时忽略。"""
+    with _METADATA_LOCK:
+        metadata = _metadata_load_unlocked()
+        entry = metadata.get(question_id)
+        if not isinstance(entry, dict):
+            return
+        states = [s for s in (entry.get("state") or [])
+                  if not (isinstance(s, str) and s.rsplit(":", 1)[0] == model)]
+        states.append(f"{model}:{state}")
+        entry["state"] = states
+        _metadata_save_unlocked(metadata)
 
 
 def update_question_metadata(question_id: str,
@@ -460,7 +524,6 @@ def update_question_metadata(question_id: str,
                              trains: list = None,
                              source: str = None,
                              question_type: str = None,
-                             answer: str = None,
                              question: str = None,
                              interference: bool = None,
                              interference_density: float = None,
@@ -473,25 +536,37 @@ def update_question_metadata(question_id: str,
                              start_station_id: str = None,
                              end_station_id: str = None,
                              criterion: str = None,
-                             constraints: list = None,
-                             tested_models: list = None):
-    """更新单条题目的元数据（status 字段已废弃，不再读写）"""
-    metadata = load_metadata()
-    if question_id in metadata:
-        entry = metadata[question_id]
+                             constraints: list = None):
+    """更新单条题目的元数据（锁内“读-改-写”原子完成）。
+
+    已废弃字段（不再读写）：
+    - status：已完成/草稿概念移除；
+    - answer：出题不再自动写入答案文本，“标准答案”统一由 ground_truth 展示；
+    - tested_models：已测模型由 state 列表推导（见 get_question_tested_models）。
+
+    interference_mode 新口径：`interference`=干扰（存在性 1_，票数严格<人数）、
+    `random_tickets`=随机票（选择性 2_，0.5~1.5×人数）；无票注入不存。
+    """
+    with _METADATA_LOCK:
+        metadata = _metadata_load_unlocked()
+        entry = metadata.get(question_id)
+        if not isinstance(entry, dict):
+            entry = {
+                "train_count": train_count if train_count is not None else (len(trains) if trains else 0),
+            }
+            metadata[question_id] = entry
         if train_count is not None:
             entry["train_count"] = train_count
         if source is not None:
             entry["source"] = source
         if question_type is not None:
             entry["question_type"] = question_type
+        # 题目类型：优先 question_mode；否则按 interference_mode 推导（interference=存在性 / random_tickets=选择性）
         if question_mode is not None:
             entry["type"] = "存在性" if question_mode == "existence" else "选择性"
             entry["question_mode"] = question_mode
         elif interference_mode is not None:
-            entry["type"] = "存在性" if interference_mode == "fake" else "选择性"
-        if answer is not None:
-            entry["answer"] = answer
+            entry["type"] = "存在性" if interference_mode == "interference" else "选择性"
         if question is not None:
             entry["question"] = question
         if interference is not None:
@@ -516,58 +591,12 @@ def update_question_metadata(question_id: str,
             entry["criterion"] = criterion
         if constraints is not None:
             entry["constraints"] = constraints
-        if tested_models is not None:
-            entry["tested_models"] = tested_models
         if trains is not None:
             existing = set(entry.get("trains", []))
             existing.update(trains)
             entry["trains"] = sorted(existing)
             entry["train_count"] = len(entry["trains"])
-    else:
-        entry = {
-            "train_count": train_count if train_count is not None else (len(trains) if trains else 0),
-        }
-        if source is not None:
-            entry["source"] = source
-        if question_type is not None:
-            entry["question_type"] = question_type
-        if question_mode is not None:
-            entry["type"] = "存在性" if question_mode == "existence" else "选择性"
-            entry["question_mode"] = question_mode
-        elif interference_mode is not None:
-            entry["type"] = "存在性" if interference_mode == "fake" else "选择性"
-        if answer is not None:
-            entry["answer"] = answer
-        if question is not None:
-            entry["question"] = question
-        if interference is not None:
-            entry["interference"] = interference
-        if interference_density is not None:
-            entry["interference_density"] = interference_density
-        if segment_plans is not None:
-            entry["segment_plans"] = segment_plans
-        if people_count is not None:
-            entry["people_count"] = people_count
-        if seat_type is not None:
-            entry["seat_type"] = seat_type
-        if interference_mode is not None:
-            entry["interference_mode"] = interference_mode
-        if ground_truth is not None:
-            entry["ground_truth"] = ground_truth
-        if start_station_id is not None:
-            entry["start_station_id"] = start_station_id
-        if end_station_id is not None:
-            entry["end_station_id"] = end_station_id
-        if criterion is not None:
-            entry["criterion"] = criterion
-        if constraints is not None:
-            entry["constraints"] = constraints
-        if tested_models is not None:
-            entry["tested_models"] = tested_models
-        if trains is not None:
-            entry["trains"] = sorted(set(trains))
-        metadata[question_id] = entry
-    save_metadata(metadata)
+        _metadata_save_unlocked(metadata)
 
 
 def get_question_metadata(question_id: str) -> Dict:

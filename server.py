@@ -44,6 +44,7 @@ from database import (
     delete_train_tickets, remove_train_from_metadata,
     load_metadata, update_question_metadata, get_question_metadata,
     save_metadata,
+    get_question_model_state, get_question_tested_models, set_question_model_state,
     validate_train_exists, validate_station_exists,
     resolve_station_name_or_id,
     load_same_train_map,
@@ -321,31 +322,12 @@ def get_tool_names() -> List[str]:
     """获取所有工具名称列表"""
     return [t["function"]["name"] for t in TOOLS]
 
-# 预览缓存：存储未确认的自动出题数据（key=question_id）
-_preview_cache: Dict[str, Dict] = {}
+# 出题直接落盘（无预览缓存）：生成→注入→自检→临时文件原子改名，避免半成品题库。
 
 
 class _RetryTrainError(HTTPException):
-    """内层找不到合法解（中间站/换乘车次/额外站不足等）→ 应换下一辆 T 重试，而非直接报错。"""
-
-
-def _create_in_memory_question_db() -> sqlite3.Connection:
-    """创建内存中的题目数据库（用于预览验证，不做磁盘写入）"""
-    conn = sqlite3.connect(':memory:')
-    conn.execute("PRAGMA foreign_keys = ON")
-    for table in TICKET_TABLES:
-        conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                train_num TEXT NOT NULL,
-                from_station_id TEXT NOT NULL,
-                to_station_id TEXT NOT NULL,
-                tickets INTEGER NOT NULL CHECK (tickets >= 0 AND tickets <= {QUESTION_CONFIG["ticket_max_value"]}),
-                UNIQUE(train_num, from_station_id, to_station_id)
-            )
-        """)
-    return conn
-from verifier import verify_final_plan, normalize_final_plan
+    """内层找不到合法解（中间站/换乘车次/额外站不足/自检不通过等）→ 应换下一辆 T 重试，而非直接报错。"""
+from verifier import verify_final_plan, normalize_final_plan, _check_strategy_constraints
 
 
 # ============================================================
@@ -613,19 +595,21 @@ class UpdateTicketRequest(BaseModel):
     tickets: int
 
 
-class AutoGenerateRequest(BaseModel):
+class _GenerateParams(BaseModel):
+    """单题出题参数（批量出题内部使用；手动出题页已移除）。
+
+    interference_mode（票注入方式，由批量流程按题型传入，不随题面参数走）：
+    - "none"：无票注入（存在性 0_，唯一解）
+    - "interference"：干扰（存在性 1_，票数严格 < 人数，唯一解）
+    - "random_tickets"：随机票（选择性 2_，0.5~1.5×人数，多解，检测不对标答）
+    """
     # question_type：存在性必传；选择性可不传（None）→ 服务端按行为约束自动推导（保证有解）
     question_type: Optional[str] = None  # transfer/short_buy/extra_front/extra_rear/mixed（direct 仅作 mixed 段内策略）
     from_station_id: str  # 可接受站名（如"北京南"）或站ID（如"VNP"），服务端自动解析
     to_station_id: str  # 同上
-    mode: str = ""  # "existence" 存在性(0_ 必出 + fake_interference 时另出 1_)；"selective" 选择性(一份 2_)；空串按 selective 处理
-    random_tickets: bool = False  # 是否添加干扰票（保留字段，实际以 mode/fake_interference 为准）
-    fake_interference: bool = False  # 存在性是否额外生成 1_ 伪干扰（票数 < 人数，仍唯一解）；False=仅出 0_
-    interference_density: float = 0.02  # 干扰密度（全局池比例，默认 2%，上限 5%，步长 0.1%）
     transfers: int = 0  # 换乘次数（仅 mixed 题型）
     segment_plans: List[str] = []  # 每段策略，长度 = transfers + 1
-    custom_qid: str = ""  # 自定义题名，为空则自动生成
-    seed: Optional[int] = None
+    custom_qid: str = ""  # 自定义题名主体（前缀由系统自动加），为空则按时间戳生成
     people_count: Optional[int] = None  # 需求人数：缺省时服务端随机 3~6
     seat_type: str = "class2"  # 答案票等级（class0/class1/class2）
     # 评判标准（仅选择性题，单选必选；只作为题目对模型的优化要求，无标准答案、不参与核查）：
@@ -633,7 +617,7 @@ class AutoGenerateRequest(BaseModel):
     #   depart_latest 最晚出发 / arrive_earliest 最早到达
     criterion: str = "comprehensive"
     # 行为约束（仅选择性题，多选；作为题目对模型的要求，参与硬校验）：
-    #   no_transfer 不允许换乘 / no_short_buy_extra 不允许买短补长与额外购买
+    #   no_transfer 不允许换乘 / no_short_buy_extra 不允许买短补长与额外购买（两者互斥）
     constraints: List[str] = []
 
 
@@ -672,8 +656,6 @@ def api_update_ticket(req: UpdateTicketRequest):
             req.from_station_id, req.to_station_id,
             req.seat_type, req.tickets
         )
-        # 更新元数据修改时间（不再写 status：已完成/草稿概念已移除）
-        update_question_metadata(req.question_id)
         return {"success": True, "message": "余票已更新"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -814,13 +796,14 @@ def _find_transfer_trains(rw_conn: sqlite3.Connection,
     ]
 
 
-def _random_solution_tickets(people_count: int) -> int:
+def _random_solution_tickets(people_count: int, rng: random.Random = None) -> int:
     """生成答案票数：保证 ≥ 需求人数（票够），在 1~1.5× 人数范围内随机（而非恒等于人数）。
 
     例：2 人 → 2~3；4 人 → 4~6；20 人 → 20~30。人数=1 时退化为 1。
     """
+    rng = rng or random
     hi = max(people_count, int(people_count * 1.5))
-    return random.randint(people_count, hi)
+    return rng.randint(people_count, hi)
 
 
 
@@ -831,14 +814,16 @@ def _build_transfer_segments(q_conn: Optional[sqlite3.Connection],
                              train_num: str, stops: List[Dict],
                              from_id: str, mid_id: str, u_train_num: str,
                              actual_dest: str, seat_type: str,
-                             people_count: int) -> List[Dict]:
+                             people_count: int,
+                             rng: random.Random = None) -> List[Dict]:
     """写换乘题两段：T(A→M) + U(M→B)；q_conn 为 None 时只构建 segments 不写库。
 
-    供出题与「换方案」共用：换方案传 q_conn=None 仅重算预览，确认时再统一写盘。
+    供出题流程共用（换方案预览已随手动出题页一并移除）。
     """
+    rng = rng or random
     station_names = {s["station_id"]: s["station_name"] for s in stops}
-    tickets1 = _random_solution_tickets(people_count)
-    tickets2 = _random_solution_tickets(people_count)
+    tickets1 = _random_solution_tickets(people_count, rng)
+    tickets2 = _random_solution_tickets(people_count, rng)
     if q_conn is not None:
         db_update_ticket(q_conn, train_num, from_id, mid_id, seat_type, tickets1)
         db_update_ticket(q_conn, u_train_num, mid_id, actual_dest, seat_type, tickets2)
@@ -1232,31 +1217,37 @@ def _get_all_stops_cached(rw_conn: sqlite3.Connection) -> Dict[str, List[Dict]]:
 
 def _add_interference_all_trains(q_conn: sqlite3.Connection,
                                  rw_conn: sqlite3.Connection,
-                                 target_train_num: str,
-                                 target_solution_pairs: set,
+                                 solution_occupied: set,
                                  density: float = 0.02,
                                  block_pairs: set = None,
-                                 fake: bool = True,
+                                 interference_mode: str = "interference",
                                  people_count: int = 2,
+                                 rng: random.Random = None,
                                  shortbuy_guard_from: str = None,
                                  shortbuy_guard_to: str = None):
-    """全局池注入干扰（统一密度语义）。
+    """全局池注入票（统一密度语义）。
 
-    候选池 = 全部车次的全部 i<j 站对（跳过合法解站对 / block_pairs / 买短补长逃逸对），
-    一次 shuffle 后按密度取前 int(池大小 × density) 个 —— 分母固定为全局池大小（约 46 万），
-    不再逐车取整导致低密度归零，且跨题可比。
+    候选池 = 全部车次的全部 i<j 站对，一次 shuffle 后按密度取前 int(池大小 × density) 个 ——
+    分母固定为全局池大小（约 46 万），不再逐车取整导致低密度归零，且跨题可比。
 
-    - block_pairs: 全局禁止站对（如真干扰的直达 (A,B)），所有车次一律跳过；
-      伪干扰（fake=True）票数严格 < 人数、无逃逸可能，传空集即可。
-    - fake=True : 伪干扰票数 randint(1, 人数-1)，严格不足 → 唯一解（人数=1 时退化为无干扰）
-    - fake=False: 真干扰票数 randint(0.5×人数, 1.5×人数)，部分够票（真替代）、部分差一点（陷阱）
-    - shortbuy_guard_from/to: 非空时（真干扰的 transfer/mixed），对所有“先经过 A 再经过 B”的车次，
+    - solution_occupied: 标答占用的 (train_num, from_id, to_id) 三元组集合。
+      **候选站对命中即跳过（不论席别、不论车次是否目标车）** —— 保证干扰/随机票
+      永远不会写到标答占用的车次+区间上（含 transfer/mixed 换乘车上的标答段，
+      修复旧版只保护目标车导致标答票被覆盖的 BUG#1）。
+    - block_pairs: 全局禁止站对（如随机票题的直达 (A,B)），所有车次一律跳过；
+      干扰（票数严格 < 人数）无逃逸可能，传空集即可。
+    - interference_mode="interference"：干扰票 randint(1, 人数-1)，严格不足 → 唯一解
+      （人数=1 时退化为无票注入）
+    - interference_mode="random_tickets"：随机票 randint(0.5×人数, 1.5×人数)，
+      部分够票（真替代）、部分差一点（陷阱）→ 多解，检测时不与标答对比
+    - shortbuy_guard_from/to: 非空时（随机票题的 transfer/mixed），对所有“先经过 A 再经过 B”的车次，
       跳过 (A, X)（X 在 B 之前）站对 —— 防止“买短补长直达 B”的逃逸。
     """
+    rng = rng or random
     if block_pairs is None:
         block_pairs = set()
-    # 伪干扰边界：1 人时伪干扰票数需 <1（=0 张即无票），退化为无干扰，保证唯一解
-    if fake and people_count <= 1:
+    # 干扰边界：1 人时干扰票数需 <1（=0 张即无票），退化为无票注入，保证唯一解
+    if interference_mode == "interference" and people_count <= 1:
         return
 
     stops_cache = _get_all_stops_cached(rw_conn)
@@ -1276,7 +1267,8 @@ def _add_interference_all_trains(q_conn: sqlite3.Connection,
         for i in range(n):
             for j in range(i + 1, n):
                 f, t = ids[i], ids[j]
-                if train_num == target_train_num and (f, t) in target_solution_pairs:
+                # 标答占用（车次+区间）一律跳过：干扰/随机票绝不与标答重叠（BUG#1 修复）
+                if (train_num, f, t) in solution_occupied:
                     continue
                 if (f, t) in block_pairs:
                     continue
@@ -1284,17 +1276,17 @@ def _add_interference_all_trains(q_conn: sqlite3.Connection,
                     continue
                 pool.append((train_num, f, t))
 
-    random.shuffle(pool)
+    rng.shuffle(pool)
     selected = pool[:int(len(pool) * density)]
 
     for train_num, f, t in selected:
-        seat = random.choice(TICKET_TABLES)
-        if fake:
-            tickets = random.randint(1, max(1, people_count - 1))  # 伪干扰：票数 < 人数（严格不足，唯一解）
+        seat = rng.choice(TICKET_TABLES)
+        if interference_mode == "interference":
+            tickets = rng.randint(1, max(1, people_count - 1))  # 干扰：票数 < 人数（严格不足，唯一解）
         else:
             lo = max(1, int(people_count * 0.5))
             hi = max(lo, int(people_count * 1.5))
-            tickets = random.randint(lo, hi)  # 真干扰：0.5×人数 ~ 1.5×人数
+            tickets = rng.randint(lo, hi)  # 随机票：0.5×人数 ~ 1.5×人数（多解，检测不对标答）
         q_conn.execute(f"""
             INSERT OR REPLACE INTO {seat}
             (train_num, from_station_id, to_station_id, tickets)
@@ -1303,19 +1295,66 @@ def _add_interference_all_trains(q_conn: sqlite3.Connection,
     q_conn.commit()
 
 
-# --- POST /api/auto_generate auto出题器生成题目 ---
-# 生成单份题的预览（内存 DB 验证，不写磁盘）。
-# 存在性出两份：0_无伪干扰 / 1_有伪干扰；选择性出一份：2_。前缀自动加在题名前，与输入无关。
-def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, base_seed=None):
-    """生成一份题的预览。
-    prefix: 题名前缀（存在性 "0_"/"1_"；选择性 "2_"）
-    fake: 伪干扰模式（干扰票数严格 < 人数，保证唯一解）
-    mode: 题目模式（"existence"/"selective"，用于 type 显示）
-    with_interference: 是否添加干扰票（0_=False 完全无干扰，唯一解）
-    base_seed: 共用随机种子（存在性两份共用 → 同一车次同一合法解）
-    返回 (question_id, preview_dict)；重试耗尽抛 HTTPException(400)
+# ============================================================
+# 出题核心：生成 → 注入干扰/随机票 → 自检 → 临时文件原子改名落盘（无预览、无二次随机）
+# 存在性 0_ 无票注入 / 1_ 干扰（票<人数，唯一解）；选择性 2_ 随机票（多解，检测不对标答）
+# ============================================================
+
+def _self_check_generated(q_conn: sqlite3.Connection, segments: List[Dict],
+                          people_count: int, interference_mode: str,
+                          solution_occupied: set) -> Optional[str]:
+    """落盘前自检（兜底断言）。返回 None=通过；否则返回错误描述（换下一辆 T 重试）。
+
+    ① 标答每段：库中实际票数 == 标答票数 且 >= 需求人数（防任何路径污染标答）；
+    ② 干扰题唯一解断言：除标答占用站对外，库中所有站对票数严格 < 需求人数。
     """
-    # 选择性题题型由行为约束自动推导（手动/批量一致，保证有解）：
+    try:
+        for seg in segments:
+            seat = seg.get("seat_type", "")
+            if seat not in TICKET_TABLES or seg.get("seg_type") == "onboard":
+                continue
+            row = q_conn.execute(
+                f"SELECT tickets FROM {seat} WHERE train_num=? AND from_station_id=? AND to_station_id=?",
+                (seg["train_num"], seg["from_station_id"], seg["to_station_id"]),
+            ).fetchone()
+            db_tickets = row[0] if row else None
+            if db_tickets != seg.get("tickets"):
+                return (f"标答段 {seg['train_num']} {seg['from_station_id']}→{seg['to_station_id']} "
+                        f"票数与标注不符（标注 {seg.get('tickets')} 实际 {db_tickets}）")
+            if db_tickets is None or db_tickets < people_count:
+                return f"标答段 {seg['train_num']} 票数 {db_tickets} 不足需求人数 {people_count}"
+        if interference_mode == "interference":
+            for table in TICKET_TABLES:
+                for tn, f, t, tk in q_conn.execute(
+                    f"SELECT train_num, from_station_id, to_station_id, tickets FROM {table}"
+                ).fetchall():
+                    if (tn, f, t) in solution_occupied:
+                        continue
+                    if tk >= people_count:
+                        return (f"干扰题唯一解被破坏：{tn} {f}→{t}（{table}）"
+                                f"有 {tk} 张票（≥人数 {people_count}）")
+        return None
+    except sqlite3.Error as e:
+        return f"自检查询异常: {e}"
+
+
+def _generate_question(params: _GenerateParams, prefix: str, mode: str,
+                       rw_conn: sqlite3.Connection, interference_mode: str,
+                       density: float, rng: random.Random = None):
+    """生成一道题并直接落盘（无预览）。
+
+    流程：候选车次重试循环 → 临时文件建库 → 写标答 → 全局注入干扰/随机票
+    （按 (车次,区间) 排除标答占用站对）→ 标答自反校验 + 自检 → 原子改名落盘 → 写 metadata。
+
+    prefix: 题名前缀（存在性 "0_"/"1_"；选择性 "2_"）
+    mode: "existence"/"selective"
+    interference_mode: "none" 无票注入 / "interference" 干扰 / "random_tickets" 随机票
+    density: 注入密度（interference_mode="none" 时忽略）
+    返回 (question_id, summary_dict)；重试耗尽抛 HTTPException(400)
+    """
+    rng = rng or random
+    req = params
+    # 选择性题题型由行为约束自动推导（批量/内部一致，保证有解）：
     #   constraints 含 no_transfer → 买短补长（换乘被禁时唯一可达策略）
     #   否则（无约束或仅 no_short_buy_extra）→ 换乘（一次换乘保证可达）
     if mode == "selective":
@@ -1327,9 +1366,9 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
     if req.question_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"无效的题型: {req.question_type}")
 
-    # 需求人数：缺省时服务端随机 3~6（手动页每次进入/重新出题时前端也会随机，双保险）
+    # 需求人数：缺省时随机 3~6
     if req.people_count is None:
-        req.people_count = random.randint(3, 6)
+        req.people_count = rng.randint(3, 6)
     if not (1 <= req.people_count <= QUESTION_CONFIG["max_people_count"]):
         raise HTTPException(status_code=400, detail=f"人数超出范围: {req.people_count}")
     if req.seat_type not in TICKET_TABLES:
@@ -1341,12 +1380,21 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
         if len(req.segment_plans) != req.transfers + 1:
             raise HTTPException(status_code=400, detail=f"段策略数需等于换乘数+1（{req.transfers + 1}）")
 
-    # 行为约束（仅选择性题）：白名单校验（不限制题型选择，约束作为对模型输出的硬要求参与核查）
+    # 行为约束（仅选择性题）：白名单 + 去重 + 互斥校验。
+    # no_transfer 与 no_short_buy_extra 同选会使题面自相矛盾（题型被推导为买短补长、
+    # 又禁止买短补长 → 标答必违反约束、无任何合法解），故硬性拒绝（BUG#2 修复之一）。
     VALID_CONSTRAINTS = {"no_transfer", "no_short_buy_extra"}
     constraints = req.constraints or []
     invalid = [c for c in constraints if c not in VALID_CONSTRAINTS]
     if invalid:
         raise HTTPException(status_code=400, detail=f"无效的行为约束: {invalid}")
+    if len(constraints) != len(set(constraints)):
+        raise HTTPException(status_code=400, detail="行为约束存在重复项")
+    if "no_transfer" in constraints and "no_short_buy_extra" in constraints:
+        raise HTTPException(
+            status_code=400,
+            detail="行为约束「不允许换乘」与「不允许买短补长与额外购买」互斥，不可同时选择（否则题目无合法解）"
+        )
     if constraints and mode != "selective":
         raise HTTPException(status_code=400, detail="行为约束仅选择性题支持")
     # 评判标准（仅选择性题，单选必选）：枚举校验
@@ -1358,10 +1406,6 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
 
     # 换乘衔接最短分钟：所有题型固定 20 分钟（时间约束配置已移除）
     min_gap = 20
-
-    # Step 0: 固定随机种子
-    if base_seed is not None:
-        random.seed(base_seed)
 
     # Step 1: 解析车站
     from_id = resolve_station_name_or_id(rw_conn, req.from_station_id)
@@ -1381,10 +1425,10 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
     if not routes:
         raise HTTPException(status_code=400, detail=f"未找到从 {from_id} 到 {to_id} 的车次")
 
-    random.shuffle(routes)
+    rng.shuffle(routes)
     max_attempts = min(len(routes), 15)
 
-    # 题号查重基准：读取一次 metadata（确认时会落盘到同一份，避免覆盖同名题）
+    # 题号查重基准：读取一次 metadata（落盘时同一份，避免覆盖同名题）
     existing_metadata = load_metadata()
 
     last_error = None
@@ -1432,26 +1476,32 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
             last_error = "到达站后无足够车站做后额外"
             continue
 
-        # Step 3: 确定题名（前缀自动加，与输入无关；仅用于预览标识，不创建磁盘文件）
+        # Step 3: 确定题名（前缀自动加，与输入无关）
         if req.custom_qid:
             question_id = prefix + req.custom_qid
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             question_id = f"{prefix}{timestamp}_{attempt}"
 
-        # 题号查重：db 文件 / metadata / 预览缓存 任一命中即视为已占用
-        # （custom_qid 与自动题号都查；自动题号同秒撞号时换下一 attempt 重试）
-        if (os.path.exists(get_question_db_path(question_id))
-                or question_id in _preview_cache
-                or question_id in existing_metadata):
+        # 题号查重：正式 db / metadata 任一命中即视为已占用
+        if os.path.exists(get_question_db_path(question_id)) or question_id in existing_metadata:
             last_error = f"题名 {question_id} 已存在"
             continue
 
-        # 使用内存数据库做验证，不写入磁盘
-        q_conn = _create_in_memory_question_db()
+        # Step 4: 先写临时文件，自检通过后原子改名落盘（任何失败都不产生半成品题库）
+        db_path = get_question_db_path(question_id)
+        tmp_path = db_path + ".tmp"
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        create_question_db(question_id, path=tmp_path)
+        q_conn = sqlite3.connect(tmp_path)
+        q_conn.execute("PRAGMA foreign_keys = ON")
 
         try:
-            # Step 4: 写入合法解（写入内存 DB，仅做验证）
+            # 写入合法解（标答）
             transfer_dest = None
             if req.question_type == "transfer":
                 transfer_dest = to_id  # 用户输入的真正目的地
@@ -1470,104 +1520,67 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
             )
             solution_segments = solution_result["segments"]
 
-            # 收集合法解占用的站对（使用站 ID）
-            solution_pairs = set()
-            for seg in solution_segments:
-                solution_pairs.add((seg["from_station_id"], seg["to_station_id"]))
+            # 标答占用集合：(车次, 购买起点, 购买终点) —— 含 transfer/mixed 换乘车上的段。
+            # 干扰/随机票注入按此全局排除，保证与标答车次+区间完全错开（BUG#1 修复）。
+            solution_occupied = {
+                (seg["train_num"], seg["from_station_id"], seg["to_station_id"])
+                for seg in solution_segments
+            }
 
-            # 验证干扰票写入（仍在内存 DB 中）：0_ 完全无干扰；1_/2_ 按 with_interference 添加
-            if with_interference:
-                # 1_ 伪干扰：票数严格 < 人数，无逃逸可能，不设 block、不清直达
-                if fake:
+            # 注入干扰/随机票（仍在临时库中，与标答同一份数据落盘，无二次随机）
+            if interference_mode != "none":
+                if interference_mode == "interference":
+                    # 干扰：票数严格 < 人数，无逃逸可能，不设 block、不清直达
                     block_pairs: set = set()
                     guard_from = guard_to = None
                 else:
-                    # 2_ 真干扰：全局禁直达 (A,B)；transfer/mixed 额外防“买短补长到 B”
+                    # 随机票：全局禁直达 (A,B)；transfer/mixed 额外防"买短补长到 B"
                     block_pairs = {(from_id, to_id)}
                     guard_from, guard_to = (
                         (from_id, to_id) if req.question_type in ("transfer", "mixed")
                         else (None, None)
                     )
                 _add_interference_all_trains(
-                    q_conn, rw_conn, target_train_num,
-                    solution_pairs, req.interference_density,
-                    block_pairs=block_pairs, fake=fake, people_count=req.people_count,
+                    q_conn, rw_conn, solution_occupied, density,
+                    block_pairs=block_pairs, interference_mode=interference_mode,
+                    people_count=req.people_count, rng=rng,
                     shortbuy_guard_from=guard_from, shortbuy_guard_to=guard_to,
                 )
-                if not fake:
+                if interference_mode == "random_tickets":
                     _clear_direct_route(q_conn, target_train_num, from_id, to_id)
 
             q_conn.commit()
 
-            # 构造预览
-            station_names = {s["station_id"]: s["station_name"] for s in stops}
-            from_name = station_names.get(from_id, from_id)
-            cursor = rw_conn.cursor()
-            cursor.execute("SELECT station_name FROM stations WHERE station_id = ?", (to_id,))
-            row = cursor.fetchone()
-            dest_name = row[0] if row else to_id
-            first_stop = stops[0]["station_name"] if stops else ""
-            last_stop = stops[-1]["station_name"] if stops else ""
-            # 题目描述：用户填写的初始站到终点站
-            question_str = f"{from_name}到{dest_name}"
+            # 标答自反校验（BUG#2 修复之二）：题目带行为约束时，标答自身必须零违规
+            if constraints:
+                violations = _check_strategy_constraints(solution_segments, constraints)
+                if violations:
+                    raise _RetryTrainError(
+                        status_code=400,
+                        detail=f"标答与行为约束冲突: {violations[0].get('detail', '')}"
+                    )
 
-            if req.question_type == "transfer":
-                parts = [f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票）"]
-                parts.append(f"换乘 {solution_segments[1]['train_num']} 从 {solution_segments[1]['from']} 到 {dest_name}（有票）")
-                path_desc = "，".join(parts)
-            elif req.question_type == "short_buy":
-                path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票），补票段 {solution_segments[0]['to']}→{dest_name} 无余票需上车补票"
-            elif req.question_type == "extra_front":
-                path_desc = f"乘坐 {target_train_num} 从 {solution_segments[0]['from']} 到 {dest_name} 有票（前额外），可在 {from_name} 站上车，实际乘坐 {from_name}→{dest_name}"
-            elif req.question_type == "extra_rear":
-                path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']} 有票（后额外），在 {dest_name} 站提前下车，实际乘坐 {from_name}→{dest_name}"
-            elif req.question_type == "mixed":
-                # 各分段叙述叠加（与换方案共用 _build_mixed_path_desc）
-                path_desc = _build_mixed_path_desc(solution_segments)
-            else:
-                path_desc = ""
+            # 自检（BUG#1 兜底断言）：标答票数一致且足够；干扰题唯一解成立
+            check_err = _self_check_generated(
+                q_conn, solution_segments, req.people_count, interference_mode, solution_occupied
+            )
+            if check_err:
+                raise _RetryTrainError(status_code=400, detail=f"自检未通过: {check_err}")
 
-            # 缓存生成的完整数据（含站 ID，供确认时写入磁盘）
-            _preview_cache[question_id] = {
-                "question_type": req.question_type,
-                "segments": solution_segments,
-                "target_train_num": target_train_num,
-                "cur_from_id": cur_from_id,
-                "cur_to_id": cur_to_id,
-                "start_station_id": from_id,
-                "end_station_id": to_id,
-                "stops": stops,
-                "random_tickets": with_interference,
-                "fake_interference": fake,
-                "question_mode": mode,
-                "interference_density": req.interference_density,
-                "segment_plans": req.segment_plans,
-                "interference": with_interference,
-                "people_count": req.people_count,
-                "seat_type": req.seat_type,
-                "criterion": req.criterion if mode == "selective" else "comprehensive",
-                "constraints": constraints,  # 行为约束（仅选择性）
-                "question": question_str,
-                "solutions": solution_result.get("solutions"),
-                "chosen_solution": solution_result.get("chosen_solution"),
-            }
-
+            # 原子落盘：临时文件改名（同目录 rename）
             q_conn.close()
-
-            return question_id, {
-                "question": question_str,
-                "question_type": req.question_type,
-                "target_train_num": target_train_num,
-                "target_train_route": f"{first_stop}→{last_stop}",
-                "target_section": f"{from_name}→{dest_name}",
-                "path_description": path_desc,
-                "solution_segments": solution_segments,
-                "criterion": req.criterion if mode == "selective" else "comprehensive",
-                "constraints": constraints,
-            }
+            os.replace(tmp_path, db_path)
 
         except HTTPException as e:
-            q_conn.close()
+            try:
+                q_conn.close()
+            except Exception:
+                pass
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
             detail = e.detail if hasattr(e, 'detail') else str(e)
             # 内层找不到合法解（_RetryTrainError）或命中重试关键词 → 换下一辆 T 重试，不直接报错
             if isinstance(e, _RetryTrainError) or any(keyword in str(detail) for keyword in [
@@ -1576,15 +1589,88 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
                 "混合策略换乘",
                 "出发站前无足够车站",
                 "到达站后无足够车站",
+                "标答与行为约束冲突",
+                "自检未通过",
             ]):
                 last_error = str(detail)
                 continue  # 重试下一个车次
             raise  # 非重试性错误，直接抛出
 
         except Exception as e:
-            q_conn.close()
+            try:
+                q_conn.close()
+            except Exception:
+                pass
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
             last_error = f"出题过程异常: {str(e)}"
             continue
+
+        # ---- 落盘成功，写 metadata ----
+        station_names = {s["station_id"]: s["station_name"] for s in stops}
+        from_name = station_names.get(from_id, from_id)
+        cursor = rw_conn.cursor()
+        cursor.execute("SELECT station_name FROM stations WHERE station_id = ?", (to_id,))
+        row = cursor.fetchone()
+        dest_name = row[0] if row else to_id
+        first_stop = stops[0]["station_name"] if stops else ""
+        last_stop = stops[-1]["station_name"] if stops else ""
+        question_str = f"{from_name}到{dest_name}"
+
+        if req.question_type == "transfer":
+            parts = [f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票）"]
+            parts.append(f"换乘 {solution_segments[1]['train_num']} 从 {solution_segments[1]['from']} 到 {dest_name}（有票）")
+            path_desc = "，".join(parts)
+        elif req.question_type == "short_buy":
+            path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']}（有票），补票段 {solution_segments[0]['to']}→{dest_name} 无余票需上车补票"
+        elif req.question_type == "extra_front":
+            path_desc = f"乘坐 {target_train_num} 从 {solution_segments[0]['from']} 到 {dest_name} 有票（前额外），可在 {from_name} 站上车，实际乘坐 {from_name}→{dest_name}"
+        elif req.question_type == "extra_rear":
+            path_desc = f"乘坐 {target_train_num} 从 {from_name} 到 {solution_segments[0]['to']} 有票（后额外），在 {dest_name} 站提前下车，实际乘坐 {from_name}→{dest_name}"
+        elif req.question_type == "mixed":
+            path_desc = _build_mixed_path_desc(solution_segments)
+        else:
+            path_desc = ""
+
+        trains_list = sorted({seg["train_num"] for seg in solution_segments})
+        meta_kwargs = {
+            "question_id": question_id,
+            "train_count": len(trains_list),
+            "trains": trains_list,
+            "source": "auto",
+            "question_type": req.question_type,
+            "question": question_str,
+            "segment_plans": req.segment_plans,
+            "interference": interference_mode != "none",
+            "interference_mode": (interference_mode if interference_mode != "none" else None),
+            "question_mode": mode,
+            "people_count": req.people_count,
+            "seat_type": req.seat_type,
+            "start_station_id": from_id,
+            "end_station_id": to_id,
+            "criterion": req.criterion if mode == "selective" else "comprehensive",
+            "ground_truth": solution_segments,   # 结构化标答（购买+乘坐区间 id），不写 answer 文本
+        }
+        if interference_mode != "none":
+            meta_kwargs["interference_density"] = density
+        if constraints:
+            meta_kwargs["constraints"] = constraints
+        update_question_metadata(**meta_kwargs)
+
+        return question_id, {
+            "question": question_str,
+            "question_type": req.question_type,
+            "target_train_num": target_train_num,
+            "target_train_route": f"{first_stop}→{last_stop}",
+            "target_section": f"{from_name}→{dest_name}",
+            "path_description": path_desc,
+            "solution_segments": solution_segments,
+            "criterion": req.criterion if mode == "selective" else "comprehensive",
+            "constraints": constraints,
+        }
 
     # 所有重试都失败
     raise HTTPException(
@@ -1593,129 +1679,8 @@ def _generate_one_variant(req, prefix, fake, mode, rw_conn, with_interference, b
     )
 
 
-@app.post("/api/auto_generate")
-def api_auto_generate(req: AutoGenerateRequest):
-    """自动生成题目。
-    - 存在性（mode=existence）：必出 0_（无干扰，唯一解，对标标答）；
-      若 fake_interference=true 额外出 1_（伪干扰，票数严格 < 人数，仍唯一解）
-    - 选择性（mode=selective）：出一份 2_（真干扰 0.5~1.5×人数）
-    - 前缀自动加在题名前，与用户输入无关
-    """
-    # 生成新题前，清除所有未确认的旧预览缓存（未保存的题自动作废）
-    _preview_cache.clear()
-
-    # 决定生成哪些变体：(前缀, 伪干扰, 是否加干扰票)
-    # 0_=完全无干扰（唯一解，对标标答）；1_=伪干扰（票数<人数，唯一解）；2_=真干扰
-    if req.mode == "existence":
-        variants = [("0_", False, False)]
-        if req.fake_interference:
-            variants.append(("1_", True, True))
-    else:
-        variants = [("2_", False, True)]
-
-    # 存在性两份共用同一种子 → 同一车次同一合法解，仅干扰不同；选择性单份用 req.seed
-    if len(variants) > 1:
-        base_seed = req.seed if req.seed is not None else random.randint(0, 2 ** 31)
-    else:
-        base_seed = req.seed
-
-    rw_conn = get_railway_conn()
-    try:
-        questions = []
-        for prefix, fake, with_if in variants:
-            mode = "existence" if prefix != "2_" else "selective"
-            question_id, preview = _generate_one_variant(
-                req, prefix, fake, mode, rw_conn, with_if, base_seed=base_seed,
-            )
-            questions.append({"question_id": question_id, "preview": preview})
-
-        return {
-            "success": True,
-            "questions": questions,
-            "message": f"生成 {len(questions)} 道题（预览，尚未保存）",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        rw_conn.close()
-
-
-# --- GET /api/auto_generate/previews 查看预览缓存（调试用） ---
-@app.get("/api/auto_generate/previews")
-def api_auto_generate_previews():
-    """查看当前内存中的预览缓存"""
-    return {
-        "count": len(_preview_cache),
-        "previews": [
-            {
-                "question_id": qid,
-                "question_type": data.get("question_type"),
-                "question": data.get("question"),
-                "target_train_num": data.get("target_train_num"),
-                "segments_count": len(data.get("segments", [])),
-                "segment_plans": data.get("segment_plans"),
-            }
-            for qid, data in _preview_cache.items()
-        ]
-    }
-
-
-class ConfirmAutoGenerateRequest(BaseModel):
-    question_id: str
-    question_type: str = ""
-    answer: str = ""
-    interference: bool = False
-    interference_density: float = 0.0
-
-
-class ClearPreviewRequest(BaseModel):
-    question_id: str
-
-
-# --- POST /api/auto_generate/clear 清除预览缓存 ---
-@app.post("/api/auto_generate/clear")
-def api_auto_generate_clear(req: ClearPreviewRequest):
-    """
-    清除指定题目的预览缓存（重新出题时调用）。
-    不删除磁盘上的题目文件，只清理内存中的未确认预览。
-    """
-    cleared = False
-    if req.question_id in _preview_cache:
-        del _preview_cache[req.question_id]
-        cleared = True
-    return {"success": True, "cleared": cleared}
-
-
-class SwapSolutionRequest(BaseModel):
-    question_id: str
-
-
-def _build_transfer_preview(cached: Dict) -> Dict:
-    """由缓存条目构造换乘题预览（与出题预览同格式，供换方案返回）"""
-    segs = cached["segments"]
-    seg0, seg1 = segs[0], segs[1]
-    stops = cached.get("stops") or []
-    first_stop = stops[0]["station_name"] if stops else ""
-    last_stop = stops[-1]["station_name"] if stops else ""
-    path_desc = (
-        f"乘坐 {seg0['train_num']} 从 {seg0['from']} 到 {seg0['to']}（有票），"
-        f"换乘 {seg1['train_num']} 从 {seg1['from']} 到 {seg1['to']}（有票）"
-    )
-    return {
-        "question": cached.get("question", ""),
-        "question_type": "transfer",
-        "target_train_num": cached["target_train_num"],
-        "target_train_route": f"{first_stop}→{last_stop}",
-        "target_section": f"{seg0['from']}→{seg1['to']}",
-        "path_description": path_desc,
-        "solution_segments": segs,
-    }
-
-
 def _build_mixed_path_desc(segments: List[Dict]) -> str:
-    """混合题各分段叙述（与出题预览共用，供换方案重建预览）"""
+    """混合题各分段叙述（出题直接落盘流程的预览摘要用）"""
     parts = []
     for seg in segments:
         tn = seg["train_num"]
@@ -1735,267 +1700,8 @@ def _build_mixed_path_desc(segments: List[Dict]) -> str:
     return "，然后 ".join(parts)
 
 
-def _build_mixed_preview(cached: Dict) -> Dict:
-    """由缓存条目构造混合题预览（供换方案返回）"""
-    segs = cached["segments"]
-    stops = cached.get("stops") or []
-    first_stop = stops[0]["station_name"] if stops else ""
-    last_stop = stops[-1]["station_name"] if stops else ""
-    seg0, segN = segs[0], segs[-1]
-    return {
-        "question": cached.get("question", ""),
-        "question_type": "mixed",
-        "target_train_num": cached["target_train_num"],
-        "target_train_route": f"{first_stop}→{last_stop}",
-        "target_section": f"{seg0['from']}→{segN['to']}",
-        "path_description": _build_mixed_path_desc(segs),
-        "solution_segments": segs,
-    }
-
-
-def _segment_signature(segments: List[Dict]) -> tuple:
-    """判断两套方案是否相同（车次 + 购买区间 + 乘坐区间）"""
-    return tuple(
-        (s.get("train_num"), s.get("from_station_id"), s.get("to_station_id"),
-         s.get("ride_from_station_id"), s.get("ride_to_station_id"))
-        for s in segments
-    )
-
-
-def _swap_transfer(cached: Dict, rw_conn: sqlite3.Connection) -> Tuple[List[Dict], Dict]:
-    """换乘题换方案：从已枚举的 (M, U) 里重新随机挑一个"""
-    solutions = cached.get("solutions") or []
-    if len(solutions) < 2:
-        raise HTTPException(status_code=400, detail="该车次只有 1 个可行换乘方案，无法再换")
-    current = cached.get("chosen_solution") or {}
-    remaining = [
-        s for s in solutions
-        if (s.get("mid_id"), s.get("train_num")) != (current.get("mid_id"), current.get("train_num"))
-    ]
-    if not remaining:
-        raise HTTPException(status_code=400, detail="没有其他可行换乘方案可换")
-    s = random.choice(remaining)
-    segs = _build_transfer_segments(
-        None, rw_conn,
-        cached["target_train_num"], cached.get("stops") or [],
-        cached["start_station_id"], s["mid_id"], s["train_num"],
-        cached["end_station_id"],
-        cached.get("seat_type", "class2"), cached.get("people_count", 2),
-    )
-    return segs, s
-
-
-def _swap_mixed(cached: Dict, rw_conn: sqlite3.Connection) -> List[Dict]:
-    """混合题换方案：同一第一程车 T 重新随机选中间站与各段换乘车次（重跑 mixed 合法解）。
-
-    用内存库重跑（不写真实题库），直到得到与当前不同的方案。
-    """
-    stops = cached.get("stops") or []
-    stop_ids = [s["station_id"] for s in stops]
-    if cached["start_station_id"] not in stop_ids:
-        raise HTTPException(status_code=400, detail="缓存缺少混合题起点信息，无法换方案")
-    from_idx = stop_ids.index(cached["start_station_id"])
-    to_idx = len(stops) - 1
-    current_sig = _segment_signature(cached.get("segments") or [])
-    for _ in range(20):
-        q_conn = _create_in_memory_question_db()
-        try:
-            result = _write_legal_solution(
-                q_conn, rw_conn,
-                question_type="mixed",
-                train_num=cached["target_train_num"],
-                stops=stops,
-                from_id=cached["start_station_id"], to_id=cached["end_station_id"],
-                from_idx=from_idx, to_idx=to_idx,
-                segment_plans=cached.get("segment_plans") or [],
-                seat_type=cached.get("seat_type", "class2"),
-                people_count=cached.get("people_count", 2),
-            )
-            segs = result["segments"]
-        except HTTPException:
-            continue  # 该次重跑不可行（_RetryTrainError 等），换一次随机再试
-        finally:
-            q_conn.close()
-        if not segs or _segment_signature(segs) == current_sig:
-            continue  # 与当前方案相同，重试
-        return segs
-    raise HTTPException(status_code=400, detail="未能找到与当前不同的可行混合方案，无法换方案")
-
-
-# --- POST /api/auto_generate/swap 换方案（不变第一程车 T，换中间站/换乘车次） ---
-@app.post("/api/auto_generate/swap")
-def api_auto_generate_swap(req: SwapSolutionRequest):
-    """
-    换方案：保持第一程车 T 不变，重新挑一组合法方案并重建预览。
-    - 换乘题（transfer）：从该 T 已枚举的全部可行 (M, U) 里重新随机挑一个
-    - 混合题（mixed）：同一 T 重新随机选中间站与各段换乘车次（重跑 mixed 合法解）
-    存在性配对（0_/1_ 同 T 同终点）会同步换到同一个新方案，保持两者一致。
-    """
-    if req.question_id not in _preview_cache:
-        raise HTTPException(status_code=400, detail="该题目没有可换方案的预览，请先生成")
-    cached = _preview_cache[req.question_id]
-    qtype = cached.get("question_type")
-    if qtype not in ("transfer", "mixed"):
-        raise HTTPException(status_code=400, detail="仅换乘/混合题型支持换方案")
-
-    rw_conn = get_railway_conn()
-    try:
-        if qtype == "transfer":
-            new_segments, chosen = _swap_transfer(cached, rw_conn)
-        else:
-            new_segments = _swap_mixed(cached, rw_conn)
-            chosen = None
-    finally:
-        rw_conn.close()
-
-    # 更新本 qid 缓存
-    cached["segments"] = new_segments
-    if chosen is not None:
-        cached["chosen_solution"] = chosen
-    _preview_cache[req.question_id] = cached
-
-    # 同步存在性配对（同 T 同终点的其他缓存条目，如 0_/1_）→ 保持同一合法解
-    preview_builder = _build_transfer_preview if qtype == "transfer" else _build_mixed_preview
-    previews = [{"question_id": req.question_id, "preview": preview_builder(cached)}]
-    for other_qid, other in list(_preview_cache.items()):
-        if other_qid == req.question_id:
-            continue
-        if (other.get("question_type") == qtype
-                and other.get("target_train_num") == cached["target_train_num"]
-                and other.get("end_station_id") == cached["end_station_id"]):
-            other["segments"] = new_segments
-            if chosen is not None:
-                other["chosen_solution"] = chosen
-            _preview_cache[other_qid] = other
-            previews.append({"question_id": other_qid, "preview": preview_builder(other)})
-
-    return {"success": True, "message": "已换方案", "questions": previews}
-
-
-def _confirm_generated_question(question_id: str,
-                                question_type: str = "",
-                                answer: str = "",
-                                interference: bool = False,
-                                interference_density: float = 0.0) -> str:
-    """将预览缓存中的题目落盘（DB + metadata），成功后清除缓存。
-
-    手动确认与批量出题共用同一落盘逻辑；失败抛 HTTPException。
-    返回确认消息文本。
-    """
-    if question_id not in _preview_cache:
-        raise HTTPException(status_code=400, detail=f"题目 {question_id} 尚未生成预览，请先生成")
-
-    cached = _preview_cache[question_id]
-
-    # 检查磁盘是否已存在同名 DB（防止并发冲突）
-    db_path = get_question_db_path(question_id)
-    if os.path.exists(db_path):
-        del _preview_cache[question_id]
-        raise HTTPException(status_code=400, detail=f"题目 {question_id} 的数据库文件已存在")
-
-    # 创建真实数据库文件
-    create_question_db(question_id)
-    q_conn = sqlite3.connect(db_path)
-    try:
-        for seg in cached["segments"]:
-            db_update_ticket(
-                q_conn, seg["train_num"],
-                seg["from_station_id"],
-                seg["to_station_id"],
-                seg.get("seat_type", "class2"),
-                seg["tickets"]
-            )
-
-        # 干扰票处理：与预览（_generate_one_variant）保持同一套全局池逻辑
-        if cached.get("random_tickets"):
-            solution_pairs = set()
-            for seg in cached["segments"]:
-                solution_pairs.add((seg["from_station_id"], seg["to_station_id"]))
-            fake_mode = bool(cached.get("fake_interference"))
-            from_id = cached.get("start_station_id")
-            to_id = cached.get("end_station_id")
-            if fake_mode:
-                block_pairs = set()
-                guard_from = guard_to = None
-            else:
-                block_pairs = {(from_id, to_id)}
-                guard_from, guard_to = (
-                    (from_id, to_id) if cached.get("question_type") in ("transfer", "mixed")
-                    else (None, None)
-                )
-            # 需要 rw_conn 读取全部车次信息（内部一次性缓存经停站）
-            rw_conn = get_railway_conn()
-            try:
-                _add_interference_all_trains(
-                    q_conn, rw_conn, cached["target_train_num"],
-                    solution_pairs, cached["interference_density"],
-                    block_pairs=block_pairs, fake=fake_mode,
-                    people_count=cached.get("people_count") or 2,
-                    shortbuy_guard_from=guard_from, shortbuy_guard_to=guard_to,
-                )
-            finally:
-                rw_conn.close()
-            if not fake_mode:
-                _clear_direct_route(q_conn, cached["target_train_num"], from_id, to_id)
-
-        q_conn.commit()
-    except Exception as e:
-        q_conn.close()
-        # 写入失败则清理
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        del _preview_cache[question_id]
-        raise HTTPException(status_code=500, detail=f"写入数据库失败: {str(e)}")
-    q_conn.close()
-
-    # 收集 trains 列表
-    trains_list = sorted({seg["train_num"] for seg in cached["segments"]})
-
-    meta_kwargs = {
-        "question_id": question_id,
-        "train_count": len(trains_list),
-        "trains": trains_list,
-        "source": "auto",
-        "question_type": question_type or cached["question_type"],
-        "answer": answer or None,
-        "question": cached.get("question"),
-        "segment_plans": cached.get("segment_plans"),
-        "interference": cached.get("interference"),
-        "interference_mode": (
-            "fake" if cached.get("fake_interference")
-            else ("real" if cached.get("interference") else None)
-        ),
-        "question_mode": cached.get("question_mode"),
-        "people_count": cached.get("people_count"),
-        "seat_type": cached.get("seat_type"),
-        "start_station_id": cached.get("start_station_id"),
-        "end_station_id": cached.get("end_station_id"),
-        "criterion": cached.get("criterion", "comprehensive"),  # 评判标准（仅选择性）
-        "ground_truth": cached.get("segments"),   # 结构化标答存进 metadata（含购买+乘坐区间 id）
-    }
-    # 仅选择性题（有干扰票）才记录干扰密度，存在性题不写入该字段
-    if cached.get("interference"):
-        meta_kwargs["interference_density"] = cached.get("interference_density")
-    # 行为约束：仅选择性题且非空时落盘（纯要求，无标准答案）
-    if cached.get("constraints"):
-        meta_kwargs["constraints"] = cached.get("constraints")
-    update_question_metadata(**meta_kwargs)
-
-    # 清除缓存
-    del _preview_cache[question_id]
-
-    return f"题目 {question_id} 已确认生成，可在测试器中加载使用"
-
-
-# --- POST /api/auto_generate/confirm 确认生成 ---
-@app.post("/api/auto_generate/confirm")
-def api_auto_generate_confirm(req: ConfirmAutoGenerateRequest):
-    """确认生成自动出题的题目（落盘 DB + metadata）。"""
-    message = _confirm_generated_question(
-        req.question_id, req.question_type, req.answer,
-        req.interference, req.interference_density,
-    )
-    return {"success": True, "message": message}
+# 注：手动出题页已移除，/api/auto_generate*（生成预览/确认/换方案/清除）端点随之删除；
+# 出题统一走批量流程（_run_batch → _generate_question 直接落盘）。
 
 
 # --- GET /api/question/list 列出所有题目 ---
@@ -2060,8 +1766,8 @@ def api_question_list(
             "type": meta.get("type", ""),
             "question_type": meta.get("question_type", ""),
             "train_count": meta.get("train_count", 0),
-            # 已测模型列表（批量测试成功后写入），题目管理展示用
-            "tested_models": meta.get("tested_models") or [],
+            # 已测模型列表：由题目 state 列表推导（state=["model:tested|evaluated", ...]），题目管理展示用
+            "tested_models": get_question_tested_models(meta),
             # 标准答案：优先旧 answer 文本字段；自动出题无该字段时用结构化标答 ground_truth 生成摘要
             "answer": meta.get("answer") or _ground_truth_summary(meta.get("ground_truth")),
             "question": meta.get("question", ""),
@@ -2211,10 +1917,7 @@ def api_question_delete_train(question_id: str, train_num: str):
 # --- DELETE /api/question/{question_id} 删除题目 ---
 @app.delete("/api/question/{question_id}")
 def api_question_delete(question_id: str):
-    """删除指定题目（metadata + .db文件 + 缓存中的预览）"""
-    # 先清除预览缓存（如果有）
-    _preview_cache.pop(question_id, None)
-
+    """删除指定题目（metadata + .db文件）"""
     # 先删除 .db 文件（防止文件被占用导致 metadata 已删但 db 残留）
     db_path = get_question_db_path(question_id)
     db_deleted = False
@@ -2752,34 +2455,58 @@ def _parse_ai_final_plan(assistant_content: str) -> Optional[List[Dict]]:
     """
     从模型回复末尾解析 JSON 格式的 final_plan。
     格式: {"final_plan": [{"train_num":"G1","from":"VNP","to":"JGK","seat_type":"class2","tickets":2}]}
-    尝试匹配 ```json ... ```、``` ... ``` 或裸 JSON（正确处理嵌套花括号）。
+
+    解析策略（健壮性）：定位 "final_plan" → 向左找最近的 { → 字符串感知的花括号配对扫描
+    （跟踪是否在字符串内与转义，字符串内的 { } 不计深度）→ 取配对完整 JSON。
+    兑底：解析失败时再尝试最后一个 ```json 代码块。
     """
     if not assistant_content:
         return None
     import re
     json_str = None
 
-    # 1. 尝试 ```json ... ``` 或 ``` ... ```
-    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', assistant_content, re.DOTALL)
-    if match:
-        json_str = match.group(1)
-    else:
-        # 2. 定位 "final_plan" 所在的最外层花括号
-        idx = assistant_content.find('"final_plan"')
-        if idx >= 0:
-            # 向左找第一个 {
-            start = assistant_content.rfind('{', 0, idx)
-            if start >= 0:
-                # 向右逐字符匹配花括号，找到对应闭合 }
-                depth = 0
-                for i in range(start, len(assistant_content)):
-                    if assistant_content[i] == '{':
-                        depth += 1
-                    elif assistant_content[i] == '}':
-                        depth -= 1
-                        if depth == 0:
-                            json_str = assistant_content[start:i + 1]
-                            break
+    def _balanced_json_from(text: str, start: int) -> Optional[str]:
+        """从 start（指向 '{'）起做字符串感知的花括号配对扫描，返回配对完整子串。"""
+        depth = 0
+        in_string = False
+        escaped = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        return None
+
+    # 1. 定位 "final_plan" → 向左找最近 { → 配对扫描
+    idx = assistant_content.find('"final_plan"')
+    if idx >= 0:
+        start = assistant_content.rfind('{', 0, idx)
+        if start >= 0:
+            json_str = _balanced_json_from(assistant_content, start)
+
+    # 2. 兑底：最后一个 ```json ...``` / ``` ...``` 代码块中的最外层 JSON
+    if not json_str:
+        for m in re.finditer(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', assistant_content, re.DOTALL):
+            cand = m.group(1)
+            try:
+                if '"final_plan"' in json.loads(cand):
+                    json_str = cand
+            except (json.JSONDecodeError, TypeError):
+                continue
+
     if not json_str:
         return None  # 没有找到 final_plan JSON
     try:
@@ -2839,9 +2566,9 @@ def api_test_complete(req: TestCompleteRequest):
     # 获取会话轨迹日志（harness 风格按轮次条目，含思考/输出/嵌套工具调用；唯一对话源）
     trace = chat_session_trace.get(req.session_id, [])
 
-    # 生成保存路径
+    # 生成保存路径（含微秒，避免同秒同模型同题重复完成时互相覆盖）
     from config import LOGS_TEST_DIR
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{timestamp}_{model_name}_{question_id}.json"
     filepath = os.path.join(LOGS_TEST_DIR, filename)
 
@@ -2879,6 +2606,13 @@ def api_test_complete(req: TestCompleteRequest):
 
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(record, f, ensure_ascii=False, indent=2)
+
+    # 落盘成功后清理会话内存（BUG#8 修复）：批量测试大量会话的对话/轨迹/元数据
+    # 不再常驻内存；此后同 session 再发消息即开启新会话（首轮自动加系统提示词）
+    chat_sessions.pop(req.session_id, None)
+    chat_session_trace.pop(req.session_id, None)
+    chat_session_meta.pop(req.session_id, None)
+    chat_session_model.pop(req.session_id, None)
 
     return {
         "success": True,
@@ -3061,7 +2795,7 @@ def api_eval_complete(req: EvalCompleteRequest):
     """标记测评完成，保存结果"""
     from config import LOGS_RESULT_DIR
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{timestamp}_{req.model_name}_{req.question_id}.json"
     filepath = os.path.join(LOGS_RESULT_DIR, filename)
 
@@ -3493,6 +3227,39 @@ _batch_state: Dict[str, Any] = {
 
 
 # ============================================================
+# 批量任务级互斥（流水线串行，BUG#3 修复核心）：
+# 四类批量任务（batch_generate / batch_nl / batch_test / batch_eval）
+# 同一时刻只允许一个运行——题目按题串行流经出题→自然语言→测试→测评四节点，
+# 批量化时不会有另一批量任务插入交错写 metadata；
+# 配合 database.py 的 metadata 写锁，彻底消除“旧快照整体覆盖”丢更新。
+# ============================================================
+_PIPELINE_LOCK = threading.Lock()
+_PIPELINE_RUNNING: Optional[str] = None
+
+
+def _pipeline_acquire(job: str) -> bool:
+    """原子地检查并占用流水线；已有任务运行中返回 False。"""
+    global _PIPELINE_RUNNING
+    with _PIPELINE_LOCK:
+        if _PIPELINE_RUNNING is not None:
+            return False
+        _PIPELINE_RUNNING = job
+        return True
+
+
+def _pipeline_release(job: str):
+    global _PIPELINE_RUNNING
+    with _PIPELINE_LOCK:
+        if _PIPELINE_RUNNING == job:
+            _PIPELINE_RUNNING = None
+
+
+def _pipeline_running_job() -> Optional[str]:
+    with _PIPELINE_LOCK:
+        return _PIPELINE_RUNNING
+
+
+# ============================================================
 # 批量工具日志：三个批量任务（batch_generate / batch_nl / batch_test）共用
 # - 内存环形缓冲：供前端 status 接口增量轮询（seq 游标）
 # - 追加落盘 logs/batch_tools.log：供后台直接查看
@@ -3597,16 +3364,16 @@ def _generate_batch_nl(question_ids: List[str]) -> Dict[str, Any]:
 
 def _run_batch(payload: Dict[str, Any]) -> None:
     """在线程中顺序生成全部题目：每题固定参数（站对/方向/人数/座位/题型）重试 ≤ max_retries，
-    成功即落盘（复用 _generate_one_variant + _confirm_generated_question），失败计入回执。"""
+    成功即直接落盘（_generate_question：生成→注入→自检→原子落盘），失败计入回执。"""
     rw_conn = get_railway_conn()
     try:
         distribution = payload.get("distribution") or []
         selective_rows = payload.get("selective") or []
         stations = payload.get("stations") or []
         seat_weights = payload.get("seat_weights") or {"class0": 20, "class1": 30, "class2": 50}
-        # 干扰密度分开：伪干扰（存在性 1_ 有干扰）与真干扰（选择性 2_）；旧字段 interference_density 作为两者兜底
-        fake_density = float(payload.get("fake_interference_density") or payload.get("interference_density") or 0.02)
-        real_density = float(payload.get("real_interference_density") or payload.get("interference_density") or 0.02)
+        # 密度分开：干扰（存在性 1_，票数<人数）与随机票（选择性 2_，0.5~1.5×人数）
+        interference_density = float(payload.get("interference_density") or 0.02)
+        random_tickets_density = float(payload.get("random_tickets_density") or 0.02)
         max_retries = max(1, int(payload.get("max_retries") or 40))
         nl_enabled = bool(payload.get("nl_enabled", True))
 
@@ -3619,14 +3386,14 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             "result": None,
         })
         _batch_log("batch_generate",
-                   f"批量出题开始：共 {exists_total + sel_total} 题（存在性 {exists_total} + 选择性 {sel_total}），每题重试上限 {max_retries}，伪干扰密度 {fake_density:.1%}，真干扰密度 {real_density:.1%}")
+                   f"批量出题开始：共 {exists_total + sel_total} 题（存在性 {exists_total} + 选择性 {sel_total}），每题重试上限 {max_retries}，干扰密度 {interference_density:.1%}，随机票密度 {random_tickets_density:.1%}")
 
         details: List[Dict] = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         seq = 0
 
-        def _build_request(question_type, transfers, segment_plans, mode, criterion, constraints, density):
-            """随机取站对（方向可倒置）、随机人数 3~6、按权重随机座位等级；干扰密度按题型传入"""
+        def _build_request(question_type, transfers, segment_plans, criterion, constraints):
+            """随机取站对（方向可倒置）、随机人数 3~6、按权重随机座位等级"""
             nonlocal seq
             pair = random.choice(stations)
             from_st, to_st = (pair[0], pair[1]) if random.random() < 0.5 else (pair[1], pair[0])
@@ -3635,14 +3402,10 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 ["class0", "class1", "class2"],
                 weights=[seat_weights.get("class0", 0), seat_weights.get("class1", 0), seat_weights.get("class2", 0)],
             )[0]
-            return AutoGenerateRequest(
+            return _GenerateParams(
                 question_type=question_type,
                 from_station_id=from_st,
                 to_station_id=to_st,
-                mode=mode,
-                random_tickets=False,
-                fake_interference=False,
-                interference_density=density,
                 transfers=transfers,
                 segment_plans=segment_plans,
                 custom_qid=f"B{timestamp}_{seq:04d}",
@@ -3652,23 +3415,24 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                 constraints=constraints,
             ), seq
 
-        def _generate_one(question_type, transfers, plans, mode, criterion, constraints, prefix, fake, with_if, density):
+        def _generate_one(question_type, transfers, plans, mode, criterion, constraints,
+                          prefix, interference_mode, density):
             """重试 ≤ max_retries：每次重试都重新随机站对/方向/人数/座位（换站对提高成功率）；
-            干扰密度按题型传入（存在性=伪干扰密度，选择性=真干扰密度）；
+            interference_mode：1_=interference（干扰）/ 0_=none / 2_=random_tickets（随机票）；
             成功返回 (qid, 尝试次数, None, seq)，失败返回 (None, max_retries, 错误, 首次seq)"""
             last_err = ""
             first_sq = None
             for attempt in range(1, max_retries + 1):
-                req, sq = _build_request(question_type, transfers, plans, mode, criterion, constraints, density)
+                req, sq = _build_request(question_type, transfers, plans, criterion, constraints)
                 if first_sq is None:
                     first_sq = sq
                 try:
-                    qid, _preview = _generate_one_variant(
-                        req, prefix, fake,
+                    qid, _summary = _generate_question(
+                        req, prefix,
                         "existence" if prefix != "2_" else "selective",
-                        rw_conn, with_if,
+                        rw_conn, interference_mode, density,
+                        rng=random.Random(),  # 每题独立随机实例，不重置全局流
                     )
-                    _confirm_generated_question(qid, interference=with_if, interference_density=density)
                     return qid, attempt, None, sq
                 except HTTPException as e:
                     last_err = str(e.detail) if hasattr(e, "detail") else str(e)
@@ -3676,7 +3440,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                     last_err = str(e)
             return None, max_retries, last_err, first_sq
 
-        # ---- 存在性问题：1_ 伪干扰（有干扰）/ 0_ 无干扰 ----
+        # ---- 存在性问题：1_ 干扰（票数<人数，唯一解）/ 0_ 无票注入 ----
         exists_fail = [{"has_interference": 0, "no_interference": 0} for _ in distribution]
         for idx, row in enumerate(distribution):
             row_label = f"{row.get('category', '')}/{row.get('name', '')}"
@@ -3684,22 +3448,22 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             transfers = int(row.get("transfers") or 0)
             plans = row.get("segment_plans") or []
             for _ in range(int(row.get("has_interference") or 0)):
-                _batch_state["current"] = f"存在性（有干扰）：{row_label}"
-                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "1_", True, True, fake_density)
+                _batch_state["current"] = f"存在性（干扰）：{row_label}"
+                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "1_", "interference", interference_density)
                 details.append({
                     "question_id": qid or f"1_B{timestamp}_{sq:04d}",
-                    "row": f"{row_label}/有干扰",
+                    "row": f"{row_label}/干扰",
                     "attempts": attempt, "ok": qid is not None, "error": err,
                 })
                 if qid is None:
                     exists_fail[idx]["has_interference"] += 1
-                    _batch_log("batch_generate", f"[{sq:04d}] 1_ 存在性（有干扰）{row_label} 失败（重试 {attempt} 次）：{err}", "error")
+                    _batch_log("batch_generate", f"[{sq:04d}] 1_ 存在性（干扰）{row_label} 失败（重试 {attempt} 次）：{err}", "error")
                 else:
-                    _batch_log("batch_generate", f"[{sq:04d}] 1_ 存在性（有干扰）{row_label} → {qid}（尝试 {attempt} 次）", "success")
+                    _batch_log("batch_generate", f"[{sq:04d}] 1_ 存在性（干扰）{row_label} → {qid}（尝试 {attempt} 次）", "success")
                 _batch_state["done_count"] += 1
             for _ in range(int(row.get("no_interference") or 0)):
                 _batch_state["current"] = f"存在性（无干扰）：{row_label}"
-                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "0_", False, False, fake_density)
+                qid, attempt, err, sq = _generate_one(qtype, transfers, plans, "existence", "comprehensive", [], "0_", "none", interference_density)
                 details.append({
                     "question_id": qid or f"0_B{timestamp}_{sq:04d}",
                     "row": f"{row_label}/无干扰",
@@ -3712,7 +3476,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
                     _batch_log("batch_generate", f"[{sq:04d}] 0_ 存在性（无干扰）{row_label} → {qid}（尝试 {attempt} 次）", "success")
                 _batch_state["done_count"] += 1
 
-        # ---- 选择性问题：2_ 真干扰（评判标准 + 行为约束） ----
+        # ---- 选择性问题：2_ 随机票（评判标准 + 行为约束） ----
         sel_fail = [0 for _ in selective_rows]
         for idx, row in enumerate(selective_rows):
             crit = row.get("criterion", "comprehensive")
@@ -3720,8 +3484,8 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             constraints = [] if beh == "none" else [beh]
             for _ in range(int(row.get("count") or 0)):
                 _batch_state["current"] = f"选择性：{_CRITERION_CN.get(crit, crit)}({_BEHAVIOR_CN.get(beh, beh)})"
-                # 题型不在此处指定：_generate_one_variant 对选择性题按行为约束自动推导（保证有解）
-                qid, attempt, err, sq = _generate_one(None, 0, [], "selective", crit, constraints, "2_", False, True, real_density)
+                # 题型不在此处指定：_generate_question 对选择性题按行为约束自动推导（保证有解）
+                qid, attempt, err, sq = _generate_one(None, 0, [], "selective", crit, constraints, "2_", "random_tickets", random_tickets_density)
                 details.append({
                     "question_id": qid or f"2_B{timestamp}_{sq:04d}",
                     "row": f"{_CRITERION_CN.get(crit, crit)}/{_BEHAVIOR_CN.get(beh, beh)}",
@@ -3776,6 +3540,7 @@ def _run_batch(payload: Dict[str, Any]) -> None:
         rw_conn.close()
         _batch_state["running"] = False
         _batch_state["done"] = True
+        _pipeline_release("batch_generate")
 
 
 # --- POST /api/batch/parse-distribution 解析 1.xlsx 分布表 ---
@@ -3805,9 +3570,8 @@ class BatchGenerateRequest(BaseModel):
     selective: List[Dict] = []
     stations: List[List[str]] = []
     seat_weights: Dict[str, float] = {}
-    interference_density: float = 0.02   # （兼容保留）未分字段时的兜底密度
-    fake_interference_density: float = 0.02   # 伪干扰密度（存在性 1_ 有干扰）
-    real_interference_density: float = 0.02   # 真干扰密度（选择性 2_）
+    interference_density: float = 0.02   # 干扰密度（存在性 1_，票数严格<人数，唯一解）
+    random_tickets_density: float = 0.02  # 随机票密度（选择性 2_，0.5~1.5×人数，多解）
     max_retries: int = 40
     # 批量落盘后是否自动生成自然语言并写回 metadata['nl_question']（需 .env NL_API_KEY）
     # 默认关闭：批量自然语言化由独立的批量语言框（/api/batch_nl/*）异步执行，与批量出题不混合
@@ -3818,9 +3582,11 @@ class BatchGenerateRequest(BaseModel):
 @app.post("/api/batch/generate")
 def api_batch_generate(req: BatchGenerateRequest):
     """按分布表 + 站对表一键批量出题：每题固定参数重试 ≤ max_retries，成功即直接落盘。"""
-    if _batch_state.get("running"):
-        raise HTTPException(status_code=400, detail="已有批量任务运行中，请等待完成")
+    if not _pipeline_acquire("batch_generate"):
+        raise HTTPException(status_code=400,
+                            detail=f"另一批量任务（{_pipeline_running_job()}）运行中：批量任务互斥（出题/自然语言/测试/测评同一时刻只能跑一个），请等待完成")
     if not req.stations:
+        _pipeline_release("batch_generate")
         raise HTTPException(status_code=400, detail="未提供站对表（2.xlsx），请先上传解析")
     import threading
     _batch_log_clear("batch_generate")
@@ -3924,6 +3690,7 @@ def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
                                     "skipped": len(question_ids)},
                        "details": [], "error": "未配置 NL_API_KEY，批量自然语言化已整批跳过"},
         })
+        _pipeline_release("batch_nl")
         return
     model = (ENV.get("NL_MODEL") or ENV.get("DEFAULT_MODEL") or "").strip()
     base_url = (ENV.get("NL_BASE_URL") or ENV.get("DEFAULT_BASE_URL") or "").strip()
@@ -3938,6 +3705,7 @@ def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
                                     "skipped": len(question_ids)},
                        "details": [], "error": f"未配置 {miss}，批量自然语言化已整批跳过"},
         })
+        _pipeline_release("batch_nl")
         return
 
     concurrency = max(1, min(int(concurrency or 1), 20))
@@ -4003,6 +3771,7 @@ def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
                f"批量自然语言化完成{'（中途停止）' if stopped else ''}：成功 {counts['generated']} / 失败 {counts['failed']} / 跳过 {counts['skipped']}（共 {len(question_ids)} 题，并发 {concurrency}）",
                "success" if counts["failed"] == 0 else "warn")
     _nl_state.update({"running": False, "done": True, "current": "", "stop": False})
+    _pipeline_release("batch_nl")
 
 
 class BatchNlGenerateRequest(BaseModel):
@@ -4038,10 +3807,12 @@ def api_batch_nl_scan():
 
 @app.post("/api/batch_nl/generate")
 def api_batch_nl_generate(req: BatchNlGenerateRequest):
-    """启动批量自然语言化（独立线程与进度，与批量出题互不影响）。"""
-    if _nl_state.get("running"):
-        raise HTTPException(status_code=400, detail="已有批量自然语言任务运行中，请等待完成")
+    """启动批量自然语言化（独立线程与进度；批量任务级互斥）。"""
+    if not _pipeline_acquire("batch_nl"):
+        raise HTTPException(status_code=400,
+                            detail=f"另一批量任务（{_pipeline_running_job()}）运行中：批量任务互斥（出题/自然语言/测试/测评同一时刻只能跑一个），请等待完成")
     if not req.question_ids:
+        _pipeline_release("batch_nl")
         raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描缺失自然语言的题目）")
     import threading
     _batch_log_clear("batch_nl")
@@ -4085,19 +3856,19 @@ _test_state: Dict[str, Any] = {
 
 
 def _batch_test_model_testable(m: Dict, model: str) -> bool:
-    """可测试条件：题目信息核查完备（含自然语言问题）且该模型未测试过。"""
+    """可测试条件：题目信息核查完备（含自然语言问题）且该模型在 state 列表中无记录（未测过）。"""
     return bool(m.get("question")) and bool(m.get("nl_question")) \
-        and model not in (m.get("tested_models") or [])
+        and get_question_model_state(m, model) is None
 
 
 def _run_batch_test(model: str, question_ids: List[str], max_iterations: int, concurrency: int = 1) -> None:
     """线程池并发测试：每题独立会话（session=batch_test_<qid>），题目上下文按调用传入（不依赖全局当前题目）；
-    成功后把模型名写入该题 metadata.tested_models（每个模型每题只测一次），最后统一落盘 metadata。"""
+    成功后把该题 state 写为 model:tested（即时锁内落盘；state 只记成功，失败可重试，成功后同模型不可重测）。"""
     concurrency = max(1, min(int(concurrency or 1), 8))
     _test_state.update({"running": True, "done": False, "current": "",
                         "total": len(question_ids), "done_count": 0, "result": None})
     _batch_log("batch_test", f"批量测试开始：模型 {model}，共 {len(question_ids)} 题，最大工具调用 {max_iterations}，并发数 {concurrency}")
-    metadata = load_metadata()
+    metadata = load_metadata()   # 只读快照：预检 testable；state 写入由 set_question_model_state 锁内即时落盘
     details = []
     state_lock = threading.Lock()
 
@@ -4125,10 +3896,8 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int, co
             complete_r = api_test_complete(TestCompleteRequest(session_id=session_id))
             if not complete_r.get("success"):
                 raise RuntimeError(str(complete_r.get("error", "测试记录保存失败")))
-            tested = list(entry.get("tested_models") or [])
-            if model not in tested:
-                tested.append(model)
-            entry["tested_models"] = tested
+            # state 节点推进：tested（锁内即时落盘；同模型成功一次后不可重测）
+            set_question_model_state(qid, model, "tested")
             _batch_log("batch_test",
                        f"{qid} 测试完成（plan_status={complete_r.get('plan_status', '')}，模型调用 {complete_r.get('model_calls', '-')} 次，工具调用 {complete_r.get('tool_calls', '-')} 次，耗时 {round(complete_r.get('duration', 0), 1)}s）→ {complete_r.get('filename', '')}",
                        "success")
@@ -4150,7 +3919,6 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int, co
             with state_lock:
                 details.append(detail)
                 _test_state["done_count"] += 1
-    save_metadata(metadata)
     ok_count = sum(1 for d in details if d["ok"])
     details.sort(key=lambda d: question_ids.index(d["question_id"]))
     _test_state["result"] = {
@@ -4162,6 +3930,7 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int, co
     _batch_log("batch_test", f"批量测试完成：成功 {ok_count} / 失败 {len(details) - ok_count}（共 {len(question_ids)} 题）",
                "success" if ok_count == len(details) else "warn")
     _test_state.update({"running": False, "done": True, "current": ""})
+    _pipeline_release("batch_test")
 
 
 class BatchTestScanRequest(BaseModel):
@@ -4200,7 +3969,7 @@ def api_batch_test_scan(req: BatchTestScanRequest):
             "seat_type": m.get("seat_type"),
             "criterion": m.get("criterion"),
             "constraints": m.get("constraints"),
-            "tested_models": m.get("tested_models") or [],
+            "tested_models": get_question_tested_models(m),
             "testable": _batch_test_model_testable(m, model),
         })
     return {"success": True, "model": model, "items": items, "total": len(items)}
@@ -4208,13 +3977,15 @@ def api_batch_test_scan(req: BatchTestScanRequest):
 
 @app.post("/api/batch_test/start")
 def api_batch_test_start(req: BatchTestStartRequest):
-    """启动批量测试：仅对“信息完备且该模型未测过”的题目执行，逐题保存测试记录并写回 tested_models。"""
+    """启动批量测试：仅对“信息完备且该模型未测过（state 无记录）”的题目执行，逐题保存测试记录并推进 state。"""
     model = (req.model or "").strip()
     if not model:
         raise HTTPException(status_code=400, detail="请先填写测试模型编号（名称）")
-    if _test_state.get("running"):
-        raise HTTPException(status_code=400, detail="已有批量测试任务运行中，请等待完成")
+    if not _pipeline_acquire("batch_test"):
+        raise HTTPException(status_code=400,
+                            detail=f"另一批量任务（{_pipeline_running_job()}）运行中：批量任务互斥（出题/自然语言/测试/测评同一时刻只能跑一个），请等待完成")
     if not req.question_ids:
+        _pipeline_release("batch_test")
         raise HTTPException(status_code=400, detail="未选择任何题目（可先扫描可测试题目）")
     import threading
     max_iter = max(1, min(int(req.max_iterations or 30), 100))
@@ -4267,7 +4038,8 @@ def _list_evaluated_test_files() -> set:
 
 
 def _run_batch_eval(filenames: List[str]) -> None:
-    """串行逐条测评：读测试记录 → 代码核查（verifier）→ 保存结果到 logs/result（结构同手动测评）。"""
+    """串行逐条测评：读测试记录 → 代码核查（verifier）→ 保存结果到 logs/result（结构同手动测评）；
+    成功后把该题该模型的 state 从 tested 升级为 evaluated。"""
     from config import LOGS_TEST_DIR, LOGS_RESULT_DIR
     _eval_state.update({"running": True, "done": False, "current": "",
                         "total": len(filenames), "done_count": 0, "result": None})
@@ -4290,7 +4062,7 @@ def _run_batch_eval(filenames: List[str]) -> None:
             verdict = verification.get("verdict", "unknown")
             verdict_count[verdict] = verdict_count.get(verdict, 0) + 1
             tu = data.get("token_usage") or {}
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             result_name = f"{timestamp}_{data.get('model_name', 'unknown')}_{qid}.json"
             record = {
                 "timestamp": datetime.now().isoformat(),
@@ -4312,6 +4084,10 @@ def _run_batch_eval(filenames: List[str]) -> None:
             }
             with open(os.path.join(LOGS_RESULT_DIR, result_name), "w", encoding="utf-8") as fh:
                 json.dump(record, fh, ensure_ascii=False, indent=2)
+            # state 节点推进：evaluated（锁内即时落盘）
+            model_name = data.get("model_name", "unknown")
+            if qid != "unknown" and model_name:
+                set_question_model_state(qid, model_name, "evaluated")
             ok_count += 1
             details.append({"filename": fn, "question_id": qid, "ok": True, "error": None,
                             "verdict": verdict, "result_file": result_name})
@@ -4330,6 +4106,7 @@ def _run_batch_eval(filenames: List[str]) -> None:
     _batch_log("batch_eval", f"批量测评完成：成功 {ok_count} / 失败 {len(details) - ok_count}，verdict 分布 {verdict_count}",
                "success" if ok_count == len(details) else "warn")
     _eval_state.update({"running": False, "done": True, "current": ""})
+    _pipeline_release("batch_eval")
 
 
 @app.post("/api/batch_eval/scan")
@@ -4364,9 +4141,11 @@ def api_batch_eval_scan():
 def api_batch_eval_start(req: Dict = Body(...)):
     """启动批量测评：对勾选的测试记录逐条代码核查并保存结果。"""
     filenames = [str(f) for f in (req.get("records") or []) if f]
-    if _eval_state.get("running"):
-        raise HTTPException(status_code=400, detail="已有批量测评任务运行中，请等待完成")
+    if not _pipeline_acquire("batch_eval"):
+        raise HTTPException(status_code=400,
+                            detail=f"另一批量任务（{_pipeline_running_job()}）运行中：批量任务互斥（出题/自然语言/测试/测评同一时刻只能跑一个），请等待完成")
     if not filenames:
+        _pipeline_release("batch_eval")
         raise HTTPException(status_code=400, detail="未选择任何测试记录（可先扫描测评记录）")
     _batch_log_clear("batch_eval")
     _batch_log("batch_eval", f"收到批量测评请求：{len(filenames)} 条记录，任务已启动")
@@ -4401,21 +4180,6 @@ if os.path.exists(STATIC_DIR):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return get_html("index.html")
-
-
-@app.get("/manual_question", response_class=HTMLResponse)
-def manual_question():
-    return get_html("index.html")
-
-
-@app.get("/auto_question", response_class=HTMLResponse)
-def auto_question():
-    return get_html("index.html")
-
-
-@app.get("/selective_question", response_class=HTMLResponse)
-def selective_question():
     return get_html("index.html")
 
 

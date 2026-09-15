@@ -11,6 +11,7 @@
 import sqlite3
 import os
 import json
+import re
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,8 +37,12 @@ def find_overnight_trains() -> dict:
     finally:
         conn.close()
 
+    _hhmm = re.compile(r'^\d{2}:\d{2}$')
     result = {}
     for train_num, stop_no, t_from, t_to in rows:
+        # 脏数据（非 HH:MM 格式，如 "--" 占位符）不参与跨天判定，避免字符串比较误报
+        if not (_hhmm.match(t_from or "") and _hhmm.match(t_to or "")):
+            continue
         # 只有「时间倒退」才是跨天（如 23:20 → 00:07）；正常车次后站时间晚于前站
         if t_from > t_to:
             result.setdefault(train_num, []).append((stop_no, t_from, t_to))

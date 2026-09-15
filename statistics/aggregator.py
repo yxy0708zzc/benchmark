@@ -161,24 +161,6 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
     scores = [_compute_score(r) for r in group]
     avg_score = sum(scores) / len(scores) if scores else 0
 
-    # 从测试记录中获取 token 消耗 / 模型调用 / 工具调用（均由 trace 推导）
-    total_tokens = 0
-    total_duration = 0
-    total_tool_calls = 0
-    total_model_calls = 0
-    token_count = 0
-    for r in group:
-        test_file = r.get("test_file", "")
-        if test_file:
-            test_data = load_test_record(os.path.basename(test_file))
-            if test_data:
-                tu = test_data.get("token_usage", {})
-                total_tokens += tu.get("total_tokens", 0)
-                total_duration += test_data.get("duration", 0)
-                total_tool_calls += _trace_tool_calls(test_data)
-                total_model_calls += _trace_model_calls(test_data)
-                token_count += 1
-
     return {
         "total_tests": total,
         "success_count": success_count,
@@ -194,10 +176,11 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
         "db_count": db_count,
         "unknown_count": unknown_count,
         "avg_score": round(avg_score, 1),
+        # token/耗时/双调用计数由 aggregate_results 统一补齐（此处不再重复读测试记录文件）
         "avg_tokens": 0,
         "avg_duration": 0,
-        "avg_tool_calls": round(total_tool_calls / token_count, 1) if token_count else 0,
-        "avg_model_calls": round(total_model_calls / token_count, 1) if token_count else 0,
+        "avg_tool_calls": 0,
+        "avg_model_calls": 0,
         "scores": scores,
     }
 

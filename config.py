@@ -37,7 +37,9 @@ def load_env(path: str = None) -> dict:
                     continue
                 k, _, v = line.partition("=")
                 v = v.strip()
-                quoted = v.startswith('"') or v.startswith("'")
+                # 配对引号包裹：整体剥掉一对引号（仅当开头与结尾是同类引号）；
+                # 引号内的 # 不视为注释
+                quoted = len(v) >= 2 and v[0] in ('"', "'") and v[-1] == v[0]
                 if not quoted:
                     # 剥离行内注释：值以 # 开头视为整段注释（值为空）；
                     # 否则剥离 " #"（# 前有空白）之后的内容，避免误伤值中紧邻的 #
@@ -48,8 +50,9 @@ def load_env(path: str = None) -> dict:
                             idx = v.find(sep)
                             if idx != -1:
                                 v = v[:idx].strip()
-                env[k.strip()] = v.strip().strip('"').strip("'")
-    # 记录 mtime 供 ensure_env_fresh 检测修改
+                if quoted:
+                    v = v[1:-1]  # 剥掉配对引号
+                env[k.strip()] = v.strip()    # 记录 mtime 供 ensure_env_fresh 检测修改
     global _env_mtime
     try:
         _env_mtime = os.path.getmtime(path)
@@ -130,8 +133,8 @@ CRAWLER_CONFIG = {
 # ============================================================
 QUESTION_CONFIG = {
     "default_interference_density": 0.02,  # 默认干扰密度（全局池统一默认 2%）
-    "ticket_max_value": 1000,              # 余票上限（宽松兜底；合法解/真干扰最大 1.5×人数 ≤ 30，留足余量）
-    "max_people_count": 20,                # 需求人数上限（答案票 1~1.5×人数，真干扰 0.5~1.5×人数）
+    "ticket_max_value": 1000,              # 余票上限（宽松兑底；标答/随机票最大 1.5×人数 ≤ 30，留足余量）
+    "max_people_count": 20,                # 需求人数上限（答案票 1~1.5×人数，随机票 0.5~1.5×人数）
     # 遗留（不再使用）：合法解票数现由 server.py `_random_solution_tickets` 生成（1~1.5×人数随机）
     "default_solution_ticket_min": 1,
     "default_solution_ticket_max": 5,

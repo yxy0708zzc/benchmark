@@ -73,8 +73,14 @@ class RateLimiter:
         self.request_count = 0
 
     def wait(self):
-        """执行请求前等待（已禁用休眠）"""
-        pass
+        """执行请求前等待，保证相邻请求间隔 ≥ min_interval（限速防反爬）"""
+        now = time.monotonic()
+        if self.last_request_time > 0:
+            elapsed = now - self.last_request_time
+            if elapsed < self.min_interval:
+                time.sleep(self.min_interval - elapsed)
+        self.last_request_time = time.monotonic()
+        self.request_count += 1
 
 # ============================================================
 # 12306 爬虫客户端
@@ -405,13 +411,8 @@ class TicketCrawler:
                 stop_time = item.get("start_time", "").strip()
             elif _is_valid_time((item.get("begin_time") or "").strip()):
                 stop_time = item.get("begin_time", "").strip()
-            # 兜底：取第一个非空字段
-            if not stop_time:
-                for fld in ("arrive_time", "depart_time", "start_time", "begin_time"):
-                    v = (item.get(fld) or "").strip()
-                    if v:
-                        stop_time = v
-                        break
+            # 无有效 HH:MM 时间则留空（不写入 "--" 等占位符脏数据），
+            # 由 verify_data 的 missing_stop_time 检出后清理
 
             # 查找车站电报码（通过“去非汉字”后的站名反向映射，避免空格/符号差异 miss）
             norm_name = _norm_station(station_name)

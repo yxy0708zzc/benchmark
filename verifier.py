@@ -61,6 +61,16 @@ def normalize_final_plan(raw_plan: List[Dict]) -> List[Dict]:
             if not seat_type:
                 out.append({"__invalid__": True, "error": "购票段缺 seat_type", "raw": item})
                 continue
+            # tickets 类型容错（BUG#5 修复）：模型常输出 "3.0" 等字符串小数或非法值，
+            # 解析失败不再抛异常导致接口 500，而是记为无效条目
+            try:
+                tickets_val = int(float(item.get("tickets", 0) or 0))
+            except (ValueError, TypeError):
+                out.append({"__invalid__": True, "error": f"购票段 tickets 非法: {item.get('tickets')!r}", "raw": item})
+                continue
+            if tickets_val < 0:
+                out.append({"__invalid__": True, "error": f"购票段 tickets 为负数: {tickets_val}", "raw": item})
+                continue
             # 缺实际乘坐区间 → 一律按不全处理（不兜底）：ride 留空，层2 不计入可达拼接
             missing_ride_flag = not (ride_from and ride_to)
             entry = {
@@ -70,7 +80,7 @@ def normalize_final_plan(raw_plan: List[Dict]) -> List[Dict]:
                 "ride_from_station_id": str(ride_from) if not missing_ride_flag else "",
                 "ride_to_station_id": str(ride_to) if not missing_ride_flag else "",
                 "seat_type": str(seat_type),
-                "tickets": int(item.get("tickets", 0) or 0),
+                "tickets": tickets_val,
                 "seg_type": "purchase",
             }
             if missing_ride_flag:
@@ -481,11 +491,13 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str) -> L
             if prev_to is not None and f != prev_to:
                 issues.append({"type": "route_discontinuity",
                                "detail": f"第{i}段终点 {prev_to} 与第{i + 1}段起点 {f} 不连续"})
-            # 2. 时间顺序（跨车次换乘衔接）
+            # 2. 时间顺序（跨车次换乘衔接）。注意：字符串比较遇跨天（前车 23:xx 到、
+            # 后车次日 00:xx 发）会判冲突——这是有意的「当日完成约束」：行程必须当日完成，
+            # 换乘跨天即为非法方案（数据库与提示词均不支持跨天）
             if prev_train is not None and prev_train != tn and prev_arr and times.get(f):
                 if str(times[f]) < str(prev_arr):
                     issues.append({"type": "transfer_time_conflict",
-                                   "detail": f"{prev_train} 到达 {prev_to} {prev_arr}，晚于 {tn} 从 {f} 发车 {times[f]}"})
+                                   "detail": f"{prev_train} 到达 {prev_to} {prev_arr}，晚于 {tn} 从 {f} 发车 {times[f]}（换乘跨天/时间倒退，违反当日完成约束）"})
             prev_to = t
             prev_train = tn
             prev_arr = times.get(t)
