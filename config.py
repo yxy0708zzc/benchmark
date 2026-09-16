@@ -4,6 +4,7 @@
 """
 
 import os
+import threading
 from datetime import datetime, timedelta
 
 # ============================================================
@@ -29,6 +30,17 @@ def load_env(path: str = None) -> dict:
     """
     path = path or os.path.join(PROJECT_ROOT, ".env")
     env = {}
+    def _strip_comment(val: str) -> str:
+        """剥离行内注释：值以 # 开头视为整段注释（值为空）；
+        否则剥离 " #"（# 前有空白）之后的内容，避免误伤值中紧邻的 #"""
+        if val.startswith("#"):
+            return ""
+        for sep in (" #", "\t#"):
+            idx = val.find(sep)
+            if idx != -1:
+                val = val[:idx].rstrip()
+        return val
+
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -37,21 +49,23 @@ def load_env(path: str = None) -> dict:
                     continue
                 k, _, v = line.partition("=")
                 v = v.strip()
-                # 配对引号包裹：整体剥掉一对引号（仅当开头与结尾是同类引号）；
-                # 引号内的 # 不视为注释
-                quoted = len(v) >= 2 and v[0] in ('"', "'") and v[-1] == v[0]
-                if not quoted:
-                    # 剥离行内注释：值以 # 开头视为整段注释（值为空）；
-                    # 否则剥离 " #"（# 前有空白）之后的内容，避免误伤值中紧邻的 #
-                    if v.startswith("#"):
-                        v = ""
+                # 引号解析：以引号开头 → 找配对闭引号，引号内的 # 不视为注释，
+                # 闭引号后仅允许空白/注释。
+                # （修复：原实现先判 quoted 再剥注释，导致 `"xxx"  # 注释` 的引号
+                #   残留在值里，模型名带着引号发给 API 报 401/404）
+                if v[:1] in ('"', "'"):
+                    q = v[0]
+                    end = v.find(q, 1)
+                    if end != -1:
+                        rest = v[end + 1:].strip()
+                        if rest == "" or rest.startswith("#"):
+                            v = v[1:end]           # 整体引号包裹：取引号内内容
+                        else:
+                            v = _strip_comment(v)   # 闭引号后还有内容：按普通值处理
                     else:
-                        for sep in (" #", "\t#"):
-                            idx = v.find(sep)
-                            if idx != -1:
-                                v = v[:idx].strip()
-                if quoted:
-                    v = v[1:-1]  # 剥掉配对引号
+                        v = _strip_comment(v)       # 无配对闭引号：按普通值处理
+                else:
+                    v = _strip_comment(v)
                 env[k.strip()] = v.strip()    # 记录 mtime 供 ensure_env_fresh 检测修改
     global _env_mtime
     try:
@@ -62,6 +76,7 @@ def load_env(path: str = None) -> dict:
 
 
 _env_mtime = None
+_ENV_LOCK = threading.Lock()
 
 
 def ensure_env_fresh():
@@ -69,6 +84,10 @@ def ensure_env_fresh():
 
     所有读取 ENV 配置的入口（调模型前）应先调用本函数，避免"改了 .env 忘记重启"导致
     进程继续使用旧 key / 旧模型名（曾表现为批量测试 401 而直接调用成功）。
+
+    并发安全（修复）：批量测试/NL 多线程同时进入时，原 `ENV.clear()+update()` 会让
+    其他线程在两步之间读到半空 ENV（偶发"未配置 key"整批误报）。改为加锁 + 逐键迁移：
+    dict 单键读写原子，任何线程看到的每个 key 要么旧值要么新值，不会为空。
     """
     global _env_mtime
     path = os.path.join(PROJECT_ROOT, ".env")
@@ -77,9 +96,19 @@ def ensure_env_fresh():
     except OSError:
         return
     if _env_mtime is None or mt != _env_mtime:
-        fresh = load_env(path)
-        ENV.clear()
-        ENV.update(fresh)
+        with _ENV_LOCK:
+            # 双检：等锁期间其他线程可能已完成重载
+            try:
+                mt2 = os.path.getmtime(path)
+            except OSError:
+                return
+            if _env_mtime is not None and mt2 == _env_mtime:
+                return
+            fresh = load_env(path)
+            for k in [k for k in ENV if k not in fresh]:
+                ENV.pop(k, None)
+            ENV.update(fresh)
+            _env_mtime = mt2
 
 
 ENV = load_env()
@@ -109,6 +138,13 @@ METADATA_PATH = os.path.join(QUESTION_DIR, "metadata.json")   # 题目元数据
 # ============================================================
 NL_TEMPERATURE = 1.4      # 起名 / 自然语言化温度（提高多样性）
 TEST_TEMPERATURE = 0.7    # 测试器对话温度
+# 测试器单轮 LLM 请求超时（秒），全局唯一口径，所有调用方一律引用本常量：
+# - 非流式（批量测试 /api/test/chat、NL 生成等）→ TEST_CHAT_TIMEOUT = 600
+# - 流式（页面对话 /api/test/chat/stream）      → TEST_CHAT_STREAM_TIMEOUT = 120
+# 慢推理模型单轮思考可能非常长，太短会把对话拦腰掐断
+# （2026-09-15 曾因 60s 批量全军覆没；2026-09-16 非流式提到 600s，流式保持 120s）
+TEST_CHAT_TIMEOUT = 600
+TEST_CHAT_STREAM_TIMEOUT = 120
 
 # ============================================================
 # 爬虫配置（12306 请求限速 / 超时 / 重试 / 基准日期）

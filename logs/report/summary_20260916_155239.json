@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-09-16T15:52:39.881403",
+  "total_tests": 5,
+  "models_compared": [
+    "glm-5.3-flash"
+  ],
+  "model_ranking": [
+    {
+      "model": "glm-5.3-flash",
+      "completion_rate": 100.0,
+      "pass_rate": 20.0,
+      "error_rate": 40.0
+    }
+  ],
+  "by_question_type": {
+    "by_type": {
+      "存在性": {
+        "count": 3,
+        "pass_count": 0,
+        "pass_rate": 0.0,
+        "error_count": 1,
+        "error_rate": 33.3,
+        "no_plan_count": 2,
+        "empty_count": 0
+      },
+      "选择性": {
+        "count": 2,
+        "pass_count": 1,
+        "pass_rate": 50.0,
+        "error_count": 1,
+        "error_rate": 50.0,
+        "no_plan_count": 0,
+        "empty_count": 0
+      }
+    },
+    "by_question_type": {
+      "transfer": {
+        "count": 3,
+        "pass_count": 1,
+        "pass_rate": 33.3,
+        "error_count": 2,
+        "error_rate": 66.7,
+        "no_plan_count": 0,
+        "empty_count": 0
+      },
+      "mixed": {
+        "count": 2,
+        "pass_count": 0,
+        "pass_rate": 0.0,
+        "error_count": 0,
+        "error_rate": 0.0,
+        "no_plan_count": 2,
+        "empty_count": 0
+      }
+    }
+  },
+  "hallucination_warning": [
+    "glm-5.3-flash 错误率 40.0%，超过 10% 阈值"
+  ],
+  "insights": [
+    "glm-5.3-flash 在所有模型中通过率最高（20.0%）",
+    "glm-5.3-flash 在所有模型中通过率最低（20.0%）",
+    "题型从易到难排序：transfer > mixed",
+    "所有模型在 transfer 题型上表现最好（通过率 33.3%）",
+    "所有模型在 mixed 题型上最具挑战（通过率 0.0%）",
+    "题目类型从易到难排序：选择性 > 存在性"
+  ]
+}

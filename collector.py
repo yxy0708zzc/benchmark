@@ -501,6 +501,12 @@ class TicketCrawler:
 
             conn.commit()
         finally:
+            # 先结束未决事务（成功路径 commit 后为 no-op；异常路径回滚半成品），
+            # 否则活动事务内的 PRAGMA 会被 SQLite 静默忽略，FK 无法真正恢复
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             # 确保无论是否异常都重新启用 FK 校验
             cursor.execute("PRAGMA foreign_keys = ON")
         logger.info(f"[经停] 采集完成，共 {len(all_stops)} 条经停记录")
@@ -551,6 +557,11 @@ class TicketCrawler:
         # 停站序列哈希 -> 车次列表
         hash_to_trains = defaultdict(list)
         for tn, stops in train_stops.items():
+            # 任一站缺有效时间则不参与同车分组：key 含时间，缺时间车次的 key 会退化成
+            # 纯站名序列，可能把「经停相同但时刻不同」的两趟合法车误合并成同车组，
+            # 随后 dedup 按"票价较少"整车删除（宁可不归组，不可误合并）
+            if any(not re.match(r'^\d{2}:\d{2}$', s["stop_time"] or "") for s in stops):
+                continue
             stop_key = "|".join([f"{s['station_name']}:{s['stop_time']}" for s in stops])
             hash_to_trains[stop_key].append(tn)
 
@@ -618,11 +629,17 @@ class TicketCrawler:
         missing_stop_time = cursor.fetchone()[0]
 
         # 跨天车次（相邻经停站 stop_time 时间倒退，如 23:20→00:07，违反当日完成约束）
+        # - 相邻站按「下一个实际存在的 stop_no」取（容忍断号，与 cleanup_overnight 口径一致）
+        # - 双侧时间都必须是合法 HH:MM（GLOB 过滤），避免缺时间车因 '23:20'>'' 被误报为跨天
         cursor.execute("""
             SELECT COUNT(DISTINCT a.train_num)
             FROM train_stops a JOIN train_stops b
-              ON a.train_num = b.train_num AND a.stop_no = b.stop_no - 1
-            WHERE a.stop_time > b.stop_time
+              ON b.train_num = a.train_num
+             AND b.stop_no = (SELECT MIN(c.stop_no) FROM train_stops c
+                              WHERE c.train_num = a.train_num AND c.stop_no > a.stop_no)
+            WHERE a.stop_time GLOB '[0-9][0-9]:[0-9][0-9]'
+              AND b.stop_time GLOB '[0-9][0-9]:[0-9][0-9]'
+              AND a.stop_time > b.stop_time
         """)
         overnight_count = cursor.fetchone()[0]
 

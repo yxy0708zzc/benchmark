@@ -401,12 +401,29 @@ def _run_full_cleanup():
 
     print(f"\n自动删除 {len(incomplete)} 个仍不全的车次...")
     deleted = []
+    skipped_noprice = []
     need_rebuild = False
-    for info in incomplete:
-        result = delete_train_completely(info["train_num"])
-        deleted.append(info["train_num"])
-        if result["success"]:
-            need_rebuild = True
+    pr = sqlite3.connect(PRICES_DB)
+    try:
+        for info in incomplete:
+            tn = info["train_num"]
+            # 零票价记录保护（修复误删链）：prices 完全无行的车次（全量爬取时所有站对
+            # 都失败所致）现已能被 price_collector --supplement 扫到并补爬（候选含 trains
+            # 全集），不再整车删除——否则会连爬到的经停数据一起不可逆删掉
+            rows = pr.execute("SELECT COUNT(*) FROM prices WHERE train_num=?", (tn,)).fetchone()[0]
+            if rows == 0:
+                skipped_noprice.append(tn)
+                print(f"  ⏭ {tn}: prices 无任何记录（数据缺失而非不全），跳过删除（建议补爬）")
+                continue
+            result = delete_train_completely(tn)
+            deleted.append(tn)
+            if result["success"]:
+                need_rebuild = True
+    finally:
+        pr.close()
+    if skipped_noprice:
+        print(f"\n跳过零票价记录车次 {len(skipped_noprice)} 个：{', '.join(skipped_noprice)}\n"
+              f"  （补爬命令：python price_collector.py --supplement）")
     _rebuild_and_report(deleted, [], need_rebuild)
 
 

@@ -188,7 +188,7 @@ const Components = {
       html += `</div></details>`;
     }
 
-    html += `<div>${fmt(content)}</div>`;
+    html += `<div class="message-content">${fmt(content)}</div>`;
 
     // 工具调用：统一折叠目录（默认展开，避免流式刷新时自动合上）
     if (toolCalls && toolCalls.length > 0) {
@@ -207,17 +207,29 @@ const Components = {
     return html;
   },
 
-  /** 格式化消息内容（Markdown 渲染） */
+  /** 格式化消息内容（Markdown 渲染 + XSS 净化） */
   _formatContent: function(content) {
     if (!content) return '';
+    let html;
     try {
       if (typeof marked !== 'undefined' && marked.parse) {
-        return marked.parse(content, { breaks: true });
+        html = marked.parse(content, { breaks: true });
+      } else {
+        html = content.replace(/\n/g, '<br>');
       }
     } catch (e) {
       // fallback
+      html = content.replace(/\n/g, '<br>');
     }
-    return content.replace(/\n/g, '<br>');
+    // XSS 防护：marked v5+ 已移除 sanitize 能力，内联 HTML 默认原样通过；
+    // 模型输出/题面提示注入/历史记录文件中的 <img onerror> 等必须净化后才可入 DOM
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+      return DOMPurify.sanitize(html);
+    }
+    // DOMPurify 加载失败时安全降级：整体转义（显示源码也不执行脚本）
+    const d = document.createElement('div');
+    d.textContent = html;
+    return d.innerHTML;
   },
 
   /** 流式纯文本渲染：先剥离 Markdown 语法标记（避免中间态显示源码乱码），再转义 HTML */

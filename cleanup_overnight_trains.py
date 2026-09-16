@@ -27,11 +27,15 @@ def find_overnight_trains() -> dict:
     """
     conn = sqlite3.connect(RAILWAY_DB)
     try:
+        # 相邻站按「下一个实际存在的 stop_no」配对：stop_no 断号（个别站写入失败被跳过）
+        # 时，旧写法 a.stop_no = b.stop_no - 1 会漏检恰好落在缺口上的跨天点
         rows = conn.execute("""
             SELECT a.train_num, a.stop_no, a.stop_time, b.stop_time
             FROM train_stops a
             JOIN train_stops b
-              ON a.train_num = b.train_num AND a.stop_no = b.stop_no - 1
+              ON b.train_num = a.train_num
+             AND b.stop_no = (SELECT MIN(c.stop_no) FROM train_stops c
+                              WHERE c.train_num = a.train_num AND c.stop_no > a.stop_no)
             ORDER BY a.train_num, a.stop_no
         """).fetchall()
     finally:

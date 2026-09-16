@@ -802,7 +802,8 @@ html.dark-mode [style*="background:#fff"] { background: #171A21 !important; }
 /* 右侧抽屉：JS 修改 display/right 后浏览器会重序列化整个 style 属性（#fff → rgb(255,255,255)），
    属性子串选择器失配 → 直接按 ID 覆盖，并兼容序列化后的 rgb 形式 */
 html.dark-mode #eval-drawer,
-html.dark-mode #trace-drawer {
+html.dark-mode #trace-drawer,
+html.dark-mode #test-drawer {
   background: #171A21 !important;
   box-shadow: -8px 0 24px rgba(0,0,0,.5) !important;
 }

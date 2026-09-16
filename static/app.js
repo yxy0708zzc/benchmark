@@ -49,7 +49,17 @@ const App = {
     this._setupEventListeners();
 
     // 根据 URL 路径切换到对应页面
-    const path = window.location.pathname;
+    this._routeFromPath(window.location.pathname);
+
+    // 浏览器前进/后退：按 URL 同步页面（不 pushState，避免历史堆栈继续增长；
+    // 修复：原实现无 popstate 处理，后退键 URL 变了页面不变）
+    window.addEventListener('popstate', () => {
+      this._routeFromPath(window.location.pathname);
+    });
+  },
+
+  /** URL 路径 → 页面名 并切换（init 与 popstate 共用） */
+  _routeFromPath: function(path) {
     const pageMap = {
       '/': 'test',
       '/index.html': 'test',
@@ -61,6 +71,7 @@ const App = {
       '/stats': 'stats',
       '/eval': 'eval',
       '/eval_manage': 'eval-manage',
+      '/test_manage': 'test-manage',
     };
     const pageName = pageMap[path] || 'test';
     this._switchToPage(pageName, false);
@@ -102,6 +113,7 @@ const App = {
         'stats': '/stats',
         'eval': '/eval',
         'eval-manage': '/eval_manage',
+        'test-manage': '/test_manage',
       };
       const url = urlMap[pageName] || '/';
       window.history.pushState({ page: pageName }, '', url);
@@ -138,6 +150,9 @@ const App = {
         case 'eval-manage':
           this.initEvalManage();
           break;
+        case 'test-manage':
+          this.initTestManage();
+          break;
       }
     }, 50);
   },
@@ -160,8 +175,13 @@ const App = {
   // 测试器初始化
   // ============================================================
   initTester: function() {
-    if (document.querySelector('#page-test')?.dataset.initialized) return;
-    document.querySelector('#page-test').dataset.initialized = '1';
+    const page = document.querySelector('#page-test');
+    if (page?.dataset.initialized) {
+      // 二次进入不重复绑事件，但刷新题目列表（批量出题/改题后切回来能看到新题）
+      this._loadQuestionList();
+      return;
+    }
+    page.dataset.initialized = '1';
 
     API.resetChat(this.sessionId);
     const msgContainer = document.getElementById('chat-messages');
@@ -357,7 +377,9 @@ const App = {
     /** 更新最后一条助手消息的显示内容（保留展开/折叠状态）
      *  plain=true：流式期间纯文本渲染；plain=false：完成后用 marked 渲染 Markdown */
     const updateMsg = (cursor = false, plain = true) => {
-      const displayContent = fullContent + (cursor ? '<span style="color:var(--gray-4)">▌</span>' : '');
+      // 光标不再拼进 content（会被 plain 路径的 _escapeHtml 转成字面 HTML 源码文本），
+      // 改为渲染完成后单独追加到 .message-content 尾部
+      const displayContent = fullContent;
       const lastMsg = container.lastElementChild;
 
       // 保存当前 details 展开/折叠状态
@@ -383,6 +405,12 @@ const App = {
         }
       } else {
         container.insertAdjacentHTML('beforeend', html);
+      }
+      // 流式光标：渲染/转义之后再追加，避免被转义成可见源码（修复：每次流式输出尾部显示 HTML 源码）
+      if (cursor) {
+        const curMsg = container.lastElementChild;
+        const body = curMsg && curMsg.querySelector('.message-content');
+        if (body) body.insertAdjacentHTML('beforeend', '<span style="color:var(--gray-4)">▌</span>');
       }
       this._scrollChatToBottom();
 
@@ -491,7 +519,13 @@ const App = {
       }
     } catch (e) {
       if (e.name === 'AbortError') {
-        // 用户中止，不做任何提示
+        // 用户中止：收尾占位消息，避免永久停留在"思考中..."（修复：原实现直接 return）
+        doneCalled = true;
+        if (!fullContent) {
+          fullContent = '（已中止）';
+          toolCallsList.length = 0;
+        }
+        updateMsg(false, true);
         return;
       }
       if (!doneCalled) {
@@ -624,7 +658,7 @@ const App = {
       let html = '';
       if (m.reasoning) html += secTitle('💭 思考链') + pre(m.reasoning);
       html += secTitle('📝 回复内容');
-      try { html += `<div class="message-content">${marked.parse(m.content || '')}</div>`; }
+      try { html += `<div class="message-content">${Components._formatContent(m.content || '')}</div>`; }
       catch (e) { html += pre(m.content); }
       if ((m.tools || []).length) html += secTitle(`🔧 本轮工具调用（${m.tools.length}）`);
       body.innerHTML = html;
@@ -728,9 +762,11 @@ const App = {
     // 每次进入改题页都刷新下拉列表（确保新创建的题目可见）
     this._loadEditQuestionOptions();
 
-    // 车次输入框回车触发加载
+    // 车次输入框回车触发加载（dataset 防重复绑定：原实现每次进页叠加一个监听器，
+    // 进 N 次后按一次 Enter 触发 N 次加载）
     const trainInput = document.getElementById('edit-train-input');
-    if (trainInput) {
+    if (trainInput && !trainInput.dataset.enterBound) {
+      trainInput.dataset.enterBound = '1';
       trainInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -1433,6 +1469,7 @@ const App = {
     this[flag] = true;
     const alive = () => this._batchPollTokens[job] === token;
     let warmupTicks = 0;   // 后端已受理但 worker 尚未置 running 的预热期计数（防意外死循环）
+    let pollErrors = 0;    // 连续失败计数（网络故障/回调异常达到上限即停止，防死循环刷屏）
     const tick = async () => {
       if (!alive()) return;
       try {
@@ -1444,7 +1481,13 @@ const App = {
           this._appendBatchLog(logId, job, status.logs, true);
           return;
         }
-        renderFn(status);
+        pollErrors = 0;
+        try {
+          renderFn(status);
+        } catch (err) {
+          // 渲染回调异常不进入轮询重试路径（原实现会落进下方 catch 变成无限重试）
+          console.error(job + ' 进度渲染失败:', err);
+        }
         this._appendBatchLog(logId, job, status.logs, opts.skipLogReplay);
         if (status.running) { setTimeout(tick, interval); }
         else if (!status.done && warmupTicks < 30) {
@@ -1454,11 +1497,20 @@ const App = {
         }
         else {
           this[flag] = false;
-          if (status.done && onDoneFn) onDoneFn(status);
+          if (status.done && onDoneFn) {
+            try { onDoneFn(status); } catch (err) { console.error(job + ' 完成回调失败:', err); }
+          }
         }
       } catch (e) {
         if (!alive()) return;
+        pollErrors += 1;
         console.error(job + ' 进度轮询失败:', e);
+        if (pollErrors > 30) {
+          // 连续失败上限（后端宕机/持续异常），停止轮询防止每 0.5s 一次的死循环
+          this[flag] = false;
+          this._appendBatchLog(logId, job, { items: [{ seq: 0, t: '', level: 'error', msg: '进度轮询连续失败，已停止（请检查服务后刷新页面）' }] }, false);
+          return;
+        }
         setTimeout(tick, interval);
       }
     };
@@ -1542,14 +1594,16 @@ const App = {
   _renderBatchResult: function(result) {
     const container = document.getElementById('batch-result');
     if (!container) return;
+    result = result || {};
+    const s = result.summary || {};   // 任务异常结束时可能缺 summary，兜底防 TypeError
     container.style.display = 'block';
     let html = '<div class="card"><div class="card-header">📋 批量出题结果</div>';
     html += `<div style="display:flex;gap:16px;padding:8px 0;font-size:var(--font-size-small)">
-      <div><strong>总题数：</strong>${result.summary.total}</div>
-      <div style="color:var(--success-green)"><strong>成功：</strong>${result.summary.success}</div>
-      <div style="color:var(--error-red)"><strong>失败：</strong>${result.summary.failed}</div>
+      <div><strong>总题数：</strong>${s.total ?? 0}</div>
+      <div style="color:var(--success-green)"><strong>成功：</strong>${s.success ?? 0}</div>
+      <div style="color:var(--error-red)"><strong>失败：</strong>${s.failed ?? 0}</div>
     </div>`;
-    const nl = result.summary || {};
+    const nl = s;
     if (nl.nl_generated !== undefined) {
       html += `<div style="display:flex;gap:16px;padding:4px 0;font-size:var(--font-size-small)">
         <div><strong>自然语言生成：</strong><span style="color:var(--success-green)">${nl.nl_generated}</span> 成功</div>
@@ -1560,7 +1614,7 @@ const App = {
         html += `<div style="color:var(--gray-5);font-size:var(--font-size-small);padding-bottom:4px">${nl.nl_error}</div>`;
       }
     }
-    if (result.summary.failed > 0) {
+    if ((s.failed ?? 0) > 0) {
       html += '<div style="color:var(--error-red);font-size:var(--font-size-small);padding-bottom:8px">失败明细见回执 xlsx（每格=该格失败题数，表头=总失败数），可点击下方按钮下载</div>';
     }
     if (result.details && result.details.length) {
@@ -1746,8 +1800,8 @@ const App = {
 
   /** 扫描可测试题目（模型未测过且信息完备） */
   _scanBatchTest: async function() {
-    const model = document.getElementById('batch-test-model')?.value.trim();
-    if (!model) { alert('请先填写测试模型编号（名称）'); return; }
+    // 模型自动取 .env TEST_MODEL（输入框只读展示；留空由后端回落解析）
+    const model = document.getElementById('batch-test-model')?.value.trim() || '';
     try {
       const res = await API.batchTestScan({ model });
       if (!res.success) { alert(`扫描失败: ${res.detail || '未知错误'}`); return; }
@@ -1802,8 +1856,8 @@ const App = {
   /** 开始批量测试 */
   _startBatchTest: async function() {
     if (!this.batchTestSelected.size) { alert('未勾选任何可测试题目'); return; }
-    const model = document.getElementById('batch-test-model')?.value.trim();
-    if (!model) { alert('请先填写测试模型编号（名称）'); return; }
+    // 模型自动取 .env TEST_MODEL（输入框只读展示；留空由后端回落解析）
+    const model = document.getElementById('batch-test-model')?.value.trim() || '';
     const maxIter = parseInt(document.getElementById('batch-test-max-iter')?.value || '30', 10) || 30;
     const concurrency = parseInt(document.getElementById('batch-test-concurrency')?.value || '1', 10) || 1;
     try {
@@ -2151,6 +2205,10 @@ const App = {
       const res = await API.batchEvalScan();
       if (!res.success) { alert(`扫描失败: ${res.detail || '未知错误'}`); return; }
       this.batchEvalItems = res.items || [];
+      // 选中集按可见列表裁剪：已删除/已消失的记录不再留在 batchEvalSelected
+      // （否则全选+开始测评会对已删文件逐条报错；与 tm/em/qm 的做法对齐）
+      const visible = new Set(this.batchEvalItems.map(i => i.filename));
+      this.batchEvalSelected = new Set([...this.batchEvalSelected].filter(f => visible.has(f)));
       this._renderBatchEvalTable();
     } catch (e) { alert(`扫描失败: ${e.message}`); }
   },
@@ -2178,6 +2236,14 @@ const App = {
     });
     html += '</tbody></table>';
     container.innerHTML = html;
+    // 键盘/单击勾选也同步进状态集（原实现只靠拖选的 mousedown 路径，
+    // Space 勾选 DOM 变了但 batchEvalSelected 不知道，重渲染后被画回去）
+    container.querySelectorAll('input[data-eval-file]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) this.batchEvalSelected.add(cb.dataset.evalFile);
+        else this.batchEvalSelected.delete(cb.dataset.evalFile);
+      });
+    });
   },
 
   /** 批量测评全选/取消 */
@@ -2263,7 +2329,331 @@ const App = {
   },
 
   // ============================================================
-  // 测评管理（浏览测评结果：按模型/题目筛选 + 详情抽屉含对话轨迹）
+  // 测试管理（浏览测试记录 logs/test：「测试后」产物）
+  // 结构化展示模型输出：左栏筛选 + 右栏列表，点击行开宽幅抽屉按轨迹展示；支持单条/批量删除
+  // ============================================================
+  _testManageItems: [],
+  _testManageSelected: new Set(),   // 已勾选的记录文件名集合（刷新后按可见列表裁剪）
+
+  initTestManage: function() {
+    const page = document.querySelector('#page-test-manage');
+    if (!page) return;
+    if (!page.dataset.initialized) {
+      page.dataset.initialized = '1';
+      document.getElementById('btn-tm-refresh')?.addEventListener('click', () => this._loadTestManageList());
+      document.getElementById('tm-model')?.addEventListener('change', () => this._loadTestManageList());
+      document.getElementById('tm-end')?.addEventListener('change', () => this._loadTestManageList());
+      document.getElementById('tm-question')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') this._loadTestManageList();
+      });
+      // 表头全选/全不选 + 拖选（与测评管理同套机制）
+      document.getElementById('tm-table')?.addEventListener('change', (e) => {
+        if (e.target.id === 'tm-check-all') this._toggleTmAll(e.target.checked);
+      });
+      this._bindDragSelect(
+        document.getElementById('tm-table'),
+        'input.tm-check',
+        (cb, checked) => this._setTmCheck(cb, checked),
+      );
+    }
+    this._loadTestManageList();
+  },
+
+  /** 加载测试记录列表（按当前筛选条件） */
+  _loadTestManageList: async function() {
+    const params = new URLSearchParams();
+    const model = document.getElementById('tm-model')?.value.trim() || '';
+    const qid = document.getElementById('tm-question')?.value.trim() || '';
+    const end = document.getElementById('tm-end')?.value || '';
+    if (model) params.set('model', model);
+    if (qid) params.set('question_id', qid);
+    if (end) params.set('end_reason', end);
+    try {
+      const data = await API.testManageList(params.toString());
+      // 模型下拉：按返回的全部模型重建，保留当前选择
+      const sel = document.getElementById('tm-model');
+      if (sel) {
+        const cur = (sel.value || '').trim();
+        sel.innerHTML = '<option value="">全部模型</option>' +
+          (data.models || []).map(m => `<option value="${this._escHtml(m)}">${this._escHtml(m)}</option>`).join('');
+        sel.value = cur;
+        if (sel.value !== cur) sel.value = '';
+      }
+      // 汇总卡
+      const s = data.summary || {};
+      const ec = s.end_reason_counts || {};
+      const sumEl = document.getElementById('tm-summary');
+      if (sumEl) {
+        const endMeta = {
+          completed: ['✅ completed 正常完成', 'var(--success-green)'],
+          max_iterations: ['✂️ max_iterations 轮数耗尽', '#d97706'],
+          error: ['❌ error 异常中断', 'var(--error-red)'],
+        };
+        sumEl.innerHTML =
+          `<div>共 <strong>${s.total}</strong> 条 · 总 Token <strong>${s.total_tokens}</strong> · 平均耗时 <strong>${s.avg_duration}s</strong></div>` +
+          Object.keys(endMeta).filter(k => ec[k]).map(k =>
+            `<div style="color:${endMeta[k][1]}">${endMeta[k][0]} × ${ec[k]}</div>`).join('') ||
+          '<div style="color:var(--gray-4)">暂无数据</div>';
+      }
+      const countEl = document.getElementById('tm-count');
+      if (countEl) countEl.textContent = `（共 ${data.total} 条）`;
+      this._testManageItems = data.records || [];
+      const visibleFiles = new Set(this._testManageItems.map(it => it.filename));
+      this._testManageSelected = new Set([...this._testManageSelected].filter(f => visibleFiles.has(f)));
+      this._renderTestManageTable();
+    } catch (e) {
+      const box = document.getElementById('tm-table');
+      if (box) box.innerHTML = `<div style="color:var(--error-red);padding:16px">加载失败: ${this._escHtml(e.message)}</div>`;
+    }
+  },
+
+  /** 渲染测试记录表（点击行看轨迹详情，行内可删除；勾选列支持拖选批量管理） */
+  _renderTestManageTable: function() {
+    const box = document.getElementById('tm-table');
+    if (!box) return;
+    if (!this._testManageItems.length) {
+      box.innerHTML = '<div style="text-align:center;color:var(--gray-4);padding:30px">暂无测试记录（请先在「批量测试」执行）</div>';
+      this._updateTmSelInfo();
+      return;
+    }
+    let html = '<table class="table" style="width:100%"><thead><tr>' +
+      '<th style="width:36px;text-align:center"><input type="checkbox" id="tm-check-all" title="全选/全不选" style="cursor:pointer;vertical-align:middle"></th>' +
+      '<th>题号</th><th>模型</th><th>结束原因</th><th>方案</th><th>模型/工具调用</th><th>Token</th><th>耗时(s)</th><th>时间</th><th>操作</th>' +
+      '</tr></thead><tbody>';
+    this._testManageItems.forEach(it => {
+      const ts = (it.timestamp || '').replace('T', ' ').substring(0, 19);
+      const checked = this._testManageSelected.has(it.filename) ? ' checked' : '';
+      html += `<tr style="cursor:pointer" onclick="App._openTestDetail('${this._escAttr(it.filename)}')">
+        <td style="text-align:center;user-select:none" onclick="event.stopPropagation()"><input type="checkbox" class="tm-check" data-tm-file="${this._escAttr(it.filename)}"${checked} style="cursor:pointer;vertical-align:middle"></td>
+        <td><strong>${this._escHtml(it.question_id || '-')}</strong></td>
+        <td>${this._escHtml(it.model_name || '-')}</td>
+        <td>${this._endReasonBadge(it.end_reason)}</td>
+        <td>${this._planStatusBadge(it.plan_status)}</td>
+        <td>${it.model_calls ?? '-'} / ${it.tool_calls ?? '-'}</td>
+        <td>${it.total_tokens ?? '-'}</td>
+        <td>${it.duration != null && it.duration !== '' ? Math.round(it.duration) : '-'}</td>
+        <td style="color:var(--gray-4)">${ts}</td>
+        <td><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();App._deleteTestRecord('${this._escAttr(it.filename)}')">删除</button></td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    box.innerHTML = html;
+    this._updateTmSelInfo();
+  },
+
+  // ---- 批量管理（与测评管理同套交互）----
+  _setTmCheck: function(cb, checked) {
+    cb.checked = checked;
+    const file = cb.dataset.tmFile;
+    if (checked) this._testManageSelected.add(file);
+    else this._testManageSelected.delete(file);
+    this._updateTmSelInfo();
+  },
+
+  _updateTmSelInfo: function() {
+    const boxes = Array.from(document.querySelectorAll('#tm-table input.tm-check'));
+    const selCount = boxes.filter(b => b.checked).length;
+    const info = document.getElementById('tm-sel-info');
+    if (info) info.textContent = selCount > 0
+      ? `已选择 ${selCount} 条`
+      : '未选择（按住鼠标拖过选框可批量勾选）';
+    const btnDel = document.getElementById('tm-btn-batch-del');
+    if (btnDel) btnDel.disabled = selCount === 0;
+    const btnClr = document.getElementById('tm-btn-clear-sel');
+    if (btnClr) btnClr.disabled = selCount === 0;
+    const all = document.getElementById('tm-check-all');
+    if (all) {
+      all.checked = boxes.length > 0 && selCount === boxes.length;
+      all.indeterminate = selCount > 0 && selCount < boxes.length;
+    }
+  },
+
+  _toggleTmAll: function(checked) {
+    document.querySelectorAll('#tm-table input.tm-check').forEach(cb => {
+      this._setTmCheck(cb, checked);
+    });
+  },
+
+  _clearTestManageSelection: function() {
+    this._toggleTmAll(false);
+  },
+
+  /** 批量删除勾选的测试记录 */
+  _batchDeleteTestRecords: async function() {
+    const btn = document.getElementById('tm-btn-batch-del');
+    const ids = Array.from(document.querySelectorAll('#tm-table input.tm-check'))
+      .filter(cb => cb.checked)
+      .map(cb => cb.dataset.tmFile);
+    if (!ids.length) { alert('未勾选任何测试记录'); return; }
+    if (!confirm(`确认批量删除 ${ids.length} 条测试记录？\n该操作不可恢复。`)) return;
+    if (btn) { btn.disabled = true; btn.textContent = '🗑 删除中...'; }
+    const failed = [];
+    for (const filename of ids) {
+      try {
+        const res = await API.testManageDelete(filename);
+        if (!res.success) failed.push(`${filename}: ${res.detail || '未知错误'}`);
+      } catch (e) {
+        failed.push(`${filename}: ${e.message}`);
+      }
+    }
+    if (btn) btn.textContent = '🗑 批量删除';
+    this._testManageSelected.clear();
+    this._statsReload = true;
+    await this._loadTestManageList();
+    if (failed.length) {
+      alert(`批量删除完成：成功 ${ids.length - failed.length} 条，失败 ${failed.length} 条\n` + failed.join('\n'));
+    }
+  },
+
+  /** 删除单条测试记录 */
+  _deleteTestRecord: async function(filename) {
+    if (!confirm(`确认删除测试记录？\n${filename}`)) return;
+    try {
+      const res = await API.testManageDelete(filename);
+      if (!res.success) { alert(`删除失败: ${res.detail || '未知错误'}`); return; }
+      this._loadTestManageList();
+    } catch (e) { alert(`删除失败: ${e.message}`); }
+  },
+
+  /** plan_status 徽章 */
+  _planStatusBadge: function(s) {
+    const map = {
+      has_solution: ['✅ 有方案', 'var(--success-green)'],
+      empty_plan: ['⚠️ 认为无解', '#d97706'],
+      no_plan: ['⚠️ 未输出方案', '#d97706'],
+    };
+    const [label, color] = map[s] || [`❓ ${s || '未知'}`, 'var(--gray-4)'];
+    return `<span style="color:${color};font-weight:600;font-size:11px">${this._escHtml(label)}</span>`;
+  },
+
+  /** end_reason 徽章（对话结束原因：completed=模型收尾 / max_iterations=轮数耗尽 / error=异常中断） */
+  _endReasonBadge: function(er) {
+    const map = {
+      completed: ['✅ 正常完成', 'var(--success-green)'],
+      max_iterations: ['✂️ 轮数耗尽', '#d97706'],
+      error: ['❌ 异常中断', 'var(--error-red)'],
+    };
+    const [label, color] = map[er] || [`❓ ${er || '未知'}`, 'var(--gray-4)'];
+    return `<span style="color:${color};font-weight:600;font-size:11px">${this._escHtml(label)}</span>`;
+  },
+
+  /** 打开测试详情抽屉（宽幅 960px，按轨迹展示） */
+  _openTestDetail: async function(filename) {
+    try {
+      // 请求令牌：快速连点两行时丢弃先发后至的旧响应，防"标题 A 内容 B"
+      const seq = (this._testDrawerSeq = (this._testDrawerSeq || 0) + 1);
+      const data = await API.testManageDetail(filename);
+      if (seq !== this._testDrawerSeq) return;
+      this._renderTestDrawer(data);
+    } catch (e) { alert(`加载详情失败: ${e.message}`); }
+  },
+
+  _closeTestDrawer: function() {
+    const d = document.getElementById('test-drawer');
+    if (!d) return;
+    d.style.right = '-50vw';
+    setTimeout(() => { d.style.display = 'none'; }, 260);
+  },
+
+  /** 渲染测试详情抽屉：基本信息 / 题面 / final_answer / final_plan / 对话轨迹（宽幅） */
+  _renderTestDrawer: function(data) {
+    const r = data.record || {};
+    const qm = data.question_meta || {};
+    const qType = qm.question_type ? this._questionTypeLabel(qm.question_type) : (qm.type || '');
+    const tu = r.token_usage || {};
+    const trace = Array.isArray(r.trace) ? r.trace : [];
+    const traceRounds = trace.filter(e => e.type === 'assistant').length;
+
+    let html = '';
+    // 头部信息
+    html += `<div style="border:1px solid var(--gray-2);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <strong style="font-size:14px">${this._escHtml(r.question_id || '-')}</strong>
+        <span class="tag tag-secondary">${this._escHtml(qType || '未知题型')}</span>
+        ${this._planStatusBadge(r.plan_status)}
+        ${this._endReasonBadge(r.end_reason)}
+        <span style="margin-left:auto;color:var(--gray-4);font-size:11px">${this._escHtml(r.timestamp || '')}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px 12px;color:var(--gray-5)">
+        <div>模型：<strong>${this._escHtml(r.model_name || '-')}</strong></div>
+        <div>🤖 模型调用：<strong>${r.model_calls ?? traceRounds}</strong> 次</div>
+        <div>🔧 工具调用：<strong>${r.tool_calls ?? '-'}</strong> 次</div>
+        <div>总 Token：<strong>${tu.total_tokens || 0}</strong></div>
+        <div>输入 / 输出：${tu.prompt_tokens || 0} / ${tu.completion_tokens || 0}</div>
+        <div>耗时：<strong>${r.duration != null ? Math.round(r.duration) : '-'}s</strong></div>
+      </div>
+    </div>`;
+
+    // 题面 + 标准答案
+    const nl = qm.nl_question || qm.question || r.user_input || '';
+    if (nl) {
+      html += `<div style="margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:4px">📋 题面</div>
+        <div style="border:1px solid var(--gray-2);border-radius:8px;padding:8px 10px;background:#fafafa;max-height:130px;overflow-y:auto">${this._escHtml(nl)}</div>
+      </div>`;
+    }
+    if (qm.answer) {
+      html += `<div style="margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:4px">✅ 标准答案</div>
+        <div style="border:1px solid var(--gray-2);border-radius:8px;padding:8px 10px;background:#f0fdf4;max-height:110px;overflow-y:auto">${this._escHtml(qm.answer)}</div>
+      </div>`;
+    }
+
+    // 最终回答
+    if (r.final_answer) {
+      html += `<div style="margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:4px">💬 最终回答</div>
+        <div style="border:1px solid var(--gray-2);border-radius:8px;padding:8px 10px;background:#fafafa;max-height:180px;overflow-y:auto">${Components._formatContent(r.final_answer || '')}</div>
+      </div>`;
+    }
+
+    // final_plan：结构化表格 + 原始 JSON 折叠
+    const fp = Array.isArray(r.final_plan) ? r.final_plan : [];
+    html += `<div style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:4px">🧾 final_plan（${fp.length ? `${fp.length} 段` : '空/未输出'}）</div>`;
+    if (fp.length) {
+      html += `<div style="overflow:auto;border:1px solid var(--gray-2);border-radius:8px">
+      <table class="table" style="width:100%">
+        <thead><tr><th>#</th><th>车次</th><th>购买区间</th><th>乘坐区间</th><th>座位</th><th>票数</th><th>票价(元)</th></tr></thead><tbody>`;
+      fp.forEach((p, i) => {
+        html += `<tr>
+          <td>${i + 1}</td>
+          <td><strong>${this._escHtml(p.train_num || '-')}</strong></td>
+          <td>${this._escHtml(p.from_station_id || p.from || '?')} → ${this._escHtml(p.to_station_id || p.to || '?')}</td>
+          <td>${(p.ride_from || p.ride_to)
+            ? this._escHtml(`${p.ride_from_name || p.ride_from || '?'} → ${p.ride_to_name || p.ride_to || '?'}`)
+            : '<span style="color:var(--gray-4)">—</span>'}</td>
+          <td>${this._escHtml(p.seat_type || '-')}</td>
+          <td>${p.tickets ?? '-'}</td>
+          <td>${p.price != null ? p.price : '-'}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+    html += `<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--gray-4);font-size:11px">原始 JSON（点击展开）</summary>
+      <pre style="max-height:160px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:8px 10px;font-size:11px">${this._escHtml(JSON.stringify(r.final_plan ?? null, null, 2))}</pre>
+    </details></div>`;
+
+    // 对话轨迹（宽幅 harness 风格：USER / ASSISTANT·第N轮(思考链折叠+内容) / TOOL 输入返回折叠）
+    html += `<div>
+      <div style="font-weight:600;margin-bottom:4px">🧭 对话轨迹（${traceRounds} 轮）</div>
+      <div style="border:1px solid var(--gray-2);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;background:#fafafa">${this._renderTraceRowsHtml(trace)}</div>
+    </div>`;
+
+    const drawer = document.getElementById('test-drawer');
+    const body = document.getElementById('test-drawer-body');
+    const title = document.getElementById('test-drawer-title');
+    if (!drawer || !body) return;
+    if (title) title.textContent = `测试详情 · ${r.question_id || ''}`;
+    body.innerHTML = html;
+    body.scrollTop = 0;
+    drawer.style.display = 'flex';
+    requestAnimationFrame(() => { drawer.style.right = '0'; });
+  },
+
+  // ============================================================
+  // 测评管理（浏览测评结果 logs/result：「测评后」产物）
+  // 抽屉只展示结构化正误问题（判定说明/核查明细/问题清单）；轨迹与 final_plan 已剥离至测试管理
   // ============================================================
   _evalManagePreset: null,   // 跳转预置筛选 {question_id, model}
   _evalManageItems: [],
@@ -2351,7 +2741,7 @@ const App = {
       const sumEl = document.getElementById('em-summary');
       if (sumEl) {
         sumEl.innerHTML =
-          `<div>共 <strong>${s.total}</strong> 条 · 平均分 <strong>${s.avg_score}</strong></div>` +
+          `<div>共 <strong>${s.total}</strong> 条</div>` +
           vOrder.filter(k => vc[k]).map(k => `<div style="color:${vColors[k]}">${k} × ${vc[k]}</div>`).join('') ||
           '<div style="color:var(--gray-4)">暂无数据</div>';
       }
@@ -2381,7 +2771,7 @@ const App = {
     }
     let html = '<table class="table" style="width:100%"><thead><tr>' +
       '<th style="width:36px;text-align:center"><input type="checkbox" id="em-check-all" title="全选/全不选" style="cursor:pointer;vertical-align:middle"></th>' +
-      '<th>题号</th><th>模型</th><th>判定</th><th>得分</th><th>问题/幻觉</th><th>Token</th><th>耗时(s)</th><th>时间</th><th>操作</th>' +
+      '<th>题号</th><th>模型</th><th>判定</th><th>问题/幻觉</th><th>Token</th><th>耗时(s)</th><th>时间</th><th>操作</th>' +
       '</tr></thead><tbody>';
     this._evalManageItems.forEach(it => {
       const ts = (it.timestamp || '').replace('T', ' ').substring(0, 19);
@@ -2391,7 +2781,6 @@ const App = {
         <td><strong>${this._escHtml(it.question_id || '-')}</strong></td>
         <td>${this._escHtml(it.model_name || '-')}</td>
         <td>${this._evalVerdictBadge(it.verdict)}</td>
-        <td><strong>${it.score}</strong></td>
         <td>${it.issue_count}${it.hallucination_count ? ` <span style="color:var(--error-red)">(${it.hallucination_count}幻觉)</span>` : ''}</td>
         <td>${it.total_tokens}</td>
         <td>${it.duration_seconds != null ? Math.round(it.duration_seconds) : '-'}</td>
@@ -2498,7 +2887,10 @@ const App = {
   /** 打开详情抽屉 */
   _openEvalDetail: async function(filename) {
     try {
+      // 请求令牌：同 _openTestDetail，防快速连点时旧响应覆盖新响应
+      const seq = (this._evalDrawerSeq = (this._evalDrawerSeq || 0) + 1);
       const data = await API.evalManageDetail(filename);
+      if (seq !== this._evalDrawerSeq) return;
       this._renderEvalDrawer(data);
     } catch (e) { alert(`加载详情失败: ${e.message}`); }
   },
@@ -2506,11 +2898,12 @@ const App = {
   _closeEvalDrawer: function() {
     const d = document.getElementById('eval-drawer');
     if (!d) return;
-    d.style.right = '-720px';
+    d.style.right = '-50vw';
     setTimeout(() => { d.style.display = 'none'; }, 260);
   },
 
-  /** 渲染详情抽屉：基本信息 / 核查明细 / 问题清单 / final_plan / 对话轨迹 */
+  /** 渲染详情抽屉（只展示结构化核查结论）：判定说明 / 核查明细（声称vs实际）/ 问题清单（含判定条件）；
+      final_plan 与对话轨迹已剥离至「测试管理」（2026-09-16） */
   _renderEvalDrawer: function(data) {
     const r = data.result || {};
     const tr = data.test_record;
@@ -2537,7 +2930,6 @@ const App = {
         <strong style="font-size:14px">${this._escHtml(r.question_id || '-')}</strong>
         <span class="tag tag-secondary">${this._escHtml(qType || '未知题型')}</span>
         ${this._evalVerdictBadge(ver.verdict)}
-        <span style="margin-left:auto;font-weight:700">得分 ${this._escHtml(String(this._recordScore(r)))}</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;color:var(--gray-5)">
         <div>模型：<strong>${this._escHtml(r.model_name || '-')}</strong></div>
@@ -2549,6 +2941,9 @@ const App = {
         <div>plan_status：${this._escHtml(planStatus)}</div>
       </div>
     </div>`;
+
+    // （2026-09-16）判定说明卡已移除：verdict 与下方问题清单信息重复，头部徽章保留速览；
+    // 核查两阶段说明见 docs/verifier.md
 
     // 题面 + 标准答案
     const nl = qm.nl_question || qm.question || '';
@@ -2595,42 +2990,43 @@ const App = {
       html += '</tbody></table></div></div>';
     }
 
-    // 问题清单：按 verifier 核查体系分组展示（中文名（代码）— 判定详情，与 docs/verifier.md 一致）
+    // 问题清单：按 verifier 核查体系分组（组说明 + 每项中文名（代码）+ 详情 + 判定条件，与 docs/verifier.md 一致）
     const issues = ver.issues || [];
     if (issues.length) {
       const groups = {};
       issues.forEach(it => {
-        const meta = this._ISSUE_META[it.type] || { label: it.type || '未知问题', group: '其他' };
+        const meta = this._ISSUE_META[it.type] || { label: it.type || '未知问题', group: '其他', criteria: '' };
         (groups[meta.group] = groups[meta.group] || []).push({ it, meta });
       });
       const groupOrder = [...this._ISSUE_GROUPS, '其他'].filter(g => groups[g]);
       html += `<div style="margin-bottom:12px">
-        <div style="font-weight:600;margin-bottom:4px">⚠️ 问题清单（${issues.length} 项）</div>
-        <div style="max-height:300px;overflow-y:auto;border:1px solid var(--gray-2);border-radius:8px;padding:8px 10px;background:#fffbeb">`;
-      groupOrder.forEach(g => {
-        html += `<div style="font-size:11px;font-weight:700;color:#92400e;margin:4px 0 3px;border-bottom:1px dashed #fcd34d;padding-bottom:2px">${this._escHtml(g)}（${groups[g].length}）</div>`;
+        <div style="font-weight:600;margin-bottom:4px">⚠️ 问题清单（${issues.length} 项 · 按核查体系分组）</div>
+        <div style="border:1px solid var(--gray-2);border-radius:8px;overflow:hidden">`;
+      groupOrder.forEach((g, gi) => {
+        const gDesc = this._ISSUE_GROUP_DESC[g] || '';
+        html += `<div style="padding:7px 10px;background:#fffbeb;${gi ? 'border-top:1px solid var(--gray-2);' : ''}">
+          <div style="font-size:12px;font-weight:700;color:#92400e">${this._escHtml(g)}（${groups[g].length} 项）</div>
+          ${gDesc ? `<div style="font-size:11px;color:#a16207;margin-top:1px">📌 ${this._escHtml(gDesc)}</div>` : ''}
+          <div style="margin-top:5px;display:flex;flex-direction:column;gap:4px">`;
         groups[g].forEach(({ it, meta }) => {
-          html += `<div style="margin-bottom:3px;line-height:1.6">
-            <span class="tag" style="background:#fee2e2;color:var(--error-red)">${this._escHtml(meta.label)}（${this._escHtml(it.type || '')}）</span>
-            ${it.detail ? `<span style="color:var(--gray-6)">${this._escHtml(it.detail)}</span>` : ''}
+          html += `<div style="background:#fff;border:1px solid #fde68a;border-radius:6px;padding:5px 8px">
+            <div style="line-height:1.6"><span class="tag" style="background:#fee2e2;color:var(--error-red)">${this._escHtml(meta.label)}（${this._escHtml(it.type || '')}）</span>
+            ${it.detail ? `<span style="color:var(--gray-6)">${this._escHtml(it.detail)}</span>` : ''}</div>
+            ${meta.criteria ? `<div style="font-size:11px;color:var(--gray-4);margin-top:2px">⚖️ 判定条件：${this._escHtml(meta.criteria)}</div>` : ''}
           </div>`;
         });
+        html += `</div></div>`;
       });
-      html += '</div></div>';
+      html += `</div></div>`;
+    } else {
+      html += `<div style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;padding:8px 10px;margin-bottom:12px;color:var(--success-green);font-weight:600">✅ 未发现核查问题（余票/票价/路线/约束/格式全部通过）</div>`;
     }
 
-    // final_plan
-    if (tr && Array.isArray(tr.final_plan)) {
-      html += `<div style="margin-bottom:12px">
-        <div style="font-weight:600;margin-bottom:4px">🧾 final_plan</div>
-        <pre style="max-height:160px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:8px 10px;font-size:11px">${this._escHtml(JSON.stringify(tr.final_plan, null, 2))}</pre>
-      </div>`;
-    }
-
-    // 对话轨迹（harness 风格，按轮次分组）
-    html += `<div>
-      <div style="font-weight:600;margin-bottom:4px">🧭 对话轨迹（${traceRounds} 轮）</div>
-      <div style="border:1px solid var(--gray-2);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;background:#fafafa">${this._renderTraceRowsHtml(trace)}</div>
+    // （2026-09-16 剥离）final_plan 与对话轨迹属「测试后」过程内容，已移至「测试管理」页查看；
+    // 测评管理抽屉只保留结构化核查结论（判定说明 / 核查明细 / 问题清单）
+    const tfName = (r.test_file || '').replace(/^.*[\\/]/, '');
+    html += `<div style="border:1px dashed var(--gray-3);border-radius:8px;padding:8px 10px;color:var(--gray-4);font-size:11px">
+      💡 完整对话轨迹、final_answer 与 final_plan 属「测试后」内容——请在「测试管理」页查看${tfName ? `（对应测试记录：${this._escHtml(tfName)}）` : ''}
     </div>`;
 
     const drawer = document.getElementById('eval-drawer');
@@ -2644,24 +3040,7 @@ const App = {
     requestAnimationFrame(() => { drawer.style.right = '0'; });
   },
 
-  /** 取单条结果得分（与 aggregator 同口径的前端近似值：pass=100，其余按问题数扣减已由后端算好则直接用） */
-  _recordScore: function(r) {
-    // 列表接口已算好 score 的同款逻辑此处快速复算（详情接口未带 score）
-    const v = (r.verification || {});
-    if (v.verdict === 'pass') return 100;
-    if (['no_plan', 'empty_plan', 'db_not_found', 'unknown'].includes(v.verdict)) return 0;
-    let score = 100;
-    const HARD = ['hallucination', 'price_wrong', 'route_mismatch', 'route_mismatch_train', 'route_mismatch_route',
-      'route_mismatch_seat', 'route_mismatch_ride', 'route_invalid', 'route_discontinuity', 'transfer_time_conflict',
-      'start_not_covered', 'end_not_covered', 'no_route', 'no_transfer_violated', 'no_short_buy_violated', 'no_extra_violated'];
-    (v.issues || []).forEach(it => {
-      const t = it.type || '';
-      if (HARD.includes(t)) score -= 20;
-      else if (t === 'ticket_shortage' || t === 'price_missing') score -= 10;
-      else score -= 5;
-    });
-    return Math.max(0, score);
-  },
+  /** 取单条结果的判定与扣分说明已废弃（评分功能移除，2026-09-16） */
 
   /** 工具行渲染（harness 风格；indent=true 时缩进挂在所属轮次下） */
   _toolRowHtml: function(t, indent) {
@@ -2692,7 +3071,7 @@ const App = {
              <div style="white-space:pre-wrap;word-break:break-word;color:#6b7280;background:#f5f3ff;border-radius:6px;padding:5px 8px;margin-top:3px;font-size:11px">${this._escHtml(en.reasoning)}</div></details>`
           : '';
         const content = en.content
-          ? `<div style="white-space:pre-wrap;word-break:break-word;margin-top:2px">${marked.parse(en.content)}</div>`
+          ? `<div style="white-space:pre-wrap;word-break:break-word;margin-top:2px">${Components._formatContent(en.content || '')}</div>`
           : '';
         // 本轮工具调用：缩进挂在轮次下（与前端测试页轨迹视图同构）
         const toolsHtml = (Array.isArray(en.tools) && en.tools.length)
@@ -3073,31 +3452,41 @@ const App = {
     this._mmRender();
   },
 
-  /** verifier 判定问题中文名映射（与 docs/verifier.md 一致；group 用于问题清单分组展示） */
+  /** verifier 判定问题中文名映射（与 docs/verifier.md 一致；group 用于分组，criteria 为判定条件说明） */
   _ISSUE_META: {
-    'route_mismatch': { label: '路线不符标答', group: '路线与标答不符' },
-    'route_mismatch_train': { label: '车次不符', group: '路线与标答不符' },
-    'route_mismatch_route': { label: '购买区间不符', group: '路线与标答不符' },
-    'route_mismatch_seat': { label: '座位不符', group: '路线与标答不符' },
-    'route_mismatch_ride': { label: '乘坐区间不符', group: '路线与标答不符' },
-    'hallucination': { label: '余票不符', group: '余票与票价' },
-    'price_wrong': { label: '票价不符', group: '余票与票价' },
-    'price_missing': { label: '票价缺失', group: '余票与票价' },
-    'ticket_shortage': { label: '票数不足', group: '余票与票价' },
-    'route_discontinuity': { label: '乘坐不连续', group: '全程可达' },
-    'transfer_time_conflict': { label: '换乘时间冲突', group: '全程可达' },
-    'start_not_covered': { label: '未连接出发站', group: '全程可达' },
-    'end_not_covered': { label: '未连接到达站', group: '全程可达' },
-    'route_invalid': { label: '区间无效', group: '全程可达' },
-    'no_route': { label: '无法构成全程', group: '全程可达' },
-    'no_transfer_violated': { label: '违反不允许换乘', group: '行为约束' },
-    'no_short_buy_violated': { label: '违反不允许买短补长', group: '行为约束' },
-    'no_extra_violated': { label: '违反不允许额外购买', group: '行为约束' },
-    'missing_ride': { label: '缺乘坐区间', group: '格式与缺失' },
-    'invalid_seat': { label: '无效座位', group: '格式与缺失' },
-    'invalid_plan_item': { label: '无效条目', group: '格式与缺失' },
+    'route_mismatch': { label: '路线不符标答', group: '路线与标答不符', criteria: '购票段（车次+购买区间+座位+乘坐区间）与标准答案不完全一致（总体标记）' },
+    'route_mismatch_train': { label: '车次不符', group: '路线与标答不符', criteria: '车次与标准答案不同' },
+    'route_mismatch_route': { label: '购买区间不符', group: '路线与标答不符', criteria: '购买区间（from/to）与标准答案不同' },
+    'route_mismatch_seat': { label: '座位不符', group: '路线与标答不符', criteria: '座位等级与标准答案不同' },
+    'route_mismatch_ride': { label: '乘坐区间不符', group: '路线与标答不符', criteria: '实际乘坐区间与标准答案不同' },
+    'hallucination': { label: '余票不符', group: '余票与票价', criteria: '声称某段有票，但数据库实际余票不足或为 0（编造余票）' },
+    'price_wrong': { label: '票价不符', group: '余票与票价', criteria: '声称票价与实际数据库票价相差超过 1 元' },
+    'price_missing': { label: '票价缺失', group: '余票与票价', criteria: '声称票价，但数据库中无该区间票价数据（数据端问题：统计扣分，主判不据此判错）' },
+    'ticket_shortage': { label: '票数不足', group: '余票与票价', criteria: '购票张数少于需求人数' },
+    'route_discontinuity': { label: '乘坐不连续', group: '全程可达', criteria: '后一段乘坐起点与前一段乘坐终点不一致（换乘站接不上）' },
+    'transfer_time_conflict': { label: '换乘时间冲突', group: '全程可达', criteria: '前车到达时刻晚于后车发车时刻（赶不上）' },
+    'start_not_covered': { label: '未连接出发站', group: '全程可达', criteria: '出发站不在首段乘坐区间内' },
+    'end_not_covered': { label: '未连接到达站', group: '全程可达', criteria: '到达站不在末段乘坐区间内' },
+    'route_invalid': { label: '区间无效', group: '全程可达', criteria: '车次不经过声称的站，或方向顺序错误，或缺少乘坐区间' },
+    'no_route': { label: '无法构成全程', group: '全程可达', criteria: '无法拼接出从出发站到到达站的全程' },
+    'no_transfer_violated': { label: '违反不允许换乘', group: '行为约束', criteria: '题目含 no_transfer 时，方案相邻两段乘坐车次不同（存在跨车次换乘；买短补长/额外购买均为单车次不会误判）' },
+    'no_short_buy_violated': { label: '违反不允许买短补长', group: '行为约束', criteria: '题目含 no_short_buy_extra 时，任一段乘坐区间严格包含购买区间（坐得比买得多）' },
+    'no_extra_violated': { label: '违反不允许额外购买', group: '行为约束', criteria: '题目含 no_short_buy_extra 时，任一段购买区间严格包含乘坐区间（买得比坐得多，前/后额外都算）' },
+    'missing_ride': { label: '缺乘坐区间', group: '格式与缺失', criteria: '购票段未标注实际乘坐区间（答不全，按不全处理）' },
+    'invalid_seat': { label: '无效座位', group: '格式与缺失', criteria: '座位类型非法（不在 二等/一等/特等）' },
+    'invalid_plan_item': { label: '无效条目', group: '格式与缺失', criteria: '段缺少车次/出发/到达等关键字段，或不是有效对象' },
   },
   _ISSUE_GROUPS: ['路线与标答不符', '余票与票价', '全程可达', '行为约束', '格式与缺失'],
+
+  /** 问题分组说明（判定体系定位，与 docs/verifier.md 一致） */
+  _ISSUE_GROUP_DESC: {
+    '路线与标答不符': '存在性题（0_/1_）专有：答案唯一，购票段须与标准答案完全一致，不一致细分 4 个维度',
+    '余票与票价': '所有题型通用：对每个购票段核对数据库余票是否足够、票价是否正确、张数是否达到需求人数',
+    '全程可达': '选择性题（2_）：拼接各段实际乘坐区间，检查地点连续、时间衔接、覆盖出发/到达站',
+    '行为约束': '仅当题目声明对应约束时检测（no_transfer / no_short_buy_extra），否则不判定',
+    '格式与缺失': '字段完整性：缺乘坐区间按答不全处理，非法座位/缺失关键字段直接判无效',
+    '其他': '未归类问题',
+  },
 
   /** 问题类型 → 中文名 */
   _mmIssueLabel: function(t) {
@@ -3124,7 +3513,7 @@ const App = {
             const sel = this.mmSelected === name;
             return `<div onclick="App._mmSelect('${this._escAttr(name)}')" style="border:1px solid ${sel ? '#2563eb' : 'var(--gray-2)'};border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;background:${sel ? '#eff6ff' : '#fff'}">
               <div style="font-weight:600;margin-bottom:2px">${this._escHtml(name)}</div>
-              <div style="font-size:11px;color:var(--gray-4)">${s.total_tests} 题 · 平均分 ${s.avg_score} · 通过率 ${s.pass_rate}%</div>
+              <div style="font-size:11px;color:var(--gray-4)">${s.total_tests} 题 · 通过率 ${s.pass_rate}% · 错误率 ${s.error_rate}%</div>
             </div>`;
           }).join('')
         : '<div style="color:var(--gray-4);text-align:center;padding:16px;font-size:var(--font-size-small)">暂无测评数据<br>（请先在「批量测评」执行）</div>';
@@ -3160,9 +3549,8 @@ const App = {
       </div>
     </div>`;
 
-    html += `<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:12px">
+    html += `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px">
       ${this._mmStatCard(data.total_tests || 0, '总测评数')}
-      ${this._mmStatCard(summary.avg_score || 0, '全局平均分')}
       ${this._mmStatCard((summary.pass_rate || 0) + '%', '通过率', 'var(--success-green)')}
       ${this._mmStatCard((summary.error_rate || 0) + '%', '错误率', 'var(--error-red)')}
       ${this._mmStatCard(Object.keys(models).length, '已测模型数')}
@@ -3172,7 +3560,7 @@ const App = {
     const names = Object.keys(models);
     html += '<div class="card" style="margin-bottom:12px"><div class="card-header">📋 模型对比明细</div><div style="overflow-x:auto">';
     if (names.length) {
-      html += '<table class="table"><thead><tr><th>模型</th><th>测试数</th><th>通过率</th><th>错误率</th><th>未规划/空</th><th>平均分</th><th>平均Token</th><th>平均耗时</th><th>平均模型调用</th><th>平均工具调用</th></tr></thead><tbody>';
+      html += '<table class="table"><thead><tr><th>模型</th><th>测试数</th><th>通过率</th><th>错误率</th><th>未规划/空</th><th>平均Token</th><th>平均耗时</th><th>平均模型调用</th><th>平均工具调用</th></tr></thead><tbody>';
       names.forEach(name => {
         const s = models[name];
         html += `<tr style="cursor:pointer" onclick="App._mmSelect('${this._escAttr(name)}')">
@@ -3181,7 +3569,6 @@ const App = {
           <td style="color:var(--success-green)">${s.pass_rate}%</td>
           <td style="color:var(--error-red)">${s.error_rate}%</td>
           <td>${(s.no_plan_count || 0) + (s.empty_count || 0)}</td>
-          <td><strong>${s.avg_score}</strong></td>
           <td>${s.avg_tokens}</td>
           <td>${s.avg_duration}s</td>
           <td>${s.avg_model_calls ?? '-'}</td>
@@ -3214,7 +3601,6 @@ const App = {
 
     // 指标卡
     html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">
-      ${this._mmStatCard(s.avg_score, '平均分')}
       ${this._mmStatCard(s.pass_rate + '%', '通过率', 'var(--success-green)')}
       ${this._mmStatCard(s.error_rate + '%', '错误率', 'var(--error-red)')}
       ${this._mmStatCard((s.no_plan_count || 0) + (s.empty_count || 0), '未规划/空方案')}
@@ -3248,14 +3634,13 @@ const App = {
     // 逐题明细表
     html += `<div class="card"><div class="card-header">📋 逐题明细（${records.length} 条）</div><div style="overflow-x:auto;max-height:420px;overflow-y:auto">`;
     if (records.length) {
-      html += '<table class="table" style="font-size:var(--font-size-small)"><thead><tr><th>题号</th><th>类型</th><th>判定</th><th>得分</th><th>问题/幻觉</th><th>模型/工具调用</th><th>Token</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+      html += '<table class="table" style="font-size:var(--font-size-small)"><thead><tr><th>题号</th><th>类型</th><th>判定</th><th>问题/幻觉</th><th>模型/工具调用</th><th>Token</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr></thead><tbody>';
       records.forEach(it => {
         const ts = (it.timestamp || '').replace('T', ' ').substring(0, 19);
         html += `<tr>
           <td><strong>${this._escHtml(it.question_id || '-')}</strong></td>
           <td>${this._escHtml(it.type || '-')}</td>
           <td>${this._evalVerdictBadge(it.verdict)}</td>
-          <td><strong>${it.score}</strong></td>
           <td>${it.issue_count}${it.hallucination_count ? ` <span style="color:var(--error-red)">(${it.hallucination_count})</span>` : ''}</td>
           <td>${it.model_calls ?? '-'} / ${it.tool_calls ?? '-'}</td>
           <td>${it.total_tokens}</td>

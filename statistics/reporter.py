@@ -51,38 +51,28 @@ def generate_report() -> Dict:
     insights = []
     if ranking:
         best_model = ranking[0]["model"]
-        best_score = ranking[0]["avg_score"]
-        insights.append(f"{best_model} 在所有模型中表现最好，平均分 {best_score}")
+        insights.append(f"{best_model} 在所有模型中通过率最高（{ranking[0]['pass_rate']}%）")
 
         worst_model = ranking[-1]["model"]
-        worst_score = ranking[-1]["avg_score"]
-        insights.append(f"{worst_model} 在所有模型中表现最弱，平均分 {worst_score}")
+        insights.append(f"{worst_model} 在所有模型中通过率最低（{ranking[-1]['pass_rate']}%）")
 
     # 题型洞察（按题型）
     qtype_data = question_type_data.get("by_question_type", {})
     if qtype_data:
-        sorted_types = sorted(qtype_data.items(), key=lambda x: x[1]["avg_score"], reverse=True)
+        sorted_types = sorted(qtype_data.items(), key=lambda x: x[1]["pass_rate"], reverse=True)
         if sorted_types:
             insights.append(f"题型从易到难排序：{' > '.join([t[0] for t in sorted_types])}")
             easiest = sorted_types[0]
             hardest = sorted_types[-1]
-            insights.append(f"所有模型在 {easiest[0]} 题型上表现最好（平均分 {easiest[1]['avg_score']}）")
-            insights.append(f"所有模型在 {hardest[0]} 题型上最具挑战（平均分 {hardest[1]['avg_score']}）")
+            insights.append(f"所有模型在 {easiest[0]} 题型上表现最好（通过率 {easiest[1]['pass_rate']}%）")
+            insights.append(f"所有模型在 {hardest[0]} 题型上最具挑战（通过率 {hardest[1]['pass_rate']}%）")
 
     # 题目类型洞察（存在性 / 选择性）
     type_data = question_type_data.get("by_type", {})
     if type_data:
-        sorted_types = sorted(type_data.items(), key=lambda x: x[1]["avg_score"], reverse=True)
+        sorted_types = sorted(type_data.items(), key=lambda x: x[1]["pass_rate"], reverse=True)
         if sorted_types:
             insights.append(f"题目类型从易到难排序：{' > '.join([t[0] for t in sorted_types])}")
-
-    # 各模型优缺点
-    for r in ranking:
-        model_data = aggregate_data.get("models", {}).get(r["model"], {})
-        if model_data:
-            scores = model_data.get("scores", [])
-            if scores:
-                insights.append(f"{r['model']} 最高分 {max(scores)}，最低分 {min(scores)}")
 
     report = {
         "generated_at": datetime.now().isoformat(),
@@ -100,6 +90,15 @@ def generate_report() -> Dict:
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
+    # 只保留最近 50 份（export 每调用一次落一份，原实现目录无限增长）
+    try:
+        olds = sorted(f for f in os.listdir(LOGS_REPORT_DIR)
+                      if f.startswith("summary_") and f.endswith(".json"))
+        for name in olds[:-50]:
+            os.remove(os.path.join(LOGS_REPORT_DIR, name))
+    except OSError:
+        pass
+
     return report
 
 
@@ -115,26 +114,26 @@ def export_markdown() -> str:
 
     # 模型排名
     lines.append("## 模型综合排名\n")
-    lines.append("| 排名 | 模型 | 平均分 | 完成率 | 通过率 | 错误率 |")
-    lines.append("|------|------|--------|--------|--------|--------|")
+    lines.append("| 排名 | 模型 | 完成率 | 通过率 | 错误率 |")
+    lines.append("|------|------|--------|--------|--------|")
     for i, r in enumerate(report["model_ranking"], 1):
-        lines.append(f"| {i} | {r['model']} | {r['avg_score']} | {r['completion_rate']}% | {r['pass_rate']}% | {r['error_rate']}% |")
+        lines.append(f"| {i} | {r['model']} | {r['completion_rate']}% | {r['pass_rate']}% | {r['error_rate']}% |")
 
     # 题型分析
     qtype_data = report["by_question_type"].get("by_question_type", {})
     lines.append("\n## 题型难度分析\n")
-    lines.append("| 题型 | 测试数 | 平均分 | 通过率 | 错误率 |")
-    lines.append("|------|--------|--------|--------|--------|")
-    for qtype, data in sorted(qtype_data.items(), key=lambda x: x[1]["avg_score"], reverse=True):
-        lines.append(f"| {qtype} | {data['count']} | {data['avg_score']} | {data['pass_rate']}% | {data['error_rate']}% |")
+    lines.append("| 题型 | 测试数 | 通过率 | 错误率 |")
+    lines.append("|------|--------|--------|--------|")
+    for qtype, data in sorted(qtype_data.items(), key=lambda x: x[1]["pass_rate"], reverse=True):
+        lines.append(f"| {qtype} | {data['count']} | {data['pass_rate']}% | {data['error_rate']}% |")
 
     # 题目类型分析（存在性 / 选择性）
     type_data = report["by_question_type"].get("by_type", {})
     lines.append("\n## 题目类型分析\n")
-    lines.append("| 类型 | 测试数 | 平均分 | 通过率 | 错误率 |")
-    lines.append("|------|--------|--------|--------|--------|")
-    for t, data in sorted(type_data.items(), key=lambda x: x[1]["avg_score"], reverse=True):
-        lines.append(f"| {t} | {data['count']} | {data['avg_score']} | {data['pass_rate']}% | {data['error_rate']}% |")
+    lines.append("| 类型 | 测试数 | 通过率 | 错误率 |")
+    lines.append("|------|--------|--------|--------|")
+    for t, data in sorted(type_data.items(), key=lambda x: x[1]["pass_rate"], reverse=True):
+        lines.append(f"| {t} | {data['count']} | {data['pass_rate']}% | {data['error_rate']}% |")
 
     # 警告
     if report["hallucination_warning"]:

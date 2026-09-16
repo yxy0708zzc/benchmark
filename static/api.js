@@ -261,6 +261,28 @@ const API = {
     return resp.json();
   },
 
+  /** 测试管理：测试记录列表（支持 model/question_id/end_reason/keyword 筛选） */
+  testManageList: async (query = '') => {
+    const resp = await fetch(`/api/test/manage/list${query ? '?' + query : ''}`);
+    return resp.json();
+  },
+
+  /** 测试管理：单条详情（完整测试记录含 trace 轨迹 + 题目元数据） */
+  testManageDetail: async (filename) => {
+    const resp = await fetch(`/api/test/manage/detail?filename=${encodeURIComponent(filename)}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+  },
+
+  /** 测试管理：删除单条测试记录 */
+  testManageDelete: async (filename) => {
+    const resp = await fetch(`/api/test/manage/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    return resp.json();
+  },
+
   // ============================================================
   // 统计接口
   // ============================================================

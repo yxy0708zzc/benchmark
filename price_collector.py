@@ -170,17 +170,21 @@ class PriceCollector:
                     logger.warning(f"⚠️ 反爬 [尝试 {attempt}/{self.max_retries}] "
                                    f"HTTP {resp.status_code}")
                     if attempt < self.max_retries:
+                        # 退避后重试：原实现零间隔立即重打，会加剧风控
+                        time.sleep(min(10.0, 1.5 * attempt) + random.uniform(0.5, 2.0))
                         continue
 
                 if resp.status_code != 200:
                     logger.warning(f"[重试 {attempt}/{self.max_retries}] "
                                    f"HTTP {resp.status_code}")
+                    time.sleep(min(6.0, 1.0 * attempt) + random.uniform(0.3, 1.2))
                     continue
 
                 return resp
 
             except requests.RequestException as e:
                 logger.warning(f"[重试 {attempt}/{self.max_retries}] {e}")
+                time.sleep(min(6.0, 1.0 * attempt) + random.uniform(0.3, 1.2))
                 continue
 
         return None
@@ -264,21 +268,29 @@ class PriceCollector:
                 continue
 
             # 判断车型，选择对应的字段映射
-            train_class = dto.get("train_class_name", "")
+            train_class = dto.get("train_class_name", "") or ""
             if train_class in ("高速", "动车"):
                 seat_map = SEAT_MAP_G
             else:
                 seat_map = SEAT_MAP_PUSU
 
-            prices = {}
-            for api_key, seat_key in seat_map.items():
-                val = dto.get(api_key)
-                if val is not None:
-                    try:
-                        # 价格单位是角，转为元
-                        prices[seat_key] = float(val) / 10.0
-                    except (ValueError, TypeError):
-                        pass
+            def _read_prices(mapping):
+                out = {}
+                for api_key, seat_key in mapping.items():
+                    val = dto.get(api_key)
+                    if val is not None:
+                        try:
+                            # 价格单位是角，转为元
+                            out[seat_key] = float(val) / 10.0
+                        except (ValueError, TypeError):
+                            pass
+                return out
+
+            prices = _read_prices(seat_map)
+            if not prices and train_class not in ("高速", "动车"):
+                # 兜底：车型字段缺失/取值变化时按高铁字段再探测一次，
+                # 避免 G/D 车误走普速字段导致整车查价全空 → 被判全失败
+                prices = _read_prices(SEAT_MAP_G)
 
             if prices:
                 return prices
@@ -371,7 +383,10 @@ class PriceCollector:
         rw_conn = get_railway_conn()
         p_conn = shared_p_conn or get_prices_conn()
         local_session = requests.Session()
-        local_session.headers.update(self.session.headers) if own_conn else None
+        if own_conn:
+            local_session.headers.update(self.session.headers)
+            # 同步主进程 Cookie：原实现只复制 headers，并发线程无 Cookie 可能大面积查询失败
+            local_session.cookies.update(self.session.cookies)
 
         try:
             cursor = rw_conn.cursor()
@@ -439,9 +454,13 @@ class PriceCollector:
         cursor = rw_conn.cursor()
         p_cursor = p_conn.cursor()
 
-        p_cursor.execute("SELECT DISTINCT train_num FROM prices ORDER BY train_num")
-        partial_trains = [row[0] for row in p_cursor.fetchall()]
-        logger.info(f"[补充] 共 {len(partial_trains)} 趟车次有票价数据，检查缺失站对...")
+        # 候选集 = trains 全集 ∪ prices 已有号（修复：原只查 prices，导致"全量爬取时
+        # 全部站对失败、prices 0 行"的车次永远扫不到 → 被 cleanup 一键流程整车误删）
+        cursor.execute("SELECT train_num FROM trains ORDER BY train_num")
+        train_set = {row[0] for row in cursor.fetchall()}
+        train_set.update(row[0] for row in p_cursor.execute("SELECT DISTINCT train_num FROM prices"))
+        partial_trains = sorted(train_set)
+        logger.info(f"[补充] 共 {len(partial_trains)} 趟车次待检查缺失站对（trains 全集 ∪ prices 已有）...")
 
         supplement_pairs = 0
         for train_num in partial_trains:
@@ -567,8 +586,8 @@ class PriceCollector:
             t_id, t_name = stops[i + 1]["station_id"], stops[i + 1]["station_name"]
             if only_missing is not None and (f_id, t_id) not in only_missing:
                 continue
-            with self._stats_lock:
-                self.total_pairs += 1
+            # 注意：不在这里累计 total_pairs——run() 拿到结果后已按 pair_ok+pair_fail
+            # 整体累加一次，这里再加会把每个站对计入两次（成功率恒约 50% 的根因）
 
             prices = None
             # 逐天重试：先用当前生效日期，失败则换下一天
@@ -607,13 +626,19 @@ class PriceCollector:
                 with self._failed_log_lock:
                     with open(self._failed_log, "a", encoding="utf-8") as f:
                         f.write(f"{train_num}\t{f_name}({f_id})\t{t_name}({t_id})\t全车放弃\n")
-                        # 剩余未爬站对也记入（从 i+1 开始，避免重复写入已记入的失败站对）
-                        for remaining in range(i + 1, len(stops) - 1):
-                            rf = stops[remaining]
-                            rt = stops[remaining + 1]
-                            f.write(f"{train_num}\t{rf['station_name']}({rf['station_id']})\t"
-                                    f"{rt['station_name']}({rt['station_id']})\t未爬取\n")
-                pair_fail = len(stops) - 1 - i
+                        if only_missing is None:
+                            # 全量模式：break 后剩余站对本轮不会爬，如实记入失败
+                            for remaining in range(i + 1, len(stops) - 1):
+                                rf = stops[remaining]
+                                rt = stops[remaining + 1]
+                                f.write(f"{train_num}\t{rf['station_name']}({rf['station_id']})\t"
+                                        f"{rt['station_name']}({rt['station_id']})\t未爬取\n")
+                if only_missing is None:
+                    pair_fail = len(stops) - 1 - i
+                else:
+                    # 补充模式：只统计本次实际尝试且失败的站对；修复：原实现用物理站序号
+                    # len(stops)-1-i，把已存在、本次根本没爬的站对也计入失败（统计/日志失真）
+                    pair_fail = 1
                 break
 
             for seat, price in prices.items():

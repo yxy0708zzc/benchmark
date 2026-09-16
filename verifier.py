@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import sqlite3
 from typing import Dict, List, Any, Optional
 from config import get_question_db_path
@@ -68,8 +69,9 @@ def normalize_final_plan(raw_plan: List[Dict]) -> List[Dict]:
             except (ValueError, TypeError):
                 out.append({"__invalid__": True, "error": f"购票段 tickets 非法: {item.get('tickets')!r}", "raw": item})
                 continue
-            if tickets_val < 0:
-                out.append({"__invalid__": True, "error": f"购票段 tickets 为负数: {tickets_val}", "raw": item})
+            if tickets_val <= 0:
+                # 0 张的购票段无意义（会让层1虚高 correct_items），与负数一并按无效条目处理
+                out.append({"__invalid__": True, "error": f"购票段 tickets 非法(≤0): {tickets_val}", "raw": item})
                 continue
             # 缺实际乘坐区间 → 一律按不全处理（不兜底）：ride 留空，层2 不计入可达拼接
             missing_ride_flag = not (ride_from and ride_to)
@@ -203,6 +205,17 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
 
         results = []
         issues = list(invalid_issues) + list(missing_ride_issues)   # 无效条目 + 缺乘坐区间一并计入问题
+        price_missing_issues: List[Dict] = []   # 票价缺失=数据端问题：按 docs 不计入主判 issues（2026-09-16 修复）
+
+        # 余票聚合（BUG 修复）：同一 (车次,购买区间,席别) 被拆成多条声称时先合并总张数再对比库内余票，
+        # 防止“库余 3 张拆成 2+2 两条、每条各自对比都通过”的拆单绕过
+        agg_claims: Dict[tuple, int] = {}
+        for item in purchase_items:
+            st = item.get("seat_type")
+            if st in TICKET_TABLES:
+                key = (item.get("train_num", ""), item.get("from_station_id", ""),
+                       item.get("to_station_id", ""), st)
+                agg_claims[key] = agg_claims.get(key, 0) + (item.get("tickets") or 0)
 
         for item in purchase_items:   # 仅购票段查余票/票价；补票段不查 DB
             train_num = item.get("train_num", "")
@@ -250,7 +263,8 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
             """, (train_num, from_id, to_id))
             row = cursor.fetchone()
             db_tickets = row[0] if row else 0
-            matched = db_tickets is not None and db_tickets >= claimed
+            claimed_total = agg_claims.get((train_num, from_id, to_id, seat_type), claimed)
+            matched = db_tickets is not None and db_tickets >= claimed_total
 
             ride_from_id = item.get("ride_from_station_id", "")
             ride_to_id = item.get("ride_to_station_id", "")
@@ -271,6 +285,7 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
             }
 
             if not matched:
+                total_note = f"（含同段拆分合计 {claimed_total} 张）" if claimed_total != claimed else ""
                 issues.append({
                     "type": "hallucination",
                     "train_num": train_num,
@@ -278,15 +293,18 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
                     "to_station_id": to_id,
                     "seat_type": seat_type,
                     "claimed": claimed,
+                    "claimed_total": claimed_total,
                     "actual": db_tickets if db_tickets is not None else 0,
-                    "detail": f"{train_num} {seat_type} 声称有 {claimed} 张票，实际 DB 中为 {db_tickets if db_tickets is not None else 0}",
+                    "detail": f"{train_num} {seat_type} 声称 {claimed} 张{total_note}，实际 DB 余票 {db_tickets if db_tickets is not None else 0}",
                 })
 
             # ---------- 票价核验 ----------
             if claimed_price is not None:
                 real_price = get_price(p_conn, train_num, from_id, to_id, seat_type)
                 if real_price is None:
-                    issues.append({
+                    # 票价缺失=数据端问题：按 docs/verifier.md「主判不据此判错」，
+                    # 记入独立列表（不进 issues → 不影响 verdict 与问题计数）
+                    price_missing_issues.append({
                         "type": "price_missing",
                         "train_num": train_num,
                         "from_station_id": from_id,
@@ -391,7 +409,7 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
     correct_count = len([r for r in results if r.get("match")])
     total = len(results)
     hallucination_count = len([i for i in issues if i.get("type") == "hallucination"])
-    price_issue_count = len([i for i in issues if i.get("type") in ("price_wrong", "price_missing")])
+    price_issue_count = len([i for i in issues if i.get("type") == "price_wrong"])
     total_issue_count = len(issues)
 
     # 综合判定：简化，只分 pass / hallucination
@@ -406,6 +424,8 @@ def verify_final_plan(final_plan: List[Dict], question_id: str) -> Dict[str, Any
         "issue_count": total_issue_count,
         "hallucination_count": hallucination_count,
         "price_issue_count": price_issue_count,
+        "price_missing_count": len(price_missing_issues),
+        "price_missing_issues": price_missing_issues,
         "invalid_plan_count": len(invalid_items),
         "route_mismatch_count": len([i for i in issues if i.get("type", "").startswith("route_mismatch")]),
         "ticket_shortage_count": len([i for i in issues if i.get("type") == "ticket_shortage"]),
@@ -424,12 +444,17 @@ def _generate_summary(total: int, correct: int, issue_count: int,
     if total == 0:
         return "⚠️ 未检测到乘车方案（模型可能未输出 final_plan）"
 
-    label = "✅ 全部通过" if verdict == "pass" else "❌ 存在错误（余票编造或票价不符）"
+    label = "✅ 全部通过" if verdict == "pass" else "❌ 存在错误（余票/票价/路线/约束问题）"
 
     if not issue_count:
         return f"{label}：共 {total} 条方案，均与数据库一致"
 
     return f"{label}：共 {total} 条方案，{correct} 条正确，{issue_count} 条有问题"
+
+
+def _is_hhmm(t) -> bool:
+    """合法 HH:MM 时间（脏数据如 ""/"--" 不参与时间比较）"""
+    return bool(re.match(r'^\d{2}:\d{2}$', str(t or "")))
 
 
 def _covers(item: Dict, station_id: str, rw_conn: sqlite3.Connection) -> bool:
@@ -463,6 +488,7 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str) -> L
         prev_to = None
         prev_train = None
         prev_arr = None
+        broken = False   # 链路已断（出现无效段）：后续不再判断裂/时间（防连锁误报）
         for i, item in enumerate(plan_items):
             # 缺实际乘坐区间 → 一律按不全处理，不参与可达拼接
             if item.get("__missing_ride__"):
@@ -474,6 +500,7 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str) -> L
             t = str(item.get("ride_to_station_id") or item.get("to_station_id", ""))
             if not (tn and f and t):
                 issues.append({"type": "route_invalid", "detail": f"第{i + 1}段缺少车次/区间信息"})
+                broken = True
                 continue
             stops = get_train_stops(rw_conn, tn)
             ids = [s["station_id"] for s in stops]
@@ -481,20 +508,24 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str) -> L
             if f not in ids or t not in ids:
                 issues.append({"type": "route_invalid", "train_num": tn, "from_station_id": f,
                                "to_station_id": t, "detail": f"车次 {tn} 不经过 {f} 或 {t}"})
+                broken = True
                 continue
             idx_f, idx_t = ids.index(f), ids.index(t)
             if idx_f >= idx_t:
                 issues.append({"type": "route_invalid", "train_num": tn, "from_station_id": f,
                                "to_station_id": t, "detail": f"车次 {tn} 上 {f}→{t} 方向/顺序错误"})
+                broken = True
                 continue
-            # 1. 地点连续
-            if prev_to is not None and f != prev_to:
+            # 1. 地点连续（链路已断后不再判，防对无效段之后的所有段连锁误报）
+            if not broken and prev_to is not None and f != prev_to:
                 issues.append({"type": "route_discontinuity",
                                "detail": f"第{i}段终点 {prev_to} 与第{i + 1}段起点 {f} 不连续"})
             # 2. 时间顺序（跨车次换乘衔接）。注意：字符串比较遇跨天（前车 23:xx 到、
             # 后车次日 00:xx 发）会判冲突——这是有意的「当日完成约束」：行程必须当日完成，
-            # 换乘跨天即为非法方案（数据库与提示词均不支持跨天）
-            if prev_train is not None and prev_train != tn and prev_arr and times.get(f):
+            # 换乘跨天即为非法方案（数据库与提示词均不支持跨天）。
+            # 双侧时间必须都是合法 HH:MM 才比较，防止 "--" 之类脏数据因字典序（"-"<"0"）误报
+            if not broken and prev_train is not None and prev_train != tn \
+                    and _is_hhmm(prev_arr) and _is_hhmm(times.get(f)):
                 if str(times[f]) < str(prev_arr):
                     issues.append({"type": "transfer_time_conflict",
                                    "detail": f"{prev_train} 到达 {prev_to} {prev_arr}，晚于 {tn} 从 {f} 发车 {times[f]}（换乘跨天/时间倒退，违反当日完成约束）"})
@@ -508,6 +539,11 @@ def _check_reachability(plan_items: List[Dict], start_id: str, end_id: str) -> L
         if end_id:
             if not _covers(plan_items[-1], end_id, rw_conn):
                 issues.append({"type": "end_not_covered", "detail": f"方案未连接到达站 {end_id}"})
+        # 总体结论（docs「no_route」）：存在断裂/起终点未覆盖/无效段 ⇒ 无法拼接出完整全程
+        if any(i.get("type") in ("route_discontinuity", "start_not_covered",
+                                "end_not_covered", "route_invalid") for i in issues):
+            issues.append({"type": "no_route",
+                           "detail": f"综合以上问题，无法拼接出 {start_id or '出发站'}→{end_id or '到达站'} 的完整全程"})
     finally:
         rw_conn.close()
     return issues

@@ -34,7 +34,7 @@ from config import (
     API_CONFIG, QUESTION_CONFIG, ensure_directories,
     RAILWAY_DB_PATH, METADATA_PATH, LOGS_DIR,
     get_question_db_path, TEMPLATES_DIR,
-    NL_TEMPERATURE, TEST_TEMPERATURE
+    NL_TEMPERATURE, TEST_TEMPERATURE, TEST_CHAT_TIMEOUT, TEST_CHAT_STREAM_TIMEOUT
 )
 from database import (
     get_railway_conn,
@@ -43,7 +43,7 @@ from database import (
     create_question_db, reset_question_tables, update_ticket as db_update_ticket,
     delete_train_tickets, remove_train_from_metadata,
     load_metadata, update_question_metadata, get_question_metadata,
-    save_metadata,
+    save_metadata, delete_question_metadata,
     get_question_model_state, get_question_tested_models, set_question_model_state,
     validate_train_exists, validate_station_exists,
     resolve_station_name_or_id,
@@ -1189,6 +1189,7 @@ def _clear_direct_route(q_conn: sqlite3.Connection, train_num: str,
 
 # 经停站全量缓存（一次性加载，供出题/干扰注入复用，避免逐车次查询）
 _STOPS_CACHE: Optional[Dict[str, List[Dict]]] = None
+_STOPS_CACHE_MT: Optional[float] = None   # railway.db 修改时间，变化时自动失效重建
 
 
 def _get_all_stops_cached(rw_conn: sqlite3.Connection) -> Dict[str, List[Dict]]:
@@ -1196,9 +1197,15 @@ def _get_all_stops_cached(rw_conn: sqlite3.Connection) -> Dict[str, List[Dict]]:
 
     全库约 6 万条经停记录，首次加载约 0.8s，此后每次出题直接在内存构建候选池（毫秒级），
     替代原先逐车次查询（每次出题遍历 6000+ 车次各查一次 DB）。
+    railway.db 被重新采集后 mtime 变化 → 缓存自动失效重建（修复：旧版永不失效，
+    重爬数据后出题仍用旧经停，必须重启服务）。
     """
-    global _STOPS_CACHE
-    if _STOPS_CACHE is None:
+    global _STOPS_CACHE, _STOPS_CACHE_MT
+    try:
+        mt = os.path.getmtime(RAILWAY_DB_PATH)
+    except OSError:
+        mt = None
+    if _STOPS_CACHE is None or mt != _STOPS_CACHE_MT:
         _STOPS_CACHE = {}
         cur = rw_conn.cursor()
         cur.execute(
@@ -1212,6 +1219,7 @@ def _get_all_stops_cached(rw_conn: sqlite3.Connection) -> Dict[str, List[Dict]]:
                 "station_name": row[3],
                 "stop_time": row[4],
             })
+        _STOPS_CACHE_MT = mt
     return _STOPS_CACHE
 
 
@@ -1928,11 +1936,8 @@ def api_question_delete(question_id: str):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"删除数据库文件失败: {str(e)}")
 
-    # 再更新 metadata
-    metadata = load_metadata()
-    if question_id in metadata:
-        del metadata[question_id]
-        save_metadata(metadata)
+    # 再更新 metadata（锁内读-改-写，避免与并发 update_question_metadata 丢失更新）
+    if delete_question_metadata(question_id):
         return {"success": True, "message": f"题目 {question_id} 已删除"}
 
     if db_deleted:
@@ -1951,7 +1956,7 @@ class ChatRequest(BaseModel):
     api_base_url: str = ""
     question_id: str = ""
     session_id: str = "default"
-    max_iterations: int = 100
+    max_iterations: int = 100  # 最大对话轮数（每轮=一次 LLM API 请求，轮内可嵌套多个工具调用；非工具调用次数）
 
 
 class TestCompleteRequest(BaseModel):
@@ -2008,7 +2013,7 @@ async def api_test_chat(req: ChatRequest):
 
     messages = chat_sessions[req.session_id]
 
-    # 如果这是第一条消息，添加系统提示词（最大工具调用次数由下方循环 max_iterations 限制）
+    # 如果这是第一条消息，添加系统提示词（最大对话轮数由下方循环 max_iterations 限制）
     if not messages:
         messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
@@ -2048,40 +2053,65 @@ async def api_test_chat(req: ChatRequest):
         iteration = 0
         final_content = ""
         final_reasoning = ""
+        # 结束原因：completed=模型给出最终回答 / max_iterations=轮数耗尽 / error=异常
+        # （写入会话元数据，由 api_test_complete 落盘到记录 end_reason 字段）
+        end_reason = "max_iterations"
         # 批量测试会话（batch_test_<qid>）：逐轮写入批量日志，供前端实时观察执行进度
         batch_qid = req.session_id[len("batch_test_"):] if req.session_id.startswith("batch_test_") else None
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        # 会话元数据：进循环前初始化，循环内每轮即时累计。
+        # （2026-09-15 修复：原先只在循环正常结束后写一次，中途超时/异常直接跳到 except，
+        #   meta 从未创建 → complete 读到空 → 记录 token_usage/duration 全 0）
+        sid = req.session_id
+        meta = chat_session_meta.setdefault(sid, {
+            "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "duration": 0,
+        })
+        if req.question_id:
+            meta["question_id"] = req.question_id
+
+        async with httpx.AsyncClient(timeout=TEST_CHAT_TIMEOUT) as client:
             while iteration < max_iterations:
                 iteration += 1
+                round_start = datetime.now()
                 if batch_qid:
                     _batch_log("batch_test", f"{batch_qid} 第 {iteration}/{max_iterations} 轮对话：请求模型 {model_name}")
 
                 # 调用大模型 API
                 api_url = f"{api_base_url.rstrip('/')}/chat/completions"
                 response = await client.post(api_url, json=request_body, headers=headers)
+                # 本轮耗时即时累计（超时被掐断的本轮不计，已完成轮次的耗时不丢）
+                meta["duration"] += (datetime.now() - round_start).total_seconds()
                 response_data = response.json()
 
                 if "error" in response_data:
-                    return {"error": response_data["error"].get("message", "API 调用失败")}
+                    # API 层错误（非异常路径）：显式标记 error，否则 complete 兜底写成
+                    # "completed"，余额不足/429 等中断的记录会被误标为正常完成
+                    meta["end_reason"] = "error"
+                    err = response_data["error"]
+                    msg = err.get("message", "API 调用失败") if isinstance(err, dict) else str(err)
+                    return {"error": msg}
 
                 choice = response_data["choices"][0]
                 message = choice["message"]
 
-                # 记录 token 用量（仅计新增 prompt tokens，扣除缓存命中）
+                # 记录 token 用量（口径：prompt 只计相邻轮新增——每轮重发的系统提示词/历史
+                # 由增量去重；不再扣除命中缓存，跨平台口径一致，2026-09-16）
                 if "usage" in response_data:
                     usage = response_data["usage"]
                     current_prompt = usage.get("prompt_tokens", 0)
-                    # 减去缓存命中的 tokens
-                    prompt_details = usage.get("prompt_tokens_details")
-                    if isinstance(prompt_details, dict):
-                        cached = prompt_details.get("cached_tokens", 0)
-                        current_prompt = max(0, current_prompt - cached)
                     delta = max(0, current_prompt - last_prompt_tokens)
                     token_usage["prompt_tokens"] += delta
                     last_prompt_tokens = current_prompt
                     token_usage["completion_tokens"] += usage.get("completion_tokens", 0)
                     token_usage["total_tokens"] = token_usage["prompt_tokens"] + token_usage["completion_tokens"]
+                    # 每轮即时累计到会话元数据（中途超时/异常也不丢已完成轮次统计）
+                    meta["token_usage"]["prompt_tokens"] += delta
+                    meta["token_usage"]["completion_tokens"] += usage.get("completion_tokens", 0)
+                    meta["token_usage"]["total_tokens"] = (
+                        meta["token_usage"]["prompt_tokens"]
+                        + meta["token_usage"]["completion_tokens"]
+                    )
 
                 # 提取 reasoning_content（思考链）
                 reasoning = message.get("reasoning_content") or choice.get("delta", {}).get("reasoning_content") or ""
@@ -2090,7 +2120,9 @@ async def api_test_chat(req: ChatRequest):
                 tool_calls = message.get("tool_calls")
                 if not tool_calls:
                     # 模型给出最终回答
-                    final_content = message.get("content", "")
+                    end_reason = "completed"
+                    final_content = message.get("content", "") or ""
+                    final_reasoning = reasoning   # 修复：原实现从未赋值，响应 reasoning 恒为空串
                     messages.append({
                         "role": "assistant",
                         "content": final_content,
@@ -2157,17 +2189,9 @@ async def api_test_chat(req: ChatRequest):
 
         duration = (datetime.now() - start_time).total_seconds()
 
-        # 累计保存到会话元数据
-        sid = req.session_id
-        if sid not in chat_session_meta:
-            chat_session_meta[sid] = {"token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, "duration": 0}
-        meta = chat_session_meta[sid]
-        if req.question_id:
-            meta["question_id"] = req.question_id
-        meta["token_usage"]["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
-        meta["token_usage"]["completion_tokens"] += token_usage.get("completion_tokens", 0)
-        meta["token_usage"]["total_tokens"] += token_usage.get("total_tokens", 0)
-        meta["duration"] += duration
+        # 结束原因写入会话元数据（api_test_complete 落盘到记录 end_reason 字段）；
+        # token/duration 已在循环内每轮即时累计，此处不再重复累加
+        meta["end_reason"] = end_reason
 
         return {
             "reply": final_content,
@@ -2180,6 +2204,11 @@ async def api_test_chat(req: ChatRequest):
 
     except Exception as e:
         logger.error(f"测试对话出错: {e}")
+        # 标记异常结束（meta 已在循环前初始化，已完成轮次的统计得以保留）
+        try:
+            chat_session_meta[req.session_id]["end_reason"] = "error"
+        except KeyError:
+            pass
         return {"error": str(e)}
 
 
@@ -2201,7 +2230,7 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
 
     messages = chat_sessions[req.session_id]
 
-    # 如果这是第一条消息，添加系统提示词（最大工具调用次数由下方循环 max_iterations 限制）
+    # 如果这是第一条消息，添加系统提示词（最大对话轮数由下方循环 max_iterations 限制）
     if not messages:
         messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
@@ -2232,9 +2261,36 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
         # 全量累加器（跨迭代持久化，用于 done 事件输出完整文本）
         full_content_accumulated = ""
         full_reasoning_accumulated = ""
+        end_reason = "max_iterations"
+        _settled = False
+
+        # 会话元数据：进循环前初始化（与非流式口径一致）。终态（完成/出错/断连/超轮数）
+        # 统一经 _settle_meta 结算——修复：原实现只在最终回复分支写 meta，出错/断连/超轮数
+        # 路径 token/耗时全丢，且 end_reason 从未落盘 → 记录被 complete 兜底成 "completed"
+        meta = chat_session_meta.setdefault(req.session_id, {
+            "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "duration": 0,
+        })
+        if req.question_id:
+            meta["question_id"] = req.question_id
+
+        def _settle_meta(reason: str) -> None:
+            """终态结算：本请求累计 token/耗时并入会话元数据并写 end_reason（每请求恰好一次）。"""
+            nonlocal _settled, end_reason
+            if _settled:
+                return
+            _settled = True
+            end_reason = reason
+            tu = meta["token_usage"]
+            tu["prompt_tokens"] += token_usage["prompt_tokens"]
+            tu["completion_tokens"] += token_usage["completion_tokens"]
+            tu["total_tokens"] = tu["prompt_tokens"] + tu["completion_tokens"]
+            meta["duration"] += (datetime.now() - start_time).total_seconds()
+            meta["end_reason"] = reason
 
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            # 超时口径（config.py 全局常量）：流式 120s / 非流式 600s
+            async with httpx.AsyncClient(timeout=TEST_CHAT_STREAM_TIMEOUT) as client:
                 request_body = {
                     "model": model_name,
                     "messages": messages,
@@ -2253,6 +2309,7 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                     # —— 安全检测：客户端断连 ——
                     if await request.is_disconnected():
                         logger.info(f"客户端断开连接，停止循环 (session={req.session_id})")
+                        _settle_meta("error")
                         return
 
                     accumulated_content = ""
@@ -2264,6 +2321,7 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                         async with client.stream("POST", api_url, json=request_body, headers=headers) as resp:
                             if resp.status_code != 200:
                                 error_text = await resp.aread()
+                                _settle_meta("error")
                                 yield f"data: {json.dumps({'type': 'error', 'content': f'API 调用失败 ({resp.status_code}): {str(error_text)[:200]}'})}\n\n"
                                 return
 
@@ -2275,14 +2333,9 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                                     break
                                 try:
                                     chunk = json.loads(data_str)
-                                    # 捕获 token 用量（仅累加每轮新增的 prompt tokens，扣除缓存命中）
+                                    # 捕获 token 用量（口径：prompt 只计相邻轮新增，不再扣缓存命中，2026-09-16）
                                     if "usage" in chunk and chunk["usage"] is not None:
                                         current_prompt = chunk["usage"].get("prompt_tokens", 0)
-                                        # 减去缓存命中的 tokens
-                                        prompt_details = chunk["usage"].get("prompt_tokens_details")
-                                        if isinstance(prompt_details, dict):
-                                            cached = prompt_details.get("cached_tokens", 0)
-                                            current_prompt = max(0, current_prompt - cached)
                                         delta = max(0, current_prompt - last_prompt_tokens)
                                         token_usage["prompt_tokens"] += delta
                                         last_prompt_tokens = current_prompt
@@ -2325,6 +2378,7 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                                     pass
                     except Exception as stream_err:
                         logger.error(f"流式请求出错: {stream_err}")
+                        _settle_meta("error")
                         yield f"data: {json.dumps({'type': 'error', 'content': str(stream_err)})}\n\n"
                         return
 
@@ -2406,18 +2460,8 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                             token_usage["completion_tokens"] = max(token_usage["completion_tokens"], estimated // 2)
                             token_usage["total_tokens"] = max(token_usage["total_tokens"], estimated)
 
-                        # 更新会话元数据
-                        sid = req.session_id
-                        if sid not in chat_session_meta:
-                            chat_session_meta[sid] = {
-                                "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                                "duration": 0,
-                            }
-                        meta = chat_session_meta[sid]
-                        meta["token_usage"]["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
-                        meta["token_usage"]["completion_tokens"] += token_usage.get("completion_tokens", 0)
-                        meta["token_usage"]["total_tokens"] += token_usage.get("total_tokens", 0)
-                        meta["duration"] += duration
+                        # 终态结算：token/耗时/end_reason 一次性写入会话元数据（见 _settle_meta）
+                        _settle_meta("completed")
 
                         # 保存到对话历史（reasoning 不写入 messages）
                         messages.append({
@@ -2442,11 +2486,17 @@ async def api_test_chat_stream(req: ChatRequest, request: Request):
                         return
 
                 # 超限
+                _settle_meta("max_iterations")
                 yield f"data: {json.dumps({'type': 'error', 'content': '工具调用循环超过最大次数'})}\n\n"
 
         except Exception as e:
             logger.error(f"测试流式对话出错: {e}")
+            _settle_meta("error")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        finally:
+            # 客户端断开（GeneratorExit 在 yield 点抛出，上面的 except Exception 接不住）
+            # 等未走显式结算的路径兜底：保证 end_reason / token / 耗时不丢、不重复结算
+            _settle_meta("error")
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -2490,8 +2540,9 @@ def _parse_ai_final_plan(assistant_content: str) -> Optional[List[Dict]]:
                     return text[start:i + 1]
         return None
 
-    # 1. 定位 "final_plan" → 向左找最近 { → 配对扫描
-    idx = assistant_content.find('"final_plan"')
+    # 1. 定位 "final_plan"（取最后一次出现：提示词要求 JSON 在回复末尾；若模型在正文
+    #    复述格式示例 {"final_plan": []}，取首个会把有解误判成 empty_plan）→ 向左找最近 { → 配对扫描
+    idx = assistant_content.rfind('"final_plan"')
     if idx >= 0:
         start = assistant_content.rfind('{', 0, idx)
         if start >= 0:
@@ -2511,6 +2562,8 @@ def _parse_ai_final_plan(assistant_content: str) -> Optional[List[Dict]]:
         return None  # 没有找到 final_plan JSON
     try:
         data = json.loads(json_str)
+        if not isinstance(data, dict):
+            return None
         plan = data.get("final_plan", [])
         if not isinstance(plan, list):
             return None
@@ -2552,13 +2605,19 @@ def api_test_complete(req: TestCompleteRequest):
     token_usage = meta.get("token_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
     duration = meta.get("duration", 0)
 
-    # 题目 ID：优先取会话记录的（并发批量测试不依赖全局状态），兜底全局当前题目
-    question_id = meta.get("question_id")
-    if not question_id:
-        try:
-            question_id = get_current_question()
-        except ValueError:
-            question_id = "unknown"
+    # 题目 ID：批量会话直接从 session_id(batch_test_<qid>) 解析，绝不回落全局当前题。
+    # （2026-09-15 修复：原先 meta 缺失时回落 get_current_question()，曾把并发中
+    #   0001/0003/0005 三题的记录错标成当时全局选中的 0006，造成数据集串题污染）
+    if req.session_id.startswith("batch_test_"):
+        question_id = req.session_id[len("batch_test_"):] or "unknown"
+    else:
+        # 手动会话：优先取会话记录的，兜底全局当前题目
+        question_id = meta.get("question_id")
+        if not question_id:
+            try:
+                question_id = get_current_question()
+            except ValueError:
+                question_id = "unknown"
 
     # 获取模型名称
     model_name = chat_session_model.get(req.session_id, "unknown")
@@ -2599,6 +2658,7 @@ def api_test_complete(req: TestCompleteRequest):
         "plan_status": plan_status,
         "token_usage": token_usage,
         "duration": duration,
+        "end_reason": meta.get("end_reason", "completed"),  # completed/max_iterations/error
         "model_calls": model_calls,
         "tool_calls": tool_calls,
         "trace": trace,
@@ -2725,6 +2785,15 @@ async def execute_tool_handler(func_name: str, func_args: Dict, question_id: Opt
             q_conn = sqlite3.connect(db_path)
             try:
                 seat_types = func_args.get("seat_types", None)
+                # 席别白名单校验：非法席别显式报错（原实现静默忽略后还被下方零填循环
+                # 伪造成"不存在的席别余票 0"误导模型；与 /api/train/{num}/ticket 口径对齐）
+                if isinstance(seat_types, str):
+                    seat_types = [s.strip() for s in seat_types.split(",") if s.strip()]
+                if seat_types is not None:
+                    bad = [s for s in seat_types if s not in TICKET_TABLES]
+                    if bad:
+                        return {"error": f"无效座位类型: {bad}，可选 class0/class1/class2"}
+                    seat_types = list(seat_types)
                 from_station = func_args.get("from_station_id", None)
                 to_station = func_args.get("to_station_id", None)
                 tickets = get_train_tickets_filtered(
@@ -2863,6 +2932,12 @@ def api_eval_verify(req: EvalVerifyRequest):
             "issue_count": 0,
             "hallucination_count": 0,
             "price_issue_count": 0,
+            "price_missing_count": 0,
+            "invalid_plan_count": 0,
+            "route_mismatch_count": 0,
+            "ticket_shortage_count": 0,
+            "missing_ride_count": 0,
+            "question_mode": None,
             "verdict": "empty_plan",
             "results": [],
             "issues": [],
@@ -2925,7 +3000,6 @@ def api_eval_manage_list(
 ):
     """列出测评结果（logs/result），支持按模型/题号/verdict/关键词筛选，供测评管理页浏览。"""
     from config import LOGS_RESULT_DIR
-    from statistics.aggregator import _compute_score
 
     model_f = (model or "").strip()
     qid_f = (question_id or "").strip().lower()
@@ -2964,7 +3038,6 @@ def api_eval_manage_list(
                 "question_id": qid,
                 "model_name": m,
                 "verdict": v,
-                "score": _compute_score(data),
                 "issue_count": ver.get("issue_count", 0),
                 "hallucination_count": ver.get("hallucination_count", 0),
                 "total_tokens": ss.get("total_tokens", 0),
@@ -2972,7 +3045,6 @@ def api_eval_manage_list(
             })
 
     total = len(items)
-    scores = [it["score"] for it in items]
     verdict_counts: Dict[str, int] = {}
     for it in items:
         verdict_counts[it["verdict"]] = verdict_counts.get(it["verdict"], 0) + 1
@@ -2982,7 +3054,6 @@ def api_eval_manage_list(
         "models": sorted(models),
         "summary": {
             "total": total,
-            "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
             "verdict_counts": verdict_counts,
         },
     }
@@ -3049,6 +3120,131 @@ def api_eval_manage_delete(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
     return {"success": True, "message": f"测评结果 {safe} 已删除"}
+
+
+# ============================================================
+# 测试管理接口（浏览 logs/test 测试记录：「测试后」产物，与测评管理(logs/result「测评后」)分离；
+# 模型输出的结构化展示（含 trace 轨迹）在此查看，测评管理只看结论）
+# ============================================================
+@app.get("/api/test/manage/list")
+def api_test_manage_list(
+    model: str = Query("", alias="model"),
+    question_id: str = Query("", alias="question_id"),
+    end_reason: str = Query("", alias="end_reason"),
+    keyword: str = Query("", alias="keyword"),
+):
+    """列出测试记录（logs/test），支持按模型/题号/结束原因/关键词筛选。"""
+    from config import LOGS_TEST_DIR
+
+    model_f = (model or "").strip()
+    qid_f = (question_id or "").strip().lower()
+    end_f = (end_reason or "").strip()
+    kw = (keyword or "").strip().lower()
+
+    records = []
+    models = set()
+    end_counts: Dict[str, int] = {}
+    if os.path.isdir(LOGS_TEST_DIR):
+        for f in sorted(os.listdir(LOGS_TEST_DIR), reverse=True):
+            if not f.endswith(".json"):
+                continue
+            filepath = os.path.join(LOGS_TEST_DIR, f)
+            try:
+                with open(filepath, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except Exception:
+                continue
+            m = data.get("model_name", "unknown")
+            models.add(m)
+            # 结束原因：新记录有显式 end_reason；旧记录按有无 error 字段兜底推断
+            er = data.get("end_reason") or ("error" if data.get("error") else "completed")
+            end_counts[er] = end_counts.get(er, 0) + 1
+            if model_f and m != model_f:
+                continue
+            qid = data.get("question_id", "") or ""
+            if qid_f and qid_f not in qid.lower():
+                continue
+            if end_f and er != end_f:
+                continue
+            if kw and kw not in f.lower() and kw not in qid.lower():
+                continue
+            tu = data.get("token_usage") or {}
+            records.append({
+                "filename": f,
+                "timestamp": data.get("timestamp", ""),
+                "question_id": qid,
+                "model_name": m,
+                "plan_status": data.get("plan_status", ""),
+                "end_reason": er,
+                "model_calls": data.get("model_calls", 0),
+                "tool_calls": data.get("tool_calls", 0),
+                "total_tokens": tu.get("total_tokens", 0),
+                "duration": data.get("duration", 0),
+            })
+
+    total = len(records)
+    durations = [r["duration"] for r in records if isinstance(r["duration"], (int, float))]
+    tokens = [r["total_tokens"] for r in records if isinstance(r["total_tokens"], (int, float))]
+    return {
+        "records": records,
+        "total": total,
+        "models": sorted(models),
+        "summary": {
+            "total": total,
+            "end_reason_counts": end_counts,
+            "avg_duration": round(sum(durations) / len(durations), 1) if durations else 0,
+            "total_tokens": sum(tokens) if tokens else 0,
+        },
+    }
+
+
+@app.get("/api/test/manage/detail")
+def api_test_manage_detail(filename: str):
+    """加载单条测试记录详情：完整记录（含 trace 轨迹 / final_plan / final_answer）+ 题目元数据。"""
+    from config import LOGS_TEST_DIR
+    safe = os.path.basename(filename or "")
+    if not safe.endswith(".json"):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    filepath = os.path.join(LOGS_TEST_DIR, safe)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"测试记录 {safe} 不存在")
+    with open(filepath, "r", encoding="utf-8") as fh:
+        record = json.load(fh)
+
+    qid = record.get("question_id", "")
+    meta = {}
+    try:
+        meta = get_question_metadata(qid) or {}
+    except Exception:
+        meta = {}
+
+    return {
+        "record": record,
+        "question_meta": {
+            "question": meta.get("question", ""),
+            "nl_question": meta.get("nl_question", ""),
+            "type": meta.get("type", ""),
+            "question_type": meta.get("question_type", ""),
+            "answer": meta.get("answer") or _ground_truth_summary(meta.get("ground_truth")),
+        },
+    }
+
+
+@app.delete("/api/test/manage/{filename}")
+def api_test_manage_delete(filename: str):
+    """删除单条测试记录文件"""
+    from config import LOGS_TEST_DIR
+    safe = os.path.basename(filename or "")
+    if not safe.endswith(".json"):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    filepath = os.path.join(LOGS_TEST_DIR, safe)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"测试记录 {safe} 不存在")
+    try:
+        os.remove(filepath)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+    return {"success": True, "message": f"测试记录 {safe} 已删除"}
 
 
 # ============================================================
@@ -3259,6 +3455,35 @@ def _pipeline_running_job() -> Optional[str]:
         return _PIPELINE_RUNNING
 
 
+def _safe_batch_worker(job: str, fn, *args) -> None:
+    """批量 worker 兜底包装：worker 内任何未捕获异常也保证 running/done 状态落位 +
+    流水线锁释放。修复：_run_batch_nl/_run_batch_test/_run_batch_eval 原先没有
+    try/finally，任一未捕获异常（如 metadata.json 损坏时 load_metadata 崩溃）会让
+    线程带异常死亡 → done 永远 False + 锁永不释放 → 后续批量任务全部 400、
+    auto.py wait_worker（无总超时 while True）死循环。"""
+    if job == "batch_generate":
+        state = _batch_state
+    elif job == "batch_nl":
+        state = _nl_state
+    elif job == "batch_test":
+        state = _test_state
+    else:
+        state = _eval_state
+    try:
+        fn(*args)
+    except Exception as e:
+        logger.error(f"批量任务 {job} 异常终止: {e}")
+        _batch_log(job, f"批量任务异常终止：{e}", "error")
+        state["result"] = {
+            "summary": {"total": state.get("total") or 0, "success": 0,
+                        "failed": state.get("total") or 0, "error": str(e)},
+            "details": [], "error": str(e),
+        }
+    finally:
+        state.update({"running": False, "done": True, "current": ""})
+        _pipeline_release(job)
+
+
 # ============================================================
 # 批量工具日志：三个批量任务（batch_generate / batch_nl / batch_test）共用
 # - 内存环形缓冲：供前端 status 接口增量轮询（seq 游标）
@@ -3365,15 +3590,26 @@ def _generate_batch_nl(question_ids: List[str]) -> Dict[str, Any]:
 def _run_batch(payload: Dict[str, Any]) -> None:
     """在线程中顺序生成全部题目：每题固定参数（站对/方向/人数/座位/题型）重试 ≤ max_retries，
     成功即直接落盘（_generate_question：生成→注入→自检→原子落盘），失败计入回执。"""
-    rw_conn = get_railway_conn()
+    rw_conn = None
     try:
+        rw_conn = get_railway_conn()
         distribution = payload.get("distribution") or []
         selective_rows = payload.get("selective") or []
         stations = payload.get("stations") or []
         seat_weights = payload.get("seat_weights") or {"class0": 20, "class1": 30, "class2": 50}
-        # 密度分开：干扰（存在性 1_，票数<人数）与随机票（选择性 2_，0.5~1.5×人数）
-        interference_density = float(payload.get("interference_density") or 0.02)
-        random_tickets_density = float(payload.get("random_tickets_density") or 0.02)
+        def _density(key: str) -> float:
+            v = payload.get(key)
+            if v is None:
+                return 0.02
+            try:
+                return max(0.0, min(1.0, float(v)))
+            except (TypeError, ValueError):
+                return 0.02
+
+        # 密度分开：干扰（存在性 1_，票数<人数）与随机票（选择性 2_，0.5~1.5×人数）。
+        # 修复：原 `or 0.02` 会把显式 0 劫持成 0.02 —— 网页永远无法关闭注入
+        interference_density = _density("interference_density")
+        random_tickets_density = _density("random_tickets_density")
         max_retries = max(1, int(payload.get("max_retries") or 40))
         nl_enabled = bool(payload.get("nl_enabled", True))
 
@@ -3537,7 +3773,8 @@ def _run_batch(payload: Dict[str, Any]) -> None:
             "details": [], "report": None, "error": str(e),
         }
     finally:
-        rw_conn.close()
+        if rw_conn is not None:
+            rw_conn.close()
         _batch_state["running"] = False
         _batch_state["done"] = True
         _pipeline_release("batch_generate")
@@ -3733,10 +3970,15 @@ def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
             # 慢操作（LLM 调用 + prompt 构建）在锁外执行，最大化并发
             nl = generate_nl(api_key, model, base_url, build_prompt(entry))
             with metadata_lock:
-                entry["nl_question"] = nl
-                # 每题成功立即落盘：进度实时可见，中断不丢已生成结果
-                # （save_metadata 为全文件写，必须串行化防并发写坏）
-                save_metadata(metadata)
+                # 每题成功立即落盘：进度实时可见，中断不丢已生成结果。
+                # 修复（陈旧快照覆写）：写回前重读最新 metadata 再改写本题——worker 启动
+                # 时的快照可能已过期，直接整体写回会覆盖并发期间页面 API 对其它题目的
+                # 删除/修改（已删题目会被"复活"）。
+                fresh = load_metadata()
+                fresh_entry = fresh.get(qid)
+                if isinstance(fresh_entry, dict):
+                    fresh_entry["nl_question"] = nl
+                    save_metadata(fresh)
             _batch_log("batch_nl", f"{qid} 自然语言生成成功并已写回 metadata", "success")
             return {"question_id": qid, "ok": True, "error": None}
         except Exception as e:
@@ -3759,7 +4001,7 @@ def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
                 _nl_state["done_count"] += 1
                 _nl_state["current"] = (f"并发 {concurrency} · 已完成 {_nl_state['done_count']}/{len(question_ids)}"
                                         + (" · 已请求停止，剩余跳过中" if _nl_state.get("stop") else ""))
-    save_metadata(metadata)
+    # （无统一收尾落盘：每题成功已在锁内重读-改写-落盘，不再用过期快照整体覆盖）
     stopped = bool(_nl_state.get("stop"))
     _nl_state["result"] = {
         "summary": {"total": len(question_ids), "generated": counts["generated"],
@@ -3822,7 +4064,7 @@ def api_batch_nl_generate(req: BatchNlGenerateRequest):
     _batch_log("batch_nl", f"收到批量自然语言化请求：{len(req.question_ids)} 题，并发 {concurrency}，任务已启动")
     _nl_state.update({"running": True, "done": False, "current": "准备中...",
                       "total": len(req.question_ids), "done_count": 0, "result": None, "stop": False})
-    threading.Thread(target=_run_batch_nl, args=(list(req.question_ids), concurrency), daemon=True).start()
+    threading.Thread(target=_safe_batch_worker, args=("batch_nl", _run_batch_nl, list(req.question_ids), concurrency), daemon=True).start()
     return {"success": True, "message": f"批量自然语言化已启动（并发 {concurrency}，逐题生成并写回 nl_question）"}
 
 
@@ -3855,6 +4097,19 @@ _test_state: Dict[str, Any] = {
 }
 
 
+def _resolve_batch_test_model(explicit: str = "") -> str:
+    """解析批量测试模型：显式传入优先；为空则回落 .env（TEST_MODEL → DEFAULT_MODEL）。
+
+    前端无需输入模型名（输入框只读展示 .env 解析结果）。
+    """
+    model = (explicit or "").strip()
+    if model:
+        return model
+    from config import ENV, ensure_env_fresh
+    ensure_env_fresh()
+    return (ENV.get("TEST_MODEL") or ENV.get("DEFAULT_MODEL") or "").strip()
+
+
 def _batch_test_model_testable(m: Dict, model: str) -> bool:
     """可测试条件：题目信息核查完备（含自然语言问题）且该模型在 state 列表中无记录（未测过）。"""
     return bool(m.get("question")) and bool(m.get("nl_question")) \
@@ -3867,7 +4122,7 @@ def _run_batch_test(model: str, question_ids: List[str], max_iterations: int, co
     concurrency = max(1, min(int(concurrency or 1), 8))
     _test_state.update({"running": True, "done": False, "current": "",
                         "total": len(question_ids), "done_count": 0, "result": None})
-    _batch_log("batch_test", f"批量测试开始：模型 {model}，共 {len(question_ids)} 题，最大工具调用 {max_iterations}，并发数 {concurrency}")
+    _batch_log("batch_test", f"批量测试开始：模型 {model}，共 {len(question_ids)} 题，最大对话轮数 {max_iterations}，并发数 {concurrency}")
     metadata = load_metadata()   # 只读快照：预检 testable；state 写入由 set_question_model_state 锁内即时落盘
     details = []
     state_lock = threading.Lock()
@@ -3940,16 +4195,17 @@ class BatchTestScanRequest(BaseModel):
 class BatchTestStartRequest(BaseModel):
     model: str = ""
     question_ids: List[str] = []
-    max_iterations: int = 30
+    max_iterations: int = 30  # 最大对话轮数（每轮=一次 LLM API 请求；非工具调用次数）
     concurrency: int = 1
 
 
 @app.post("/api/batch_test/scan")
 def api_batch_test_scan(req: BatchTestScanRequest):
-    """扫描可测试题目：信息核查完备（含 nl_question）且该模型未测过；前端据此勾选增删。"""
-    model = (req.model or "").strip()
+    """扫描可测试题目：信息核查完备（含 nl_question）且该模型未测过；前端据此勾选增删。
+    模型名可省略：缺省自动回落 .env 的 TEST_MODEL / DEFAULT_MODEL。"""
+    model = _resolve_batch_test_model(req.model)
     if not model:
-        raise HTTPException(status_code=400, detail="请先填写测试模型编号（名称）")
+        raise HTTPException(status_code=400, detail="未指定模型，且 .env 未配置 TEST_MODEL / DEFAULT_MODEL")
     metadata = load_metadata()
     from config import QUESTION_DIR
     db_names = {f[:-3] for f in os.listdir(QUESTION_DIR) if f.endswith(".db")} if os.path.isdir(QUESTION_DIR) else set()
@@ -3977,10 +4233,11 @@ def api_batch_test_scan(req: BatchTestScanRequest):
 
 @app.post("/api/batch_test/start")
 def api_batch_test_start(req: BatchTestStartRequest):
-    """启动批量测试：仅对“信息完备且该模型未测过（state 无记录）”的题目执行，逐题保存测试记录并推进 state。"""
-    model = (req.model or "").strip()
+    """启动批量测试：仅对“信息完备且该模型未测过（state 无记录）”的题目执行，逐题保存测试记录并推进 state。
+    模型名可省略：缺省自动回落 .env 的 TEST_MODEL / DEFAULT_MODEL。"""
+    model = _resolve_batch_test_model(req.model)
     if not model:
-        raise HTTPException(status_code=400, detail="请先填写测试模型编号（名称）")
+        raise HTTPException(status_code=400, detail="未指定模型，且 .env 未配置 TEST_MODEL / DEFAULT_MODEL")
     if not _pipeline_acquire("batch_test"):
         raise HTTPException(status_code=400,
                             detail=f"另一批量任务（{_pipeline_running_job()}）运行中：批量任务互斥（出题/自然语言/测试/测评同一时刻只能跑一个），请等待完成")
@@ -3995,7 +4252,7 @@ def api_batch_test_start(req: BatchTestStartRequest):
     # 同步置运行态（与批量 NL 同理，消除 worker 冷启动窗口内的轮询竞态）
     _test_state.update({"running": True, "done": False, "current": "准备中...",
                         "total": len(req.question_ids), "done_count": 0, "result": None})
-    threading.Thread(target=_run_batch_test, args=(model, list(req.question_ids), max_iter, concurrency), daemon=True).start()
+    threading.Thread(target=_safe_batch_worker, args=("batch_test", _run_batch_test, model, list(req.question_ids), max_iter, concurrency), daemon=True).start()
     return {"success": True, "message": f"批量测试已启动（并发 {concurrency}，仅对信息完备且该模型未测过的题目执行）"}
 
 
@@ -4059,6 +4316,11 @@ def _run_batch_eval(filenames: List[str]) -> None:
             qid = data.get("question_id", "") or "unknown"
             final_plan = data.get("final_plan") or []
             verification = verify_final_plan(final_plan, qid)
+            if not final_plan:
+                # 口径统一（BUG 修复）：空方案与手动 /api/eval/verify 一致判 empty_plan，
+                # 不再因批量路径不同而漂移成 no_plan
+                verification["verdict"] = "empty_plan"
+                verification["summary"] = "⚠️ 最终乘车方案为空（模型未输出 final_plan 或输出无解）"
             verdict = verification.get("verdict", "unknown")
             verdict_count[verdict] = verdict_count.get(verdict, 0) + 1
             tu = data.get("token_usage") or {}
@@ -4152,7 +4414,7 @@ def api_batch_eval_start(req: Dict = Body(...)):
     # 同步置运行态（与其他批量任务同理）
     _eval_state.update({"running": True, "done": False, "current": "准备中...",
                         "total": len(filenames), "done_count": 0, "result": None})
-    threading.Thread(target=_run_batch_eval, args=(filenames,), daemon=True).start()
+    threading.Thread(target=_safe_batch_worker, args=("batch_eval", _run_batch_eval, filenames,), daemon=True).start()
     return {"success": True, "message": "批量测评已启动（逐条代码核查并保存结果）"}
 
 
@@ -4220,6 +4482,11 @@ def eval_page():
 
 @app.get("/eval_manage", response_class=HTMLResponse)
 def eval_manage_page():
+    return get_html("index.html")
+
+
+@app.get("/test_manage", response_class=HTMLResponse)
+def test_manage_page():
     return get_html("index.html")
 
 

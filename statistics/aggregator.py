@@ -1,5 +1,5 @@
 """
-数据汇总模块（基于核查 verdict 判定对错与评分）
+数据汇总模块（基于核查 verdict 判定对错）
 读取 logs/result/ 的测评结果，汇总统计指标。
 
 对错判定：verification.verdict
@@ -8,10 +8,7 @@
   - no_plan         → 未规划（无任何可核查购票段）
   - empty_plan      → 空方案（模型未输出 final_plan）
   - db_not_found    → 数据缺失（不计入模型错误）
-评分（0~100）：
-  - pass = 100
-  - hallucination = 100 - 问题扣分（硬错误 -20 / 约束 -10 / 格式缺失 -5，下限 0）
-  - no_plan / empty_plan / db_not_found = 0
+注：评分功能已移除（2026-09-16），统计只看 verdict 分布/通过率/错误率。
 """
 
 import os
@@ -19,21 +16,6 @@ import json
 from typing import Dict, List, Any
 
 from config import LOGS_RESULT_DIR, LOGS_TEST_DIR
-
-# 硬错误（方案不可行 / 编造）：每项 -20
-HARD_ISSUES = {
-    "hallucination", "price_wrong",
-    "route_mismatch", "route_mismatch_train", "route_mismatch_route",
-    "route_mismatch_seat", "route_mismatch_ride",
-    "route_invalid", "route_discontinuity", "transfer_time_conflict",
-    "start_not_covered", "end_not_covered", "no_route",
-    "no_transfer_violated", "no_short_buy_violated", "no_extra_violated",
-}
-# 约束（硬性约束不满足）：每项 -10
-CONSTRAINT_ISSUES = {
-    "ticket_shortage", "price_missing",
-}
-# 其余（格式/缺失）：每项 -5
 
 
 def load_all_results() -> List[Dict]:
@@ -68,28 +50,6 @@ def _verdict(r: Dict) -> str:
     return (r.get("verification") or {}).get("verdict", "unknown")
 
 
-def _compute_score(r: Dict) -> float:
-    """基于 verdict + issues 计算 0~100 分"""
-    verdict = _verdict(r)
-    if verdict == "pass":
-        return 100.0
-    if verdict in ("no_plan", "empty_plan", "db_not_found", "unknown"):
-        # unknown = 旧数据/无 verdict，不按满分计
-        return 0.0
-    # hallucination：按问题严重度扣分
-    v = r.get("verification") or {}
-    score = 100.0
-    for issue in v.get("issues", []):
-        t = issue.get("type", "")
-        if t in HARD_ISSUES:
-            score -= 20
-        elif t in CONSTRAINT_ISSUES:
-            score -= 10
-        else:
-            score -= 5
-    return max(0.0, round(score, 1))
-
-
 def _issue_type_counts(group: List[Dict]) -> Dict[str, int]:
     """统计一组测评结果中各问题类型出现次数"""
     counts: Dict[str, int] = {}
@@ -121,7 +81,6 @@ def _record_brief(r: Dict, meta_all: Dict, test_data: Dict = None) -> Dict[str, 
         "type": m.get("type", ""),
         "question_type": m.get("question_type", ""),
         "verdict": v.get("verdict", "unknown"),
-        "score": _compute_score(r),
         "issue_count": v.get("issue_count", 0),
         "hallucination_count": v.get("hallucination_count", 0),
         "total_tokens": ss.get("total_tokens", 0),
@@ -158,9 +117,6 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
     db_count = sum(1 for r in group if _verdict(r) == "db_not_found")
     unknown_count = total - pass_count - error_count - no_plan_count - empty_count - db_count
 
-    scores = [_compute_score(r) for r in group]
-    avg_score = sum(scores) / len(scores) if scores else 0
-
     return {
         "total_tests": total,
         "success_count": success_count,
@@ -175,13 +131,11 @@ def _model_stats(group: List[Dict]) -> Dict[str, Any]:
         "empty_rate": round(empty_count / total * 100, 1) if total else 0,
         "db_count": db_count,
         "unknown_count": unknown_count,
-        "avg_score": round(avg_score, 1),
         # token/耗时/双调用计数由 aggregate_results 统一补齐（此处不再重复读测试记录文件）
         "avg_tokens": 0,
         "avg_duration": 0,
         "avg_tool_calls": 0,
         "avg_model_calls": 0,
-        "scores": scores,
     }
 
 
@@ -189,7 +143,7 @@ def aggregate_results() -> Dict:
     """
     读取所有测评结果，返回汇总统计数据。
     返回：
-    - total_tests / models（按模型分组指标）/ summary（全局汇总）/ all_scores
+    - total_tests / models（按模型分组指标）/ summary（全局汇总）
     """
     results = load_all_results()
 
@@ -198,11 +152,10 @@ def aggregate_results() -> Dict:
             "total_tests": 0,
             "models": {},
             "summary": {
-                "avg_score": 0, "completion_rate": 0, "pass_rate": 0,
+                "completion_rate": 0, "pass_rate": 0,
                 "error_rate": 0, "no_plan_rate": 0, "empty_rate": 0,
                 "total_tests": 0,
             },
-            "all_scores": [],
         }
 
     # 按模型分组
@@ -249,7 +202,7 @@ def aggregate_results() -> Dict:
         stats["avg_tool_calls"] = round(total_tool_calls / token_count, 1) if token_count else 0
         stats["avg_model_calls"] = round(total_model_calls / token_count, 1) if token_count else 0
         stats["issue_type_counts"] = _issue_type_counts(group)
-        # 逐题明细（新记录在前）：题号/verdict/得分/问题数/token/耗时/模型调用/工具调用/时间
+        # 逐题明细（新记录在前）：题号/verdict/问题数/token/耗时/模型调用/工具调用/时间
         stats["records"] = [
             _record_brief(r, meta_all, td_map.get(os.path.basename(r.get("test_file", "") or "")))
             for r in reversed(group)
@@ -263,13 +216,11 @@ def aggregate_results() -> Dict:
     noplan_c = sum(1 for r in results if _verdict(r) == "no_plan")
     empty_c = sum(1 for r in results if _verdict(r) == "empty_plan")
     success_c = sum(1 for r in results if r.get("status") == "success")
-    all_scores = [_compute_score(r) for r in results]
 
     return {
         "total_tests": total,
         "models": models_data,
         "summary": {
-            "avg_score": round(sum(all_scores) / len(all_scores), 1) if all_scores else 0,
             "completion_rate": round(success_c / total * 100, 1) if total else 0,
             "pass_rate": round(pass_c / total * 100, 1) if total else 0,
             "error_rate": round(err_c / total * 100, 1) if total else 0,
@@ -278,5 +229,4 @@ def aggregate_results() -> Dict:
             "total_tests": total,
             "issue_type_counts": _issue_type_counts(results),
         },
-        "all_scores": all_scores,
     }

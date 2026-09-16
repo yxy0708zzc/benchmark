@@ -1,14 +1,14 @@
 """
 对比分析模块
 按模型、题目类型（存在性/选择性）、题型（question_type）等维度对比分析。
-对错判定与评分复用 aggregator（基于核查 verdict）。
+对错判定复用 aggregator（基于核查 verdict）。
 """
 
 import os
 import json
 from typing import Dict, List, Any
 
-from .aggregator import load_all_results, aggregate_results, _compute_score, _verdict
+from .aggregator import load_all_results, aggregate_results, _verdict
 
 
 def _load_metadata() -> Dict:
@@ -16,7 +16,9 @@ def _load_metadata() -> Dict:
     try:
         from config import METADATA_PATH
         if os.path.exists(METADATA_PATH):
-            with open(METADATA_PATH, "r", encoding="utf-8") as f:
+            # utf-8-sig：兼容带 BOM 的 metadata.json（与 database.py 同口径；
+            # BOM 文件曾致 json.load 崩 → 静默返回 {} → 统计题型维度全变"未知"）
+            with open(METADATA_PATH, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
     except Exception:
         pass
@@ -30,7 +32,6 @@ def _stats(group: List[Dict]) -> Dict:
     err_c = sum(1 for r in group if _verdict(r) == "hallucination")
     no_plan_c = sum(1 for r in group if _verdict(r) == "no_plan")
     empty_c = sum(1 for r in group if _verdict(r) == "empty_plan")
-    scores = [_compute_score(r) for r in group]
     return {
         "count": total,
         "pass_count": pass_c,
@@ -39,7 +40,6 @@ def _stats(group: List[Dict]) -> Dict:
         "error_rate": round(err_c / total * 100, 1) if total else 0,
         "no_plan_count": no_plan_c,
         "empty_count": empty_c,
-        "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
     }
 
 
@@ -83,16 +83,15 @@ def compare_by_interference_density() -> Dict:
 
 
 def get_model_ranking() -> List[Dict]:
-    """获取模型排名（按平均分降序）"""
+    """获取模型排名（按通过率降序）"""
     models = compare_by_model()
     ranking = []
     for name, data in models.items():
         ranking.append({
             "model": name,
-            "avg_score": data.get("avg_score", 0),
             "completion_rate": data.get("completion_rate", 0),
             "pass_rate": data.get("pass_rate", 0),
             "error_rate": data.get("error_rate", 0),
         })
-    ranking.sort(key=lambda x: x["avg_score"], reverse=True)
+    ranking.sort(key=lambda x: x["pass_rate"], reverse=True)
     return ranking

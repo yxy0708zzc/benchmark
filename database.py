@@ -243,8 +243,8 @@ def calc_duration(depart: str, arrive: str) -> str:
         h1, m1 = map(int, depart.split(":"))
         h2, m2 = map(int, arrive.split(":"))
         total_minutes = (h2 * 60 + m2) - (h1 * 60 + m1)
-        if total_minutes < 0:
-            total_minutes += 1440  # 跨天处理
+        while total_minutes < 0:
+            total_minutes += 1440  # 跨天处理（循环累加，≥24h 车次时长不再回绕）
         return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
     except (ValueError, AttributeError):
         return "--:--"
@@ -460,10 +460,14 @@ def _metadata_load_unlocked() -> Dict:
 
 
 def _metadata_save_unlocked(metadata: Dict):
-    """保存题目元数据（不加锁，内部用）"""
+    """保存题目元数据（不加锁，内部用）。原子落盘：先写临时文件再 os.replace，
+    进程写入中途被杀/断电也不会留下截断损坏的 metadata.json
+    （metadata 损坏会连锁引爆批量 worker 崩溃 → done 永不置位 → auto.py 死循环）。"""
     ensure_directories()
-    with open(METADATA_PATH, "w", encoding="utf-8") as f:
+    tmp_path = METADATA_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, METADATA_PATH)
 
 
 def load_metadata() -> Dict:
@@ -477,6 +481,20 @@ def save_metadata(metadata: Dict):
     避免用陈旧快照整体覆盖他人更新。"""
     with _METADATA_LOCK:
         _metadata_save_unlocked(metadata)
+
+
+def delete_question_metadata(question_id: str) -> bool:
+    """锁内"读-改-写"删除单条题目元数据，返回是否删除（不存在=False）。
+
+    供 DELETE /api/question/{qid} 使用：原实现 load→del→save 两段各自持锁，
+    与并发 update_question_metadata 交错时存在丢失更新窗口。"""
+    with _METADATA_LOCK:
+        metadata = _metadata_load_unlocked()
+        if question_id not in metadata:
+            return False
+        del metadata[question_id]
+        _metadata_save_unlocked(metadata)
+        return True
 
 
 # ------------------------------------------------------------

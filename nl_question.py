@@ -104,13 +104,17 @@ def load_metadata(metadata_path: str) -> dict:
     if not os.path.exists(metadata_path):
         print(f"❌ metadata 不存在: {metadata_path}")
         sys.exit(1)
-    with open(metadata_path, "r", encoding="utf-8") as f:
+    # utf-8-sig：兼容带 BOM 的 metadata.json（与 database.py 同口径，BOM 文件曾致启动即崩）
+    with open(metadata_path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
 def save_metadata(metadata_path: str, metadata: dict):
-    with open(metadata_path, "w", encoding="utf-8") as f:
+    # 原子落盘：先写临时文件再替换，进程写入中途被杀不会留下截断损坏的 metadata.json
+    tmp_path = metadata_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, metadata_path)
 
 
 def build_criterion_text(entry: dict) -> str:
@@ -158,9 +162,25 @@ def build_prompt(entry: dict) -> str:
     )
 
 
-def generate_nl(api_key: str, model: str, base_url: str, prompt: str) -> str:
-    """调用大模型生成自然语言（温度读 config.NL_TEMPERATURE，在 config.py 中修改）"""
-    from config import NL_TEMPERATURE
+class _NoRetryError(RuntimeError):
+    """不可重试错误（鉴权/参数类），直接失败"""
+
+
+def generate_nl(api_key: str, model: str, base_url: str, prompt: str,
+                timeout: float = None, max_retries: int = 3) -> str:
+    """调用大模型生成自然语言（温度读 config.NL_TEMPERATURE，在 config.py 中修改）。
+
+    修复（原实现三个坑）：
+    - timeout 硬编码 60s：glm-5.3-flash 等推理模型单次调用常超 60s → ReadTimeout
+      该题直接失败；现在默认用 config.TEST_CHAT_TIMEOUT（600s，非流式全局口径）。
+    - 零重试：网络抖动/429/5xx 单次失败；现在指数退避重试（仅网络错误与
+      限流/服务端错误重试，401/400 等参数类错误不重试）。
+    - 响应字段防御：content 可能为 null/空（内容全在 reasoning_content）、
+      error 可能是字符串、非 OpenAI 兼容错误体缺 choices——不再裸崩。
+    """
+    import time as _time
+    from config import NL_TEMPERATURE, TEST_CHAT_TIMEOUT
+    timeout = timeout or TEST_CHAT_TIMEOUT
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
         "Content-Type": "application/json",
@@ -169,18 +189,38 @@ def generate_nl(api_key: str, model: str, base_url: str, prompt: str) -> str:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": NL_TEMPERATURE,  # 提高多样性（注意各平台范围限制，如 MiMo [0, 1.5]）
+        "temperature": NL_TEMPERATURE,  # 提高多样性（已实测 glm-5.3-flash 接受 1.4）
     }
-    resp = requests.post(url, json=payload, headers=headers, timeout=60)
-    if resp.status_code != 200:
-        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-    data = resp.json()
-    if "error" in data:
-        raise RuntimeError(data["error"].get("message", "API 调用失败"))
-    content = data["choices"][0]["message"]["content"].strip()
-    if not content:
-        raise RuntimeError("模型返回为空")
-    return content
+    last_err: Exception = RuntimeError("未发起请求")
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+            if resp.status_code in (429, 500, 502, 503, 504):
+                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            if resp.status_code != 200:
+                # 参数/鉴权类错误（400/401/404）：重试无意义，直接失败
+                raise _NoRetryError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            data = resp.json()
+        except _NoRetryError:
+            raise
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                _time.sleep(min(30.0, 2 ** attempt) + 1)
+            continue
+        if "error" in data:
+            err = data["error"]
+            msg = err.get("message", "API 调用失败") if isinstance(err, dict) else str(err)
+            raise RuntimeError(msg)
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"API 响应缺少 choices: {str(data)[:200]}")
+        message = choices[0].get("message") or {}
+        content = (message.get("content") or "").strip()
+        if not content:
+            raise RuntimeError("模型返回为空（content 为空，内容可能全在 reasoning_content）")
+        return content
+    raise RuntimeError(f"重试 {max_retries} 次仍失败: {last_err}")
 
 
 def ask_config(args) -> dict:
