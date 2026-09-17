@@ -16,8 +16,8 @@ from typing import List, Tuple, Optional, Dict
 from datetime import datetime
 
 from config import (
-    RAILWAY_DB_PATH, PRICES_DB_PATH, METADATA_PATH, ensure_directories,
-    get_question_db_path, QUESTION_CONFIG
+    RAILWAY_DB_PATH, PRICES_DB_PATH, METADATA_PATH, METADATA_NL_PATH,
+    ensure_directories, get_question_db_path, QUESTION_CONFIG
 )
 
 
@@ -471,9 +471,87 @@ def _metadata_save_unlocked(metadata: Dict):
 
 
 def load_metadata() -> Dict:
-    """加载题目元数据（锁内读），若文件不存在则返回空字典"""
+    """加载题目元数据（锁内读），若文件不存在则返回空字典。
+
+    自动合并 metadata_nl.json（自然语言化独立产物）中的 nl_question 字段：
+    仅当同一 qid 在主文件中仍存在时生效（主文件删除题目后 NL 文件残留无副作用）。
+    下游（前端题目列表、批量测试可测性扫描、测试消息缺省取题面）无感知。"""
     with _METADATA_LOCK:
-        return _metadata_load_unlocked()
+        metadata = _metadata_load_unlocked()
+        nl = _metadata_nl_load_unlocked()
+        for qid, entry in nl.items():
+            if not isinstance(entry, dict):
+                continue
+            nlq = entry.get("nl_question")
+            if nlq and isinstance(metadata.get(qid), dict):
+                metadata[qid]["nl_question"] = nlq
+        return metadata
+
+
+# ------------------------------------------------------------
+# 自然语言化独立产物（question/metadata_nl.json）
+# NL 生成结果不再写进 metadata.json（2026-09-17）：NL 过程（含中途失败/重跑）
+# 不再触碰主元数据文件；读取侧由 load_metadata() 自动合并，下游无感知。
+# 文件结构：{qid: 完整 metadata 条目副本 + "nl_question" 字段}
+# （写入时从 metadata.json 拷贝全字段快照；旧版 {qid: {"nl_question":...}} 仅两字段
+#   的结构也兼容读取）
+# ------------------------------------------------------------
+
+
+def _metadata_nl_load_unlocked() -> Dict:
+    """读取 metadata_nl.json（不加锁，内部用），不存在/损坏返回空字典（utf-8-sig 防 BOM）。"""
+    if not os.path.exists(METADATA_NL_PATH):
+        return {}
+    try:
+        with open(METADATA_NL_PATH, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def update_metadata_nl(updates: Dict[str, str]) -> None:
+    """写入自然语言化产物（锁内读改写 + 原子落盘，不碰 metadata.json）。
+
+    updates: {qid: nl_question 文本}。每题成功即调一次即可（增量合并）。
+
+    文件中每题存【完整 metadata 条目副本 + nl_question 字段】（写入时点快照）：
+    从 metadata.json 拷贝该题全部字段，再附加/覆盖 nl_question；题目不在主元数据时
+    （理论上不发生，NL 仅对已出题生成）退化为仅 nl_question 两字段结构。
+    """
+    if not updates:
+        return
+    with _METADATA_LOCK:
+        nl = _metadata_nl_load_unlocked()
+        metadata = _metadata_load_unlocked()
+        for qid, text in updates.items():
+            if not text:
+                continue
+            # 完整条目快照：已存在的沿用旧快照（保留首轮字段），否则从主元数据拷贝
+            entry = nl.get(qid)
+            if not isinstance(entry, dict):
+                src = metadata.get(qid)
+                entry = dict(src) if isinstance(src, dict) else {}
+            entry["nl_question"] = text
+            nl[qid] = entry
+        ensure_directories()
+        tmp_path = METADATA_NL_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(nl, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, METADATA_NL_PATH)
+
+
+def remove_metadata_nl_qid(question_id: str) -> None:
+    """从 metadata_nl.json 移除指定题目（删除题目时同步清理，防文件无限膨胀）。"""
+    with _METADATA_LOCK:
+        nl = _metadata_nl_load_unlocked()
+        if question_id in nl:
+            del nl[question_id]
+            ensure_directories()
+            tmp_path = METADATA_NL_PATH + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(nl, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, METADATA_NL_PATH)
 
 
 def save_metadata(metadata: Dict):
@@ -494,6 +572,7 @@ def delete_question_metadata(question_id: str) -> bool:
             return False
         del metadata[question_id]
         _metadata_save_unlocked(metadata)
+        remove_metadata_nl_qid(question_id)   # 同步清理 NL 独立文件中的残留
         return True
 
 

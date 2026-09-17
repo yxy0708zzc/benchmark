@@ -43,7 +43,7 @@ from database import (
     create_question_db, reset_question_tables, update_ticket as db_update_ticket,
     delete_train_tickets, remove_train_from_metadata,
     load_metadata, update_question_metadata, get_question_metadata,
-    save_metadata, delete_question_metadata,
+    save_metadata, delete_question_metadata, update_metadata_nl,
     get_question_model_state, get_question_tested_models, set_question_model_state,
     validate_train_exists, validate_station_exists,
     resolve_station_name_or_id,
@@ -3571,6 +3571,7 @@ def _generate_batch_nl(question_ids: List[str]) -> Dict[str, Any]:
                 "error": f"未配置 {miss}，批量自然语言化已跳过（系统不默认指向任何平台；题目本身已成功落盘）"}
     metadata = load_metadata()
     generated = failed = 0
+    nl_updates: Dict[str, str] = {}
     for qid in question_ids:
         entry = metadata.get(qid)
         if not entry or not entry.get("question"):
@@ -3578,11 +3579,12 @@ def _generate_batch_nl(question_ids: List[str]) -> Dict[str, Any]:
             continue
         try:
             nl = generate_nl(api_key, model, base_url, build_prompt(entry))
-            entry["nl_question"] = nl
+            nl_updates[qid] = nl
             generated += 1
         except Exception as e:
             failed += 1
-    save_metadata(metadata)
+    # NL 产物写独立文件 metadata_nl.json（不碰 metadata.json，2026-09-17）
+    update_metadata_nl(nl_updates)
     skipped = len(question_ids) - generated - failed
     return {"generated": generated, "failed": failed, "skipped": skipped, "error": None}
 
@@ -3970,15 +3972,9 @@ def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
             # 慢操作（LLM 调用 + prompt 构建）在锁外执行，最大化并发
             nl = generate_nl(api_key, model, base_url, build_prompt(entry))
             with metadata_lock:
-                # 每题成功立即落盘：进度实时可见，中断不丢已生成结果。
-                # 修复（陈旧快照覆写）：写回前重读最新 metadata 再改写本题——worker 启动
-                # 时的快照可能已过期，直接整体写回会覆盖并发期间页面 API 对其它题目的
-                # 删除/修改（已删题目会被"复活"）。
-                fresh = load_metadata()
-                fresh_entry = fresh.get(qid)
-                if isinstance(fresh_entry, dict):
-                    fresh_entry["nl_question"] = nl
-                    save_metadata(fresh)
+                # 每题成功立即落盘到独立文件 metadata_nl.json（进度实时可见，中断不丢；
+                # NL 过程不再写 metadata.json，2026-09-17）。锁内串行化防并发写坏。
+                update_metadata_nl({qid: nl})
             _batch_log("batch_nl", f"{qid} 自然语言生成成功并已写回 metadata", "success")
             return {"question_id": qid, "ok": True, "error": None}
         except Exception as e:
@@ -4001,7 +3997,7 @@ def _run_batch_nl(question_ids: List[str], concurrency: int = 5) -> None:
                 _nl_state["done_count"] += 1
                 _nl_state["current"] = (f"并发 {concurrency} · 已完成 {_nl_state['done_count']}/{len(question_ids)}"
                                         + (" · 已请求停止，剩余跳过中" if _nl_state.get("stop") else ""))
-    # （无统一收尾落盘：每题成功已在锁内重读-改写-落盘，不再用过期快照整体覆盖）
+    # （无统一收尾落盘：每题成功已在锁内写入 metadata_nl.json，与主元数据解耦）
     stopped = bool(_nl_state.get("stop"))
     _nl_state["result"] = {
         "summary": {"total": len(question_ids), "generated": counts["generated"],
@@ -4351,13 +4347,25 @@ def _run_batch_eval(filenames: List[str]) -> None:
             if qid != "unknown" and model_name:
                 set_question_model_state(qid, model_name, "evaluated")
             ok_count += 1
+            # 节点4 单表统计字段：0_/1_/2_ 分组 + 该题各问题码计数（auto.py 汇总用）
+            group = qid[:2] if qid[:2] in ("0_", "1_", "2_") else "其他"
+            issue_types: Dict[str, int] = {}
+            for _iss in (verification.get("issues") or []):
+                _t = (_iss or {}).get("type", "")
+                if _t:
+                    issue_types[_t] = issue_types.get(_t, 0) + 1
             details.append({"filename": fn, "question_id": qid, "ok": True, "error": None,
-                            "verdict": verdict, "result_file": result_name})
+                            "verdict": verdict, "result_file": result_name,
+                            "group": group, "issue_types": issue_types})
             _batch_log("batch_eval", f"{fn} → {qid} 核查完成：verdict={verdict}，结果已保存 {result_name}", "success")
         except Exception as e:
             verdict_count["error"] = verdict_count.get("error", 0) + 1
+            # 失败记录也尽量归组（从文件名反推自动题号前缀），供节点4单表统计
+            _m = re.search(r'([012]_)B\d{8}_\d{4}_\d{4}\.json$', fn)
             details.append({"filename": fn, "question_id": "", "ok": False, "error": str(e),
-                            "verdict": "error", "result_file": ""})
+                            "verdict": "error", "result_file": "",
+                            "group": _m.group(1) if _m else "其他",
+                            "issue_types": {}})
             _batch_log("batch_eval", f"{fn} 测评失败：{e}", "error")
         _eval_state["done_count"] += 1
     _eval_state["result"] = {

@@ -223,6 +223,19 @@ def generate_nl(api_key: str, model: str, base_url: str, prompt: str,
     raise RuntimeError(f"重试 {max_retries} 次仍失败: {last_err}")
 
 
+def _load_nl_file() -> dict:
+    """读 metadata_nl.json（NL 独立产物，与 server/database 同口径；损坏/不存在返回空）。"""
+    from config import METADATA_NL_PATH
+    if not os.path.exists(METADATA_NL_PATH):
+        return {}
+    try:
+        with open(METADATA_NL_PATH, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
 def ask_config(args) -> dict:
     """确定模型配置：优先级 命令行参数 > .env（NL_API_KEY / NL_MODEL → DEFAULT_MODEL / NL_BASE_URL → DEFAULT_BASE_URL）。
 
@@ -306,6 +319,13 @@ def main():
 
     cfg = ask_config(args)
     metadata = load_metadata(metadata_path)
+
+    # 合并 metadata_nl.json 的 nl_question（2026-09-17 起 NL 产物写独立文件，
+    # 不再进 metadata.json；不合并的话「默认跳过已有 nl」判断会失效导致重复生成）
+    for _qid, _entry in _load_nl_file().items():
+        _nlq = (_entry or {}).get("nl_question") if isinstance(_entry, dict) else None
+        if _nlq and isinstance(metadata.get(_qid), dict):
+            metadata[_qid]["nl_question"] = _nlq
 
     # 找出含 question 字段的题目
     raw_targets = [(qid, entry) for qid, entry in metadata.items()
@@ -411,13 +431,11 @@ def main():
         aborted = True
         print("\n\n⚠️ 检测到 Ctrl+C，中止处理。")
 
-    # 写回 metadata（原 question 保留）
+    # 写回独立产物文件 metadata_nl.json（原 question 保留在 metadata.json 不动）
     if accepted:
-        for qid, nl in accepted.items():
-            if qid in metadata:
-                metadata[qid]["nl_question"] = nl
-        save_metadata(metadata_path, metadata)
-        print(f"\n✅ 已保存 {len(accepted)} 条自然语言到 question/metadata.json")
+        from database import update_metadata_nl
+        update_metadata_nl(accepted)
+        print(f"\n✅ 已保存 {len(accepted)} 条自然语言到 question/metadata_nl.json")
     else:
         print("\nℹ️ 没有保存任何条目（metadata 未改动）")
 

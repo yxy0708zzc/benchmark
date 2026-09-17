@@ -131,6 +131,9 @@ STATISTICS_DIR = os.path.join(PROJECT_ROOT, "statistics")
 RAILWAY_DB_PATH = os.path.join(DATA_DIR, "railway.db")       # 基础数据库（只读）
 PRICES_DB_PATH = os.path.join(DATA_DIR, "prices.db")          # 票价数据库
 METADATA_PATH = os.path.join(QUESTION_DIR, "metadata.json")   # 题目元数据
+# 自然语言化产物独立文件：NL 生成结果不再写进 metadata.json（2026-09-17），
+# 读取侧由 database.load_metadata() 自动把其中 nl_question 合并回内存视图
+METADATA_NL_PATH = os.path.join(QUESTION_DIR, "metadata_nl.json")
 
 # ============================================================
 # 大模型调用参数（做题/起名 与 测试，改这里即可，无需动 .env）

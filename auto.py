@@ -261,9 +261,135 @@ def run_eval(filenames: list) -> dict:
                                "total": len(filenames), "done_count": 0, "result": None})
     start_worker(server._safe_batch_worker, ("batch_eval", server._run_batch_eval, list(filenames)))
     result = wait_worker(lambda: server._eval_state, "测评") or {}
-    s = result.get("summary") or {}
+    s = dict(result.get("summary") or {})
     print(f"  ✔ 测评完成 {s.get('success', 0)} / 失败 {s.get('failed', 0)}，verdict 分布 {s.get('verdicts', {})}")
+    # 节点4 单表：0_/1_/2_ 三列 × 问题码行（终端打印 + 附到 summary 供 write_report 落盘）
+    eval_table = build_eval_table(result.get("details") or [])
+    print("\n  ── 节点4 测评结果（占比 = 次数 ÷ 该组题数）──")
+    for line in format_eval_table(eval_table).splitlines():
+        print("  " + line)
+    if eval_table["other_total"]:
+        print(f"  ⚠ 另有非 0_/1_/2_ 前缀记录 {eval_table['other_total']} 条"
+              f"（其中测评失败 {eval_table['other_error']} 条），未计入上表")
+    s["eval_table"] = eval_table
     return s
+
+
+# ============================================================
+# 节点4 结果单表（0_/1_/2_ 三列 × 问题码行，终端与 auto_report 同一张表）
+# ============================================================
+EVAL_GROUPS = [
+    ("0_", "0_（存在性·无干扰）"),
+    ("1_", "1_（存在性·干扰）"),
+    ("2_", "2_（选择性·随机票）"),
+]
+
+# 问题码 → 中文名（行顺序即表行顺序，固定全行输出；verifier 新增码会动态追加在末尾）
+EVAL_ISSUE_ROWS = [
+    ("hallucination", "余票不符（幻觉）"),
+    ("invalid_plan_item", "方案条目无效"),
+    ("invalid_seat", "无效座位类型"),
+    ("missing_ride", "缺实际乘坐区间"),
+    ("ticket_shortage", "购票数不足人数"),
+    ("price_wrong", "票价不符"),
+    ("route_mismatch_train", "车次与标答不符"),
+    ("route_mismatch_route", "购买区间与标答不符"),
+    ("route_mismatch_seat", "座位与标答不符"),
+    ("route_mismatch_ride", "乘坐区间与标答不符"),
+    ("route_mismatch", "整体方案与标答不符"),
+    ("route_discontinuity", "乘坐区段断裂"),
+    ("transfer_time_conflict", "换乘时间冲突"),
+    ("start_not_covered", "未连接出发站"),
+    ("end_not_covered", "未连接到达站"),
+    ("route_invalid", "区段无效"),
+    ("no_route", "无法拼接完整全程"),
+    ("no_transfer_violated", "违反「不允许换乘」"),
+    ("no_short_buy_violated", "违反「不允许买短补长」"),
+    ("no_extra_violated", "违反「不允许额外购买」"),
+]
+
+
+def _disp_len(s: str) -> int:
+    """显示宽度（全角字符按 2 计），用于终端对齐"""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(ch) in ("F", "W") else 1 for ch in s)
+
+
+def build_eval_table(details: list) -> dict:
+    """从批量测评 details 聚合单表：三列（0_/1_/2_）× 行（题数/通过/verdict/各问题码）。"""
+    groups = [g for g, _ in EVAL_GROUPS]
+    cols = {g: {"total": 0, "pass": 0, "no_plan": 0, "empty_plan": 0,
+                "db_not_found": 0, "error": 0, "issues": {}} for g in groups}
+    other_total = 0
+    other_error = 0
+    for d in (details or []):
+        g = d.get("group") if d.get("group") in cols else None
+        if g is None:
+            other_total += 1
+            if not d.get("ok"):
+                other_error += 1
+            continue
+        col = cols[g]
+        col["total"] += 1
+        if not d.get("ok"):
+            col["error"] += 1
+            continue
+        v = d.get("verdict", "unknown")
+        if v == "pass":
+            col["pass"] += 1
+        elif v in ("no_plan", "empty_plan", "db_not_found"):
+            col[v] += 1
+        for code, n in (d.get("issue_types") or {}).items():
+            col["issues"][code] = col["issues"].get(code, 0) + int(n or 0)
+    return {"cols": cols, "groups": groups,
+            "other_total": other_total, "other_error": other_error}
+
+
+def format_eval_table(eval_table: dict, md: bool = False) -> str:
+    """渲染单表。md=True 输出 markdown 表格；False 输出终端对齐文本。
+    占比口径：每格 = 次数（次数 ÷ 该列题数），同题多错可超 100%；「通过」行即通过率。"""
+    cols = eval_table["cols"]
+    groups = eval_table["groups"]
+    headers = [label for _, label in EVAL_GROUPS]
+
+    def cell(col: dict, n: int) -> str:
+        if col["total"]:
+            sep = "（" if md else "("
+            return f"{n}{sep}{n / col['total'] * 100:.1f}%）" if md else f"{n}({n / col['total'] * 100:.1f}%)"
+        return str(n)
+
+    rows = []  # (行名, {group: 文本})
+    rows.append(("题数", {g: str(cols[g]["total"]) for g in groups}))
+    rows.append(("✅ 通过", {g: cell(cols[g], cols[g]["pass"]) for g in groups}))
+    for v, cn in (("no_plan", "未规划 no_plan"), ("empty_plan", "空方案 empty_plan"),
+                  ("db_not_found", "数据缺失 db_not_found")):
+        rows.append((cn, {g: cell(cols[g], cols[g][v]) for g in groups}))
+    for code, cn in EVAL_ISSUE_ROWS:
+        rows.append((f"{cn} {code}", {g: cell(cols[g], cols[g]["issues"].get(code, 0)) for g in groups}))
+    # verifier 新增码防漏统计
+    known = {c for c, _ in EVAL_ISSUE_ROWS}
+    extra = set()
+    for g in groups:
+        extra.update(cols[g]["issues"].keys())
+    for code in sorted(extra - known):
+        rows.append((f"其他问题 {code}", {g: cell(cols[g], cols[g]["issues"].get(code, 0)) for g in groups}))
+    rows.append(("合计问题", {g: str(sum(cols[g]["issues"].values())) for g in groups}))
+    rows.append(("测评失败", {g: str(cols[g]["error"]) for g in groups}))
+
+    if md:
+        out = ["| 问题类型 | " + " | ".join(headers) + " |",
+               "|---|" + "---|" * len(groups)]
+        for label, cells in rows:
+            out.append("| " + label + " | " + " | ".join(cells[g] for g in groups) + " |")
+        return "\n".join(out)
+
+    # 终端对齐（全角按 2 宽）
+    lw = max(_disp_len(label) for label, _ in rows) + 2
+    lines = []
+    for label, cells in rows:
+        parts = [f"{g}:{cells[g]}" for g in groups]
+        lines.append(label + " " * max(1, lw - _disp_len(label)) + "  ".join(parts))
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -327,7 +453,17 @@ def write_report(path, a, args_line, gen_s, nl_s, test_s, eval_s, test_model):
         f.write(f"## 节点1 批量出题\n成功 {gen_s.get('success', 0)} / 失败 {gen_s.get('failed', 0)}（共 {gen_s.get('total', 0)}）\n\n")
         f.write(f"## 节点2 自然语言化\n成功 {nl_s.get('generated', 0)} / 失败 {nl_s.get('failed', 0)} / 跳过 {nl_s.get('skipped', 0)}\n\n")
         f.write(f"## 节点3 批量测试（模型 {test_model}）\n成功 {test_s.get('success', 0)} / 失败或跳过 {test_s.get('failed', 0)}\n\n")
-        f.write(f"## 节点4 批量测评\nverdict 分布：`{json.dumps(eval_s.get('verdicts', {}), ensure_ascii=False)}`\n")
+        eval_table = (eval_s or {}).get("eval_table")
+        f.write("## 节点4 批量测评\n")
+        f.write(f"成功 {eval_s.get('success', 0)} / 失败 {eval_s.get('failed', 0)}（共 {eval_s.get('total', 0)}）\n\n")
+        if eval_table:
+            f.write("占比口径：每格 = 次数（次数 ÷ 该组题数），同题多错可超 100%；「通过」行即通过率\n\n")
+            f.write(format_eval_table(eval_table, md=True))
+            f.write("\n")
+            if eval_table.get("other_total"):
+                f.write(f"\n> ⚠ 另有非 0_/1_/2_ 前缀记录 {eval_table['other_total']} 条（其中测评失败 {eval_table['other_error']} 条），未计入上表\n")
+        else:
+            f.write(f"verdict 分布：`{json.dumps((eval_s or {}).get('verdicts', {}), ensure_ascii=False)}`\n")
     return path
 
 
